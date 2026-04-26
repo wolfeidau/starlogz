@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
@@ -128,6 +129,9 @@ func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest
 }
 
 func (ms *mcpServer) factWrite(ctx context.Context, req *mcp.CallToolRequest, in factWriteInput) (*mcp.CallToolResult, any, error) {
+	if err := requireScope(req, "facts:write"); err != nil {
+		return nil, nil, err
+	}
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -213,6 +217,9 @@ func (ms *mcpServer) factList(ctx context.Context, req *mcp.CallToolRequest, in 
 }
 
 func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, in factDeleteInput) (*mcp.CallToolResult, any, error) {
+	if err := requireScope(req, "facts:write"); err != nil {
+		return nil, nil, err
+	}
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -231,6 +238,13 @@ func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, i
 		return nil, nil, fmt.Errorf("delete fact: %w", err)
 	}
 	return jsonResult(map[string]any{})
+}
+
+func requireScope(req *mcp.CallToolRequest, scope string) error {
+	if !slices.Contains(req.Extra.TokenInfo.Scopes, scope) {
+		return fmt.Errorf("token missing required scope %q", scope)
+	}
+	return nil
 }
 
 func (ms *mcpServer) resolveUser(ctx context.Context, userIDStr string) (*store.User, error) {
