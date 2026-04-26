@@ -50,7 +50,7 @@ func TestHealth_OK(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/health")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
@@ -66,7 +66,7 @@ func TestHealth_WrongMethod(t *testing.T) {
 
 	resp, err := http.Post(ts.URL+"/health", "application/json", nil)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
@@ -78,7 +78,7 @@ func TestDiscovery_RFC8414(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/.well-known/oauth-authorization-server")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -92,7 +92,7 @@ func TestDiscovery_OIDCFallback(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/.well-known/openid-configuration")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -106,7 +106,7 @@ func TestJWKS_Route(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/.well-known/jwks")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -123,7 +123,7 @@ func TestProtectedResourceMetadata_Route(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/.well-known/oauth-protected-resource")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -140,7 +140,7 @@ func TestMCP_NoAuth_Returns401(t *testing.T) {
 
 	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(`{}`))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
@@ -163,7 +163,7 @@ func TestMCP_ValidJWT_PassesAuth(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Auth passed — must not be a 401
 	require.NotEqual(t, http.StatusUnauthorized, resp.StatusCode)
@@ -177,7 +177,7 @@ func TestMCP_Delete_Returns200(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Special-cased DELETE bypasses auth and returns 200 (not 204) for Service Worker compat
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -193,7 +193,7 @@ func TestMCP_WrongToken_Returns401(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
