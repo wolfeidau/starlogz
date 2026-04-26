@@ -51,7 +51,7 @@ func (s *Server) TokenHandler() http.Handler {
 			return
 		}
 
-		tokenString, err := s.issueJWT(pc.sub, pc.email, pc.scope)
+		tokenString, err := s.IssueJWT(pc.sub, pc.email, pc.scope)
 		if err != nil {
 			slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 			writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
@@ -71,7 +71,8 @@ func (s *Server) TokenHandler() http.Handler {
 	})
 }
 
-func (s *Server) issueJWT(sub, email, scope string) (string, error) {
+// IssueJWT signs and returns a new ES384 JWT for the given subject, email, and scope.
+func (s *Server) IssueJWT(sub, email, scope string) (string, error) {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		Issuer(s.baseURL.String()).
