@@ -39,13 +39,36 @@ type Server struct {
 	store   *store.Store
 }
 
+// dcrClientStore adapts *store.Store to oidc.ClientStore.
+type dcrClientStore struct{ s *store.Store }
+
+func (a *dcrClientStore) SaveClient(ctx context.Context, r oidc.ClientRecord) error {
+	return a.s.SaveOAuthClient(ctx, store.OAuthClient{
+		ClientID:                r.ClientID,
+		ClientName:              r.ClientName,
+		RedirectURIs:            r.RedirectURIs,
+		GrantTypes:              r.GrantTypes,
+		ResponseTypes:           r.ResponseTypes,
+		TokenEndpointAuthMethod: r.TokenEndpointAuthMethod,
+		Scope:                   r.Scope,
+		IssuedAt:                r.IssuedAt,
+		ExpiresAt:               r.ExpiresAt,
+	})
+}
+
 // New builds the mux, wires all handlers, and returns a Server.
 func New(cfg Config) (*Server, error) {
+	var clients oidc.ClientStore
+	if cfg.Store != nil {
+		clients = &dcrClientStore{s: cfg.Store}
+	}
+
 	oidcServer, err := oidc.NewServer(oidc.Config{
 		BaseURL:            cfg.BaseURL,
 		GitHubClientID:     cfg.GitHubClientID,
 		GitHubClientSecret: cfg.GitHubClientSecret,
 		Users:              cfg.Store,
+		Clients:            clients,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)

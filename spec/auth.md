@@ -199,11 +199,20 @@ Endpoint: `POST /oauth2/register` (RFC 7591)
 }
 ```
 
-Required: `redirect_uris` (non-empty array).
+Required: `redirect_uris` (non-empty array). Each URI is validated:
+
+- `https://` URIs are always accepted.
+- `http://localhost` and `http://127.0.0.1` (any port) are accepted for local MCP clients.
+- Custom schemes (e.g. `cursor://`, `claude://`) are accepted for native app callbacks.
+- `http://` with any other hostname is rejected.
+- URIs containing fragments (`#`) or wildcards (`*`) are rejected.
 
 Only `token_endpoint_auth_method=none` is accepted (public clients only).
 `grant_types` is normalised to `["authorization_code"]` — unsupported types
 are silently dropped per RFC 7591 §3.2.1 rather than rejected.
+
+Client registrations are persisted to the `oauth_clients` table with a 90-day TTL
+(`expires_at = issued_at + 90 days`). A future cleanup job can prune expired rows.
 
 ### Response (201 Created)
 
@@ -270,6 +279,7 @@ Claims:
 |-------|------|-------------|
 | `iss` | string | Issuer — the server's base URL |
 | `sub` | string | GitHub user ID as decimal string (v0.1); will be internal UUID once the `users` table is added |
+| `aud` | string[] | Audience — `["<base-url>/mcp"]`; required by MCP spec (RFC 8707) |
 | `email` | string | User's primary email |
 | `scope` | string | Space-delimited list of granted scopes |
 | `jti` | string | Unique token ID (UUID v4) — required for revocation |
@@ -282,6 +292,7 @@ Example payload:
 {
   "iss": "https://starlogz.example.com",
   "sub": "12345678",
+  "aud": ["https://starlogz.example.com/mcp"],
   "email": "user@example.com",
   "scope": "facts:read facts:write",
   "jti": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -369,8 +380,9 @@ MCP clients construct the discovery URL from the issuer.
 - **No token introspection** — not advertised in discovery
 - **No token revocation** — not advertised in discovery
 - **Public clients only** — `token_endpoint_auth_method=none`; no `client_secret`
-- **Client registrations not persisted** — DCR returns a `client_id` but does not
-  store it; the server cannot validate the `client_id` at the token endpoint yet
+- **Client registrations persisted but not yet validated at token endpoint** — DCR saves
+  registrations to `oauth_clients`; the server does not yet check the `client_id` at the
+  token endpoint (planned for v0.2)
 - **GitHub only** — Google OAuth2 is planned for v0.2
 - **No API key validation yet** — API key bearer tokens are not implemented;
   only JWTs from the GitHub OAuth2 flow are verified

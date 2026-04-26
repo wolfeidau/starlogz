@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -338,4 +339,49 @@ func TestUpdateFact(t *testing.T) {
 	require.NoError(t, st.DeleteFact(ctx, f.ID))
 	_, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Content: "too late"})
 	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+// --- OAuth clients ---
+
+func TestSaveOAuthClient(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	c := store.OAuthClient{
+		ClientID:                "test-client-id-001",
+		ClientName:              "Test Client",
+		RedirectURIs:            []string{"https://client.example.com/callback"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		Scope:                   "facts:read",
+		IssuedAt:                now,
+		ExpiresAt:               now.Add(90 * 24 * time.Hour),
+	}
+
+	require.NoError(t, st.SaveOAuthClient(ctx, c))
+}
+
+func TestSaveOAuthClient_DuplicateClientID(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	c := store.OAuthClient{
+		ClientID:                "duplicate-client-id",
+		ClientName:              "First",
+		RedirectURIs:            []string{"https://a.example.com/cb"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		IssuedAt:                now,
+		ExpiresAt:               now.Add(90 * 24 * time.Hour),
+	}
+
+	require.NoError(t, st.SaveOAuthClient(ctx, c))
+
+	c.ClientName = "Second"
+	err := st.SaveOAuthClient(ctx, c)
+	require.Error(t, err, "saving a duplicate client_id must return an error")
 }
