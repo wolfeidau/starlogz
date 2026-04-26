@@ -1,2 +1,5 @@
 # Added by goreleaser init:
 dist/
+
+# used for local development
+key.jwk

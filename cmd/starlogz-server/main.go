@@ -2,24 +2,32 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
+	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/lmittmann/tint"
 	"github.com/wolfeidau/starlogz/internal/commands"
+	"github.com/wolfeidau/starlogz/internal/telemetry"
 )
 
 var (
 	version = "devel"
 	cli     struct {
-		HTTP    commands.HTTPCmd `cmd:"" help:"http mcp server using streamable HTTP transport."`
+		HTTP    commands.HTTPCmd   `cmd:"" help:"http mcp server using streamable HTTP transport."`
+		KeyGen  commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
 		Version kong.VersionFlag
 	}
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	cmd := kong.Parse(&cli,
 		kong.Name("starlogz-server"),
 		kong.Description("A server that gives agents memory."),
@@ -33,11 +41,24 @@ func main() {
 	cmd.FatalIfErrorf(run(ctx, cmd))
 }
 
-func run(_ context.Context, cmd *kong.Context) error {
-	handler := slog.NewJSONHandler(os.Stdout, nil)
+func newLogger() *slog.Logger {
+	fi, err := os.Stderr.Stat()
+	if err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		return slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      slog.LevelDebug,
+			TimeFormat: time.Kitchen,
+		}))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+}
+
+func run(ctx context.Context, cmd *kong.Context) error {
 	buildInfo, _ := debug.ReadBuildInfo()
 
-	logger := slog.New(handler)
+	logger := newLogger()
+	slog.SetDefault(logger)
 
 	child := logger.With(
 		slog.Group("program_info",
@@ -47,6 +68,18 @@ func run(_ context.Context, cmd *kong.Context) error {
 		),
 	)
 	child.Info("starlogz server started")
+
+	telShutdown, err := telemetry.InitTelemetry(ctx, "starlogz-server", version)
+	if err != nil {
+		return fmt.Errorf("failed to initialize telemetry: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telShutdown(shutdownCtx); err != nil {
+			child.Error("telemetry shutdown error", slog.Any("error", err))
+		}
+	}()
 
 	return cmd.Run(&commands.Globals{Logger: child})
 }
