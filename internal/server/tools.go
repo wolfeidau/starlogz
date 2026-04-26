@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -12,6 +13,59 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
+
+type mcpServer struct {
+	logger *slog.Logger
+	server *mcp.Server
+	store  *store.Store
+}
+
+func newMCPServer(logger *slog.Logger, st *store.Store) *mcpServer {
+	ms := &mcpServer{
+		logger: logger,
+		server: mcp.NewServer(&mcp.Implementation{Name: name}, nil),
+		store:  st,
+	}
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "whoami",
+		Description: "Returns identity and token scopes. Call this first to verify access.",
+	}, ms.whoami)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "project_ensure",
+		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; fact_write auto-creates projects.",
+	}, ms.projectEnsure)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_write",
+		Description: "Writes a fact to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier.",
+	}, ms.factWrite)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_search",
+		Description: "Full-text search over live facts in a project. Returns results ordered by relevance.",
+	}, ms.factSearch)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_list",
+		Description: "Lists all live facts in a project, newest first. Optionally filter by a single tag.",
+	}, ms.factList)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_delete",
+		Description: "Soft-deletes a fact by ID. The fact no longer appears in list or search results.",
+	}, ms.factDelete)
+	return ms
+}
+
+func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	userInfo := req.Extra.TokenInfo
+	ms.logger.InfoContext(ctx, "whoami call", slog.String("user_id", userInfo.UserID))
+	type whoamiresp struct {
+		UserID string   `json:"user_id"`
+		Scopes []string `json:"scopes"`
+	}
+	jsonData, err := json.Marshal(&whoamiresp{UserID: userInfo.UserID, Scopes: userInfo.Scopes})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal user data: %w", err)
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(jsonData)}}}, nil, nil
+}
 
 type projectEnsureInput struct {
 	Slug string `json:"slug"`
