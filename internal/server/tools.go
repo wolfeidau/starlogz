@@ -51,6 +51,18 @@ func newMCPServer(logger *slog.Logger, st *store.Store) *mcpServer {
 		Name:        "fact_delete",
 		Description: "Soft-deletes a fact by ID. The fact no longer appears in list or search results.",
 	}, ms.factDelete)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "project_list",
+		Description: "Lists all projects owned by the caller.",
+	}, ms.projectList)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_list_tags",
+		Description: "Returns tags for a project ordered by usage frequency. Call before writing tags to avoid fragmentation.",
+	}, ms.factListTags)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_update",
+		Description: "Updates the content and/or tags of an existing fact. Supply only the fields you want to change.",
+	}, ms.factUpdate)
 	return ms
 }
 
@@ -95,6 +107,24 @@ type factListInput struct {
 
 type factDeleteInput struct {
 	ID string `json:"id"`
+}
+
+type projectListInput struct{}
+
+type factListTagsInput struct {
+	Project string `json:"project"`
+	Limit   int    `json:"limit"`
+}
+
+type factUpdateInput struct {
+	ID      string   `json:"id"`
+	Content string   `json:"content"`
+	Tags    []string `json:"tags"`
+}
+
+type tagCountResponse struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 type factResponse struct {
@@ -238,6 +268,100 @@ func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, i
 		return nil, nil, fmt.Errorf("delete fact: %w", err)
 	}
 	return jsonResult(map[string]any{})
+}
+
+func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, _ projectListInput) (*mcp.CallToolResult, any, error) {
+	if ms.store == nil {
+		return nil, nil, fmt.Errorf("database not configured")
+	}
+	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	projects, err := ms.store.ListProjects(ctx, user.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list projects: %w", err)
+	}
+	type projectResp struct {
+		ID        string `json:"id"`
+		Slug      string `json:"slug"`
+		Name      string `json:"name"`
+		CreatedAt string `json:"created_at"`
+	}
+	out := make([]projectResp, len(projects))
+	for i, p := range projects {
+		out[i] = projectResp{
+			ID:        p.ID.String(),
+			Slug:      p.Slug,
+			Name:      p.Name,
+			CreatedAt: p.CreatedAt.Format(time.RFC3339),
+		}
+	}
+	return jsonResult(map[string]any{"projects": out})
+}
+
+func (ms *mcpServer) factListTags(ctx context.Context, req *mcp.CallToolRequest, in factListTagsInput) (*mcp.CallToolResult, any, error) {
+	if ms.store == nil {
+		return nil, nil, fmt.Errorf("database not configured")
+	}
+	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	project, err := ms.store.GetProjectBySlug(ctx, user.ID, in.Project)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("project %q not found", in.Project)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get project: %w", err)
+	}
+	limit := in.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	tags, err := ms.store.ListTags(ctx, project.ID, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list tags: %w", err)
+	}
+	out := make([]tagCountResponse, len(tags))
+	for i, t := range tags {
+		out[i] = tagCountResponse{Name: t.Name, Count: t.Count}
+	}
+	return jsonResult(map[string]any{"tags": out})
+}
+
+func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, in factUpdateInput) (*mcp.CallToolResult, any, error) {
+	if err := requireScope(req, "facts:write"); err != nil {
+		return nil, nil, err
+	}
+	if ms.store == nil {
+		return nil, nil, fmt.Errorf("database not configured")
+	}
+	if _, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID); err != nil {
+		return nil, nil, err
+	}
+	factID, err := uuid.Parse(in.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
+	}
+	fact, err := ms.store.UpdateFact(ctx, store.UpdateFactParams{
+		FactID:  factID,
+		Content: in.Content,
+		Tags:    in.Tags,
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("fact %q not found or already deleted", in.ID)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("update fact: %w", err)
+	}
+	return jsonResult(factResponse{
+		ID:        fact.ID.String(),
+		Key:       fact.Key,
+		Content:   fact.Content,
+		Tags:      fact.Tags,
+		UpdatedAt: fact.UpdatedAt.Format(time.RFC3339),
+	})
 }
 
 func requireScope(req *mcp.CallToolRequest, scope string) error {

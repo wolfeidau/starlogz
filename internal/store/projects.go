@@ -32,6 +32,35 @@ func (s *Store) EnsureProject(ctx context.Context, ownerID uuid.UUID, slug, name
 	return p, nil
 }
 
+// ListProjects returns all projects owned by the caller, ordered by name.
+func (s *Store) ListProjects(ctx context.Context, ownerID uuid.UUID) ([]*Project, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, owner_id, slug, name, created_at
+		FROM projects WHERE owner_id = $1
+		ORDER BY name`,
+		ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+	var projects []*Project
+	for rows.Next() {
+		var idStr, ownerIDStr string
+		p := &Project{}
+		if err := rows.Scan(&idStr, &ownerIDStr, &p.Slug, &p.Name, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		if p.ID, err = uuid.Parse(idStr); err != nil {
+			return nil, fmt.Errorf("parse project id: %w", err)
+		}
+		if p.OwnerID, err = uuid.Parse(ownerIDStr); err != nil {
+			return nil, fmt.Errorf("parse owner id: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
 // GetProjectBySlug fetches a project by owner and slug.
 // Returns ErrNotFound if no matching row exists.
 func (s *Store) GetProjectBySlug(ctx context.Context, ownerID uuid.UUID, slug string) (*Project, error) {

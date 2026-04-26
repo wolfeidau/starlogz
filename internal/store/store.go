@@ -84,3 +84,17 @@ type WriteFactParams struct {
 	SourceType string
 	CreatedBy  uuid.UUID
 }
+
+// UpdateFactParams holds the inputs for Store.UpdateFact.
+// Empty Content means no change. Nil Tags means no change; non-nil (including empty) replaces tags.
+type UpdateFactParams struct {
+	FactID  uuid.UUID
+	Content string
+	Tags    []string
+}
+
+// TagCount holds a tag name and its usage frequency within a project.
+type TagCount struct {
+	Name  string
+	Count int
+}
