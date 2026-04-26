@@ -108,6 +108,54 @@ func (s *Store) ListFacts(ctx context.Context, projectID uuid.UUID, tag string, 
 	return scanFacts(rows)
 }
 
+// ListTags returns tags for a project ordered by usage frequency.
+func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT unnest(tags) AS tag, count(*) AS cnt
+		FROM facts
+		WHERE project_id = $1 AND deleted_at IS NULL
+		GROUP BY tag
+		ORDER BY cnt DESC
+		LIMIT $2`,
+		projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list tags: %w", err)
+	}
+	defer rows.Close()
+	var tags []TagCount
+	for rows.Next() {
+		var tc TagCount
+		if err := rows.Scan(&tc.Name, &tc.Count); err != nil {
+			return nil, fmt.Errorf("scan tag: %w", err)
+		}
+		tags = append(tags, tc)
+	}
+	return tags, rows.Err()
+}
+
+// UpdateFact patches content and/or tags on an existing live fact.
+// Empty Content leaves content unchanged. Nil Tags leaves tags unchanged.
+// Returns ErrNotFound if the fact does not exist or is already deleted.
+func (s *Store) UpdateFact(ctx context.Context, p UpdateFactParams) (*Fact, error) {
+	tags := p.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	row := s.pool.QueryRow(ctx, `
+		UPDATE facts SET
+		  content    = CASE WHEN $2 <> '' THEN $2 ELSE content END,
+		  tags       = CASE WHEN $3 THEN $4 ELSE tags END,
+		  updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at`,
+		p.FactID, p.Content, p.Tags != nil, tags)
+	f, err := scanFact(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	return f, err
+}
+
 // DeleteFact soft-deletes a fact. Returns ErrNotFound if it does not exist or is already deleted.
 func (s *Store) DeleteFact(ctx context.Context, factID uuid.UUID) error {
 	ct, err := s.pool.Exec(ctx, `
