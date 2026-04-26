@@ -272,20 +272,3 @@ func (s *Server) DiscoveryHandler() http.Handler {
 	})
 }
 
-// notImplementedHandler returns 405 for the wrong HTTP method and 501 for the correct one.
-func notImplementedHandler(method string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != method {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotImplemented)
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"error":             "not_implemented",
-			"error_description": "This endpoint is not yet implemented",
-		}); err != nil {
-			slog.Default().Error("failed to write not-implemented response", slog.Any("error", err))
-		}
-	})
-}
