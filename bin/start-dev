@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [[ ! -f key.jwk ]]; then
+  echo "key.jwk not found — generating one"
+  go run ./cmd/starlogz-server keygen --output key.jwk
+fi
+
+mkdir -p logs
+LOG_FILE="logs/server.log"
+
+echo "starting starlogz-server, logging to $LOG_FILE"
+echo "---" >> "$LOG_FILE"
+
+go run ./cmd/starlogz-server http --jwk-path key.jwk 2>&1 | tee -a "$LOG_FILE"

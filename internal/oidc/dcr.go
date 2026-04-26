@@ -34,6 +34,14 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 			return
 		}
 
+		slog.Default().InfoContext(r.Context(), "DCR request",
+			slog.Any("grant_types", req.GrantTypes),
+			slog.Any("response_types", req.ResponseTypes),
+			slog.Any("redirect_uris", req.RedirectURIs),
+			slog.String("token_endpoint_auth_method", req.TokenEndpointAuthMethod),
+			slog.String("client_name", req.ClientName),
+		)
+
 		if len(req.RedirectURIs) == 0 {
 			writeDCRError(w, "invalid_client_metadata", "redirect_uris is required", http.StatusBadRequest)
 			return
@@ -44,17 +52,9 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 			return
 		}
 
-		for _, gt := range req.GrantTypes {
-			if gt != "authorization_code" {
-				writeDCRError(w, "invalid_client_metadata", "only grant_type=authorization_code is supported", http.StatusBadRequest)
-				return
-			}
-		}
-
-		// Apply RFC 7591 defaults
-		if len(req.GrantTypes) == 0 {
-			req.GrantTypes = []string{"authorization_code"}
-		}
+		// Normalise to the supported subset — always authorization_code only.
+		// RFC 7591 §3.2.1: server registers the supported subset rather than rejecting.
+		req.GrantTypes = []string{"authorization_code"}
 		if len(req.ResponseTypes) == 0 {
 			req.ResponseTypes = []string{"code"}
 		}

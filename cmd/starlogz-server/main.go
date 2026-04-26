@@ -20,7 +20,7 @@ var (
 	version = "devel"
 	cli     struct {
 		HTTP    commands.HTTPCmd   `cmd:"" help:"http mcp server using streamable HTTP transport."`
-		KeyGen  commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
+		Keygen commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
 		Version kong.VersionFlag
 	}
 )
@@ -44,14 +44,14 @@ func main() {
 func newLogger() *slog.Logger {
 	fi, err := os.Stderr.Stat()
 	if err == nil && fi.Mode()&os.ModeCharDevice != 0 {
-		return slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		return slog.New(telemetry.NewOTelHandler(tint.NewHandler(os.Stderr, &tint.Options{
 			Level:      slog.LevelDebug,
 			TimeFormat: time.Kitchen,
-		}))
+		})))
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	return slog.New(telemetry.NewOTelHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
-	}))
+	})))
 }
 
 func run(ctx context.Context, cmd *kong.Context) error {

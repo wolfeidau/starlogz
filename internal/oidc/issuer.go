@@ -16,26 +16,41 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"golang.org/x/oauth2"
 )
+
+// Config holds construction parameters for Server.
+type Config struct {
+	BaseURL            string
+	GitHubClientID     string
+	GitHubClientSecret string
+}
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
 type Server struct {
-	baseURL  *url.URL
-	privkey  jwk.Key
-	pubkey   jwk.Key
-	jwksJSON []byte
-	authMeta *oauthex.AuthServerMeta
-	resMeta  *oauthex.ProtectedResourceMetadata
+	baseURL     *url.URL
+	privkey     jwk.Key
+	pubkey      jwk.Key
+	jwksJSON    []byte
+	authMeta    *oauthex.AuthServerMeta
+	resMeta     *oauthex.ProtectedResourceMetadata
+	githubOAuth *oauth2.Config
 
 	revokedMu sync.RWMutex
 	revoked   map[string]time.Time // jti → expiry
+
+	pendingMu sync.Mutex
+	pending   map[string]*pendingAuth // github state → pending authorization
+
+	codesMu sync.Mutex
+	codes   map[string]*pendingCode // auth code → pending token exchange
 }
 
-// NewServer constructs an OIDC Server from a raw base URL and a loaded private key.
+// NewServer constructs an OIDC Server from config and a loaded private key.
 // It derives and assigns a key ID to both keys, pre-marshals the JWKS document,
 // and builds the OAuth2 metadata documents.
-func NewServer(rawBaseURL string, privkey jwk.Key) (*Server, error) {
-	base, err := url.Parse(rawBaseURL)
+func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
+	base, err := url.Parse(cfg.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse base URL: %w", err)
 	}
@@ -47,6 +62,13 @@ func NewServer(rawBaseURL string, privkey jwk.Key) (*Server, error) {
 
 	if err := jwk.AssignKeyID(pubkey); err != nil {
 		return nil, fmt.Errorf("failed to assign key ID: %w", err)
+	}
+
+	if err := pubkey.Set(jwk.KeyUsageKey, "sig"); err != nil {
+		return nil, fmt.Errorf("failed to set key usage: %w", err)
+	}
+	if err := pubkey.Set(jwk.AlgorithmKey, jwa.ES384()); err != nil {
+		return nil, fmt.Errorf("failed to set key algorithm: %w", err)
 	}
 
 	kid, ok := pubkey.KeyID()
@@ -69,13 +91,16 @@ func NewServer(rawBaseURL string, privkey jwk.Key) (*Server, error) {
 	}
 
 	return &Server{
-		baseURL:  base,
-		privkey:  privkey,
-		pubkey:   pubkey,
-		jwksJSON: jwksJSON,
-		authMeta: buildAuthServerMeta(base),
-		resMeta:  buildProtectedResourceMeta(base),
-		revoked:  make(map[string]time.Time),
+		baseURL:     base,
+		privkey:     privkey,
+		pubkey:      pubkey,
+		jwksJSON:    jwksJSON,
+		authMeta:    buildAuthServerMeta(base),
+		resMeta:     buildProtectedResourceMeta(base),
+		githubOAuth: newGitHubOAuthConfig(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		revoked:     make(map[string]time.Time),
+		pending:     make(map[string]*pendingAuth),
+		codes:       make(map[string]*pendingCode),
 	}, nil
 }
 
@@ -143,7 +168,13 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: missing expiration claim", auth.ErrInvalidToken)
 	}
 
+	sub, ok := verifiedToken.Subject()
+	if !ok || sub == "" {
+		return nil, fmt.Errorf("%w: missing sub claim", auth.ErrInvalidToken)
+	}
+
 	return &auth.TokenInfo{
+		UserID:     sub,
 		Scopes:     strings.Fields(scope),
 		Expiration: expiresAt,
 	}, nil
@@ -240,15 +271,6 @@ func (s *Server) DiscoveryHandler() http.Handler {
 		}
 	})
 }
-
-// AuthorizeHandler is a stub for GET /oauth2/authorize.
-func (s *Server) AuthorizeHandler() http.Handler { return notImplementedHandler(http.MethodGet) }
-
-// TokenHandler is a stub for POST /oauth2/token.
-func (s *Server) TokenHandler() http.Handler { return notImplementedHandler(http.MethodPost) }
-
-// GitHubCallbackHandler is a stub for GET /auth/github/callback.
-func (s *Server) GitHubCallbackHandler() http.Handler { return notImplementedHandler(http.MethodGet) }
 
 // notImplementedHandler returns 405 for the wrong HTTP method and 501 for the correct one.
 func notImplementedHandler(method string) http.Handler {
