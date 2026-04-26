@@ -19,11 +19,18 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// UserUpserter persists user identity on successful GitHub login.
+// Implemented by *store.Store; nil is accepted (skips persistence).
+type UserUpserter interface {
+	UpsertUser(ctx context.Context, githubID int64, email, login string) error
+}
+
 // Config holds construction parameters for Server.
 type Config struct {
 	BaseURL            string
 	GitHubClientID     string
 	GitHubClientSecret string
+	Users              UserUpserter // optional
 }
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
@@ -35,6 +42,7 @@ type Server struct {
 	authMeta    *oauthex.AuthServerMeta
 	resMeta     *oauthex.ProtectedResourceMetadata
 	githubOAuth *oauth2.Config
+	users       UserUpserter
 
 	revokedMu sync.RWMutex
 	revoked   map[string]time.Time // jti → expiry
@@ -98,6 +106,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		authMeta:    buildAuthServerMeta(base),
 		resMeta:     buildProtectedResourceMeta(base),
 		githubOAuth: newGitHubOAuthConfig(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		users:       cfg.Users,
 		revoked:     make(map[string]time.Time),
 		pending:     make(map[string]*pendingAuth),
 		codes:       make(map[string]*pendingCode),

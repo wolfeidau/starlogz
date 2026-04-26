@@ -34,11 +34,18 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		}
 
 		httpClient := s.githubOAuth.Client(r.Context(), githubToken)
-		githubID, email, err := fetchGitHubIdentity(r.Context(), httpClient)
+		githubID, email, login, err := fetchGitHubIdentity(r.Context(), httpClient)
 		if err != nil {
 			slog.Default().ErrorContext(r.Context(), "GitHub identity fetch failed", slog.Any("error", err))
 			http.Error(w, "failed to fetch GitHub identity", http.StatusBadGateway)
 			return
+		}
+
+		if s.users != nil {
+			if err := s.users.UpsertUser(r.Context(), githubID, email, login); err != nil {
+				// Log but don't fail the login — user still gets a token even if the DB is momentarily down.
+				slog.Default().ErrorContext(r.Context(), "upsert user failed", slog.Any("error", err))
+			}
 		}
 
 		code := uuid.New().String()
@@ -67,6 +74,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		redirectTo.RawQuery = rq.Encode()
 
 		slog.Default().InfoContext(r.Context(), "GitHub auth complete",
+			slog.String("login", login),
 			slog.String("email", email),
 			slog.String("sub", fmt.Sprintf("%d", githubID)),
 		)

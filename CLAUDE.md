@@ -9,12 +9,15 @@ Specs live in `spec/` — read them before adding endpoints. `spec/auth.md` cove
 ## Layout
 
 ```
-cmd/starlogz-server/   binary entry point, signal handling, logger init
-internal/commands/     kong command structs (HTTPCmd, KeyGenCmd)
-internal/middleware/   HTTP middleware (access log)
-internal/oidc/         OAuth2/OIDC server — JWKS, discovery, DCR, JWT verify, logout
-internal/telemetry/    OTel init (traces + metrics via OTLP gRPC)
-spec/                  design specs (auth.md, SPEC.md)
+cmd/starlogz-server/         binary entry point, signal handling, logger init
+internal/commands/            kong command structs (HTTPCmd, KeyGenCmd)
+internal/middleware/          HTTP middleware (access log, CORS)
+internal/oidc/                OAuth2/OIDC server — JWKS, discovery, DCR, JWT verify, logout
+internal/server/              HTTP mux, MCP tool handlers, health endpoint
+internal/store/               PostgreSQL store — users, projects, facts; migration runner
+internal/store/migrations/    embedded SQL migration files
+internal/telemetry/           OTel init (traces + metrics via OTLP gRPC)
+spec/                         design specs (auth.md, facts.md)
 ```
 
 Public API surface lives under `pkg/` (currently empty — add exported types there when needed).
@@ -29,7 +32,9 @@ Public API surface lives under `pkg/` (currently empty — add exported types th
 | `github.com/modelcontextprotocol/go-sdk` | MCP server + OAuth2 middleware |
 | `github.com/lestrrat-go/jwx/v3` | JWT sign/verify, JWKS, JWK key management |
 | `github.com/google/uuid` | `jti` and `client_id` generation |
+| `github.com/jackc/pgx/v5` | PostgreSQL driver (pgxpool for connection pooling) |
 | `github.com/lmittmann/tint` | Coloured slog handler for interactive terminals |
+| `github.com/testcontainers/testcontainers-go` | Real Postgres containers for store integration tests |
 | `go.opentelemetry.io/otel` | Traces and metrics via OTLP gRPC |
 
 ---
@@ -52,6 +57,7 @@ Key env vars:
 | `SERVER_URL` | `http://localhost:8088` | Public base URL (used in discovery docs) |
 | `GITHUB_CLIENT_ID` | _(required)_ | GitHub OAuth2 app client ID |
 | `GITHUB_CLIENT_SECRET` | _(required)_ | GitHub OAuth2 app client secret |
+| `DATABASE_URL` | _(required)_ | PostgreSQL connection string (pgx DSN) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = disabled)_ | OTLP collector endpoint |
 | `OTEL_EXPORTER_OTLP_HEADERS` | — | e.g. Honeycomb API key |
 
@@ -129,7 +135,7 @@ require.NoError(t, err)
 require.Equal(t, http.StatusCreated, resp.StatusCode)
 ```
 
-Do not mock the database when it is added. Tests that touch Postgres use a real database (local or CI container).
+Do not mock the database. Tests that touch Postgres use a real database via `testcontainers-go` (postgres module). Each test gets its own container via `newTestStore(t)` in `internal/store/store_test.go`.
 
 ### End-to-end (MCP Inspector)
 
@@ -141,3 +147,18 @@ Use the MCP Inspector (`npx @modelcontextprotocol/inspector`) to validate the fu
 
 Branch names: `feat_<short_description>`, `fix_<short_description>`.
 Commits: conventional commits style (`feat:`, `fix:`, `chore:`, `docs:`).
+
+---
+
+## Documentation Style
+
+When creating external documentation (README files, design docs, specs) write in the style of an Amazon engineer:
+- Start with the customer problem and work backwards
+- Use clear, concise, and data-driven language
+- Include specific examples and concrete details
+- Structure documents with clear headings and bullet points
+- Focus on operational excellence, security, and scalability considerations
+- Include implementation details and edge cases where they affect the reader's decisions
+- Use the passive voice sparingly; prefer active, direct statements
+
+This guidance applies to prose documents only. Code comment style is governed by the **Comments** convention above.

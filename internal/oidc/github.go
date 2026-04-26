@@ -106,30 +106,30 @@ func (s *Server) consumeCode(code string) (*pendingCode, bool) {
 	return pc, true
 }
 
-// fetchGitHubIdentity returns the GitHub user's numeric ID and primary verified email.
+// fetchGitHubIdentity returns the GitHub user's numeric ID, primary verified email, and login.
 // It falls back to /user/emails when the profile email is not set (common for private accounts).
-func fetchGitHubIdentity(ctx context.Context, client *http.Client) (int64, string, error) {
+func fetchGitHubIdentity(ctx context.Context, client *http.Client) (int64, string, string, error) {
 	var user githubUser
 	if err := githubGet(ctx, client, "https://api.github.com/user", &user); err != nil {
-		return 0, "", fmt.Errorf("fetch GitHub user: %w", err)
+		return 0, "", "", fmt.Errorf("fetch GitHub user: %w", err)
 	}
 
 	if user.Email != "" {
-		return user.ID, user.Email, nil
+		return user.ID, user.Email, user.Login, nil
 	}
 
 	var emails []githubEmail
 	if err := githubGet(ctx, client, "https://api.github.com/user/emails", &emails); err != nil {
-		return 0, "", fmt.Errorf("fetch GitHub emails: %w", err)
+		return 0, "", "", fmt.Errorf("fetch GitHub emails: %w", err)
 	}
 
 	for _, e := range emails {
 		if e.Primary && e.Verified {
-			return user.ID, e.Email, nil
+			return user.ID, e.Email, user.Login, nil
 		}
 	}
 
-	return 0, "", fmt.Errorf("no verified primary email on GitHub account")
+	return 0, "", "", fmt.Errorf("no verified primary email on GitHub account")
 }
 
 func githubGet(ctx context.Context, client *http.Client, url string, dst any) error {

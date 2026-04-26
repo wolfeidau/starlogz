@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wolfeidau/starlogz/internal/middleware"
 	"github.com/wolfeidau/starlogz/internal/oidc"
+	"github.com/wolfeidau/starlogz/internal/store"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -28,12 +29,14 @@ type Config struct {
 	GitHubClientSecret string
 	PrivKey            jwk.Key
 	Logger             *slog.Logger
+	Store              *store.Store // nil is allowed; fact tools will return an error
 }
 
 // Server is the configured HTTP server ready to serve requests.
 type Server struct {
 	handler http.Handler
 	logger  *slog.Logger
+	store   *store.Store
 }
 
 // New builds the mux, wires all handlers, and returns a Server.
@@ -42,12 +45,15 @@ func New(cfg Config) (*Server, error) {
 		BaseURL:            cfg.BaseURL,
 		GitHubClientID:     cfg.GitHubClientID,
 		GitHubClientSecret: cfg.GitHubClientSecret,
+		Users:              cfg.Store,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)
 	}
 
-	mcpSrv := newMCPServer(cfg.Logger)
+	srv := &Server{logger: cfg.Logger, store: cfg.Store}
+
+	mcpSrv := newMCPServer(cfg.Logger, cfg.Store)
 
 	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
 		Scopes:              []string{"facts:read"},
@@ -71,7 +77,7 @@ func New(cfg Config) (*Server, error) {
 	mux.Handle("/oauth2/token", oidcServer.TokenHandler())
 	mux.Handle("/auth/github/callback", oidcServer.GitHubCallbackHandler())
 	mux.Handle("/auth/logout", oidcServer.LogoutHandler())
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/health", srv.healthHandler)
 	// DELETE intercept: go-sdk returns 204 which browser Fetch API rejects in Service Workers.
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -81,12 +87,12 @@ func New(cfg Config) (*Server, error) {
 		authenticatedHandler.ServeHTTP(w, r)
 	})
 
-	handler := otelhttp.NewHandler(
+	srv.handler = otelhttp.NewHandler(
 		middleware.CORS(middleware.AccessLog(cfg.Logger)(mux)),
 		name,
 	)
 
-	return &Server{handler: handler, logger: cfg.Logger}, nil
+	return srv, nil
 }
 
 // Handler returns the root HTTP handler. Use this with httptest.NewServer in tests.
@@ -117,56 +123,78 @@ func (s *Server) Run(ctx context.Context, l net.Listener) error {
 	return nil
 }
 
+func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	health := map[string]string{
+		"status": "healthy",
+		"time":   time.Now().Format(time.RFC3339),
+	}
+	if s.store != nil {
+		if err := s.store.Ping(r.Context()); err != nil {
+			health["status"] = "degraded"
+			health["db"] = "error"
+		} else {
+			health["db"] = "ok"
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(health); err != nil {
+		slog.Default().Error("failed to write health response", slog.Any("error", err))
+	}
+}
+
 type mcpServer struct {
 	logger *slog.Logger
 	server *mcp.Server
+	store  *store.Store
 }
 
-func newMCPServer(logger *slog.Logger) *mcpServer {
+func newMCPServer(logger *slog.Logger, st *store.Store) *mcpServer {
 	ms := &mcpServer{
 		logger: logger,
 		server: mcp.NewServer(&mcp.Implementation{Name: name}, nil),
+		store:  st,
 	}
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",
-		Description: "Returns identity, org memberships, and token scopes. Agents should call this first to verify they have the right access before writing.",
+		Description: "Returns identity and token scopes. Call this first to verify access.",
 	}, ms.whoami)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "project_ensure",
+		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; fact_write auto-creates projects.",
+	}, ms.projectEnsure)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_write",
+		Description: "Writes a fact to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier.",
+	}, ms.factWrite)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_search",
+		Description: "Full-text search over live facts in a project. Returns results ordered by relevance.",
+	}, ms.factSearch)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_list",
+		Description: "Lists all live facts in a project, newest first. Optionally filter by a single tag.",
+	}, ms.factList)
+	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "fact_delete",
+		Description: "Soft-deletes a fact by ID. The fact no longer appears in list or search results.",
+	}, ms.factDelete)
 	return ms
 }
 
 func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 	userInfo := req.Extra.TokenInfo
-
 	ms.logger.InfoContext(ctx, "whoami call", slog.String("user_id", userInfo.UserID))
-
 	type whoamiresp struct {
 		UserID string   `json:"user_id"`
 		Scopes []string `json:"scopes"`
 	}
-
-	jsonData, err := json.Marshal(&whoamiresp{
-		UserID: userInfo.UserID,
-		Scopes: userInfo.Scopes,
-	})
+	jsonData, err := json.Marshal(&whoamiresp{UserID: userInfo.UserID, Scopes: userInfo.Scopes})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal user data: %w", err)
 	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(jsonData)}},
-	}, nil, nil
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{
-		"status": "healthy",
-		"time":   time.Now().Format(time.RFC3339),
-	}); err != nil {
-		slog.Default().Error("failed to write health response", slog.Any("error", err))
-	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(jsonData)}}}, nil, nil
 }
