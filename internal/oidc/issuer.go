@@ -64,6 +64,13 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		return nil, fmt.Errorf("failed to assign key ID: %w", err)
 	}
 
+	if err := pubkey.Set(jwk.KeyUsageKey, "sig"); err != nil {
+		return nil, fmt.Errorf("failed to set key usage: %w", err)
+	}
+	if err := pubkey.Set(jwk.AlgorithmKey, jwa.ES384()); err != nil {
+		return nil, fmt.Errorf("failed to set key algorithm: %w", err)
+	}
+
 	kid, ok := pubkey.KeyID()
 	if !ok {
 		return nil, fmt.Errorf("key ID not set after assignment")

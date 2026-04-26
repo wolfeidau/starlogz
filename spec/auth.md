@@ -202,7 +202,8 @@ Endpoint: `POST /oauth2/register` (RFC 7591)
 Required: `redirect_uris` (non-empty array).
 
 Only `token_endpoint_auth_method=none` is accepted (public clients only).
-Only `grant_type=authorization_code` is accepted.
+`grant_types` is normalised to `["authorization_code"]` — unsupported types
+are silently dropped per RFC 7591 §3.2.1 rather than rejected.
 
 ### Response (201 Created)
 
@@ -268,7 +269,7 @@ Claims:
 | Claim | Type | Description |
 |-------|------|-------------|
 | `iss` | string | Issuer — the server's base URL |
-| `sub` | string | User UUID from the `users` table |
+| `sub` | string | GitHub user ID as decimal string (v0.1); will be internal UUID once the `users` table is added |
 | `email` | string | User's primary email |
 | `scope` | string | Space-delimited list of granted scopes |
 | `jti` | string | Unique token ID (UUID v4) — required for revocation |
@@ -280,7 +281,7 @@ Example payload:
 ```json
 {
   "iss": "https://starlogz.example.com",
-  "sub": "550e8400-e29b-41d4-a716-446655440000",
+  "sub": "12345678",
   "email": "user@example.com",
   "scope": "facts:read facts:write",
   "jti": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -316,11 +317,11 @@ background job keyed on `exp`.
 | `/oauth2/authorize` | GET | None | Authorization endpoint — redirects to GitHub |
 | `/oauth2/token` | POST | None | Token endpoint — issues JWT |
 | `/auth/github/callback` | GET | None | GitHub OAuth2 callback |
-| `/auth/logout` | POST | Session | Clears session |
-| `/auth/me` | GET | Session | Returns current user and orgs |
-| `/tokens` | POST | Session | Creates API key |
-| `/tokens` | GET | Session | Lists API keys |
-| `/tokens/:id` | DELETE | Session | Revokes API key |
+| `/auth/logout` | POST | Bearer JWT | Revokes token via jti blocklist |
+| `/auth/me` | GET | Bearer JWT | Returns current user and orgs _(not yet implemented)_ |
+| `/tokens` | POST | Bearer JWT | Creates API key _(not yet implemented)_ |
+| `/tokens` | GET | Bearer JWT | Lists API keys _(not yet implemented)_ |
+| `/tokens/:id` | DELETE | Bearer JWT | Revokes API key _(not yet implemented)_ |
 | `/mcp` | POST | Bearer JWT | MCP StreamableHTTP endpoint |
 | `/health` | GET | None | Health check |
 
@@ -373,3 +374,9 @@ MCP clients construct the discovery URL from the issuer.
 - **GitHub only** — Google OAuth2 is planned for v0.2
 - **No API key validation yet** — API key bearer tokens are not implemented;
   only JWTs from the GitHub OAuth2 flow are verified
+- **`sub` is GitHub user ID** — the `sub` JWT claim is the GitHub numeric user
+  ID as a decimal string; it will become an internal UUID once the `users` table
+  is added in v0.2
+- **In-memory OAuth2 state** — pending authorizations (10 min TTL) and issued
+  auth codes (5 min TTL) are stored in-process; a server restart during an
+  active login flow will invalidate the state and require the user to start over
