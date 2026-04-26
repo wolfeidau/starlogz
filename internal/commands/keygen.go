@@ -17,7 +17,7 @@ import (
 )
 
 type KeyGenCmd struct {
-	OutputPath string `help:"The output path of the generated key."`
+	Output string `help:"The output path of the generated key."`
 }
 
 func (c *KeyGenCmd) Run(_ context.Context, globals *Globals) error {
@@ -45,13 +45,13 @@ func (c *KeyGenCmd) Run(_ context.Context, globals *Globals) error {
 		return fmt.Errorf("failed to marshal json web key: %w", err)
 	}
 
-	if c.OutputPath == "" {
+	if c.Output == "" {
 		fmt.Println(string(jwkRaw))
 
 		return nil
 	}
 
-	err = os.WriteFile(c.OutputPath, jwkRaw, 0600)
+	err = os.WriteFile(c.Output, jwkRaw, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to save json web key: %w", err)
 	}

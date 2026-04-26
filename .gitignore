@@ -3,3 +3,5 @@ dist/
 
 # used for local development
 key.jwk
+.envrc
+logs/
