@@ -31,6 +31,7 @@ type Config struct {
 	GitHubClientID     string
 	GitHubClientSecret string
 	Users              UserUpserter // optional
+	Clients            ClientStore  // optional; if set, DCR registrations are persisted
 }
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
@@ -43,6 +44,7 @@ type Server struct {
 	resMeta     *oauthex.ProtectedResourceMetadata
 	githubOAuth *oauth2.Config
 	users       UserUpserter
+	clients     ClientStore
 
 	revokedMu sync.RWMutex
 	revoked   map[string]time.Time // jti → expiry
@@ -107,6 +109,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		resMeta:     buildProtectedResourceMeta(base),
 		githubOAuth: newGitHubOAuthConfig(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
 		users:       cfg.Users,
+		clients:     cfg.Clients,
 		revoked:     make(map[string]time.Time),
 		pending:     make(map[string]*pendingAuth),
 		codes:       make(map[string]*pendingCode),
@@ -149,6 +152,27 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	verifiedToken, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), s.pubkey))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", auth.ErrInvalidToken, err)
+	}
+
+	iss, ok := verifiedToken.Issuer()
+	if !ok || iss != s.baseURL.String() {
+		return nil, fmt.Errorf("%w: invalid issuer", auth.ErrInvalidToken)
+	}
+
+	aud, ok := verifiedToken.Audience()
+	if !ok {
+		return nil, fmt.Errorf("%w: missing aud claim", auth.ErrInvalidToken)
+	}
+	resourceURL := s.baseURL.JoinPath("/mcp").String()
+	audValid := false
+	for _, a := range aud {
+		if a == resourceURL {
+			audValid = true
+			break
+		}
+	}
+	if !audValid {
+		return nil, fmt.Errorf("%w: token audience does not include resource", auth.ErrInvalidToken)
 	}
 
 	var jti string

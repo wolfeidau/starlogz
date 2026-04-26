@@ -79,6 +79,7 @@ func (s *Server) IssueJWT(sub, email, scope string) (string, error) {
 		Subject(sub).
 		IssuedAt(now).
 		Expiration(now.Add(7 * 24 * time.Hour)).
+		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
 		Claim("email", email).
 		Claim("scope", scope).
 		Claim("jti", uuid.New().String()).

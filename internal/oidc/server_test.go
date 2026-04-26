@@ -15,7 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
@@ -716,4 +719,158 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 
 	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
 	require.Error(t, err)
+}
+
+// --- IssueJWT aud claim ---
+
+func TestIssueJWT_ContainsAudClaim(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read")
+	require.NoError(t, err)
+
+	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
+	require.NoError(t, err)
+
+	aud, ok := tok.Audience()
+	require.True(t, ok, "aud claim must be present")
+	require.Contains(t, aud, "http://example.com/mcp")
+}
+
+// --- VerifyJWT aud / iss validation ---
+
+// signCustomToken builds and signs a JWT with the server's private key, using the given claims.
+func signCustomToken(t *testing.T, srv *Server, extra func(*jwt.Builder)) string {
+	t.Helper()
+	b := jwt.NewBuilder().
+		Issuer("http://example.com").
+		Subject("12345678").
+		IssuedAt(time.Now()).
+		Expiration(time.Now().Add(time.Hour)).
+		Audience([]string{"http://example.com/mcp"}).
+		Claim("scope", "facts:read").
+		Claim("jti", uuid.New().String())
+	if extra != nil {
+		extra(b)
+	}
+	tok, err := b.Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES384(), srv.privkey))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+func TestVerifyJWT_MissingAud(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	// Build a token that intentionally omits the aud claim by overriding it with empty.
+	// Because jwt.Builder stores claims by key, setting aud to nil removes it.
+	tok, err := jwt.NewBuilder().
+		Issuer("http://example.com").
+		Subject("12345678").
+		IssuedAt(time.Now()).
+		Expiration(time.Now().Add(time.Hour)).
+		Claim("scope", "facts:read").
+		Claim("jti", uuid.New().String()).
+		Build()
+	require.NoError(t, err)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES384(), srv.privkey))
+	require.NoError(t, err)
+
+	_, err = srv.VerifyJWT(context.Background(), string(signed), nil)
+	require.Error(t, err)
+}
+
+func TestVerifyJWT_WrongAud(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	tokenString := signCustomToken(t, srv, func(b *jwt.Builder) {
+		b.Audience([]string{"https://different-resource.example.com/mcp"})
+	})
+
+	_, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	require.Error(t, err)
+}
+
+func TestVerifyJWT_WrongIssuer(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	tokenString := signCustomToken(t, srv, func(b *jwt.Builder) {
+		b.Issuer("https://evil.example.com")
+	})
+
+	_, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	require.Error(t, err)
+}
+
+// --- Redirect URI validation ---
+
+func TestValidateRedirectURIs_AcceptsHTTPS(t *testing.T) {
+	require.NoError(t, validateRedirectURIs([]string{"https://client.example.com/callback"}))
+}
+
+func TestValidateRedirectURIs_AcceptsLocalhost(t *testing.T) {
+	require.NoError(t, validateRedirectURIs([]string{"http://localhost:4000/callback"}))
+	require.NoError(t, validateRedirectURIs([]string{"http://localhost/callback"}))
+}
+
+func TestValidateRedirectURIs_AcceptsLoopback(t *testing.T) {
+	require.NoError(t, validateRedirectURIs([]string{"http://127.0.0.1:4000/callback"}))
+}
+
+func TestValidateRedirectURIs_AcceptsCustomScheme(t *testing.T) {
+	require.NoError(t, validateRedirectURIs([]string{"cursor://callback"}))
+	require.NoError(t, validateRedirectURIs([]string{"claude://auth/callback"}))
+}
+
+func TestValidateRedirectURIs_RejectsNonLocalhostHTTP(t *testing.T) {
+	err := validateRedirectURIs([]string{"http://evil.example.com/callback"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only allowed for localhost")
+}
+
+func TestValidateRedirectURIs_RejectsFragment(t *testing.T) {
+	err := validateRedirectURIs([]string{"https://client.example.com/callback#token"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fragment")
+}
+
+func TestValidateRedirectURIs_RejectsWildcard(t *testing.T) {
+	err := validateRedirectURIs([]string{"https://*.example.com/callback"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "wildcard")
+}
+
+// --- DCR ClientStore wiring ---
+
+type testClientStore struct {
+	records []ClientRecord
+}
+
+func (s *testClientStore) SaveClient(_ context.Context, r ClientRecord) error {
+	s.records = append(s.records, r)
+	return nil
+}
+
+func TestDCRHandler_PersistsToClientStore(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	store := &testClientStore{}
+
+	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"My Client","scope":"facts:read"}`
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.dcrHandler(store).ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.Len(t, store.records, 1)
+
+	r := store.records[0]
+	require.NotEmpty(t, r.ClientID)
+	require.Equal(t, "My Client", r.ClientName)
+	require.Equal(t, []string{"https://client.example.com/callback"}, r.RedirectURIs)
+	require.Equal(t, "facts:read", r.Scope)
+	require.False(t, r.IssuedAt.IsZero())
+	require.True(t, r.ExpiresAt.After(r.IssuedAt), "ExpiresAt must be after IssuedAt")
+	require.InDelta(t, clientRegistrationTTL.Seconds(), r.ExpiresAt.Sub(r.IssuedAt).Seconds(), 2)
 }
