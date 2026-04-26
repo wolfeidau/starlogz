@@ -238,3 +238,104 @@ func TestDeleteFact_NotFound(t *testing.T) {
 	err := st.DeleteFact(context.Background(), uuid.New())
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestListProjects(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, st.UpsertUser(ctx, 60, "d@example.com", "d"))
+	u, err := st.GetUserByGitHubID(ctx, 60)
+	require.NoError(t, err)
+
+	// No projects yet.
+	projects, err := st.ListProjects(ctx, u.ID)
+	require.NoError(t, err)
+	require.Empty(t, projects)
+
+	_, err = st.EnsureProject(ctx, u.ID, "beta", "Beta")
+	require.NoError(t, err)
+	_, err = st.EnsureProject(ctx, u.ID, "alpha", "Alpha")
+	require.NoError(t, err)
+
+	projects, err = st.ListProjects(ctx, u.ID)
+	require.NoError(t, err)
+	require.Len(t, projects, 2)
+	// Ordered by name ascending.
+	require.Equal(t, "alpha", projects[0].Slug)
+	require.Equal(t, "beta", projects[1].Slug)
+}
+
+func TestListTags(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	u, p := testUserAndProject(t, st, 70)
+
+	write := func(tags []string) {
+		_, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "x", Tags: tags, SourceType: "agent", CreatedBy: u.ID})
+		require.NoError(t, err)
+	}
+	write([]string{"auth", "api"})
+	write([]string{"auth", "db"})
+	write([]string{"auth"})
+
+	tags, err := st.ListTags(ctx, p.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, tags, 3)
+	// auth appears 3 times — must be first.
+	require.Equal(t, "auth", tags[0].Name)
+	require.Equal(t, 3, tags[0].Count)
+
+	// Deleted facts must not contribute to counts.
+	f, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "gone", Tags: []string{"orphan"}, SourceType: "agent", CreatedBy: u.ID})
+	require.NoError(t, err)
+	require.NoError(t, st.DeleteFact(ctx, f.ID))
+
+	tags, err = st.ListTags(ctx, p.ID, 10)
+	require.NoError(t, err)
+	for _, tc := range tags {
+		require.NotEqual(t, "orphan", tc.Name, "deleted fact tags must not appear")
+	}
+}
+
+func TestUpdateFact(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	u, p := testUserAndProject(t, st, 80)
+
+	f, err := st.WriteFact(ctx, store.WriteFactParams{
+		ProjectID:  p.ID,
+		Content:    "original content",
+		Tags:       []string{"v1"},
+		SourceType: "human",
+		CreatedBy:  u.ID,
+	})
+	require.NoError(t, err)
+
+	// Update content only — tags should be unchanged.
+	updated, err := st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Content: "updated content"})
+	require.NoError(t, err)
+	require.Equal(t, "updated content", updated.Content)
+	require.Equal(t, []string{"v1"}, updated.Tags)
+
+	// Update tags only — content should be unchanged.
+	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Tags: []string{"v2", "patched"}})
+	require.NoError(t, err)
+	require.Equal(t, "updated content", updated.Content)
+	require.Equal(t, []string{"v2", "patched"}, updated.Tags)
+
+	// Clear tags by passing an empty (non-nil) slice.
+	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Tags: []string{}})
+	require.NoError(t, err)
+	require.Empty(t, updated.Tags)
+
+	// ErrNotFound on a missing fact.
+	require.ErrorIs(t, func() error {
+		_, err := st.UpdateFact(ctx, store.UpdateFactParams{FactID: uuid.New(), Content: "x"})
+		return err
+	}(), store.ErrNotFound)
+
+	// ErrNotFound after soft-delete.
+	require.NoError(t, st.DeleteFact(ctx, f.ID))
+	_, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Content: "too late"})
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
