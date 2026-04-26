@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec docker compose exec postgres psql -U starlogz starlogz "$@"

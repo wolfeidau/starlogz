@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wolfeidau/starlogz/internal/middleware"
 	"github.com/wolfeidau/starlogz/internal/oidc"
+	"github.com/wolfeidau/starlogz/internal/store"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -28,12 +29,14 @@ type Config struct {
 	GitHubClientSecret string
 	PrivKey            jwk.Key
 	Logger             *slog.Logger
+	Store              *store.Store // nil is allowed; fact tools will return an error
 }
 
 // Server is the configured HTTP server ready to serve requests.
 type Server struct {
 	handler http.Handler
 	logger  *slog.Logger
+	store   *store.Store
 }
 
 // New builds the mux, wires all handlers, and returns a Server.
@@ -42,12 +45,15 @@ func New(cfg Config) (*Server, error) {
 		BaseURL:            cfg.BaseURL,
 		GitHubClientID:     cfg.GitHubClientID,
 		GitHubClientSecret: cfg.GitHubClientSecret,
+		Users:              cfg.Store,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)
 	}
 
-	mcpSrv := newMCPServer(cfg.Logger)
+	srv := &Server{logger: cfg.Logger, store: cfg.Store}
+
+	mcpSrv := newMCPServer(cfg.Logger, cfg.Store)
 
 	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
 		Scopes:              []string{"facts:read"},
@@ -71,7 +77,7 @@ func New(cfg Config) (*Server, error) {
 	mux.Handle("/oauth2/token", oidcServer.TokenHandler())
 	mux.Handle("/auth/github/callback", oidcServer.GitHubCallbackHandler())
 	mux.Handle("/auth/logout", oidcServer.LogoutHandler())
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/health", srv.healthHandler)
 	// DELETE intercept: go-sdk returns 204 which browser Fetch API rejects in Service Workers.
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -81,12 +87,12 @@ func New(cfg Config) (*Server, error) {
 		authenticatedHandler.ServeHTTP(w, r)
 	})
 
-	handler := otelhttp.NewHandler(
+	srv.handler = otelhttp.NewHandler(
 		middleware.CORS(middleware.AccessLog(cfg.Logger)(mux)),
 		name,
 	)
 
-	return &Server{handler: handler, logger: cfg.Logger}, nil
+	return srv, nil
 }
 
 // Handler returns the root HTTP handler. Use this with httptest.NewServer in tests.
@@ -117,56 +123,25 @@ func (s *Server) Run(ctx context.Context, l net.Listener) error {
 	return nil
 }
 
-type mcpServer struct {
-	logger *slog.Logger
-	server *mcp.Server
-}
-
-func newMCPServer(logger *slog.Logger) *mcpServer {
-	ms := &mcpServer{
-		logger: logger,
-		server: mcp.NewServer(&mcp.Implementation{Name: name}, nil),
-	}
-	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "whoami",
-		Description: "Returns identity, org memberships, and token scopes. Agents should call this first to verify they have the right access before writing.",
-	}, ms.whoami)
-	return ms
-}
-
-func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	userInfo := req.Extra.TokenInfo
-
-	ms.logger.InfoContext(ctx, "whoami call", slog.String("user_id", userInfo.UserID))
-
-	type whoamiresp struct {
-		UserID string   `json:"user_id"`
-		Scopes []string `json:"scopes"`
-	}
-
-	jsonData, err := json.Marshal(&whoamiresp{
-		UserID: userInfo.UserID,
-		Scopes: userInfo.Scopes,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal user data: %w", err)
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(jsonData)}},
-	}, nil, nil
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{
+	health := map[string]string{
 		"status": "healthy",
 		"time":   time.Now().Format(time.RFC3339),
-	}); err != nil {
+	}
+	if s.store != nil {
+		if err := s.store.Ping(r.Context()); err != nil {
+			health["status"] = "degraded"
+			health["db"] = "error"
+		} else {
+			health["db"] = "ok"
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(health); err != nil {
 		slog.Default().Error("failed to write health response", slog.Any("error", err))
 	}
 }

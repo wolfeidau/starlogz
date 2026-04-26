@@ -8,6 +8,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/wolfeidau/starlogz/internal/server"
+	"github.com/wolfeidau/starlogz/internal/store"
 )
 
 type HTTPCmd struct {
@@ -16,6 +17,7 @@ type HTTPCmd struct {
 	JWKPath            string `help:"Path to the JSON web key used to sign auth tokens." required:""`
 	GitHubClientID     string `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
 	GitHubClientSecret string `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
+	DatabaseURL        string `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -29,12 +31,23 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		return fmt.Errorf("failed to parse jwk: %w", err)
 	}
 
+	st, err := store.New(ctx, c.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer st.Close()
+
+	if err := st.Migrate(ctx, globals.Logger); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	srv, err := server.New(server.Config{
 		BaseURL:            c.BaseServerURL,
 		GitHubClientID:     c.GitHubClientID,
 		GitHubClientSecret: c.GitHubClientSecret,
 		PrivKey:            privkey,
 		Logger:             globals.Logger,
+		Store:              st,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
