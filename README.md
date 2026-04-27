@@ -1,8 +1,6 @@
 # starlogz
 
-A remote MCP server that gives developers and AI agents a persistent, searchable facts store scoped to their projects. Agents can write what they discover ("the prod database lives on postgres-01.internal"), search before making decisions, and delete stale information — all over a standard MCP connection secured by GitHub OAuth2.
-
----
+An MCP server that gives developers and AI agents a persistent, searchable facts store scoped to their projects. Agents can write what they discover ("the prod database lives on postgres-01.internal"), search before making decisions, and delete stale information, all over a standard MCP connection secured by OAuth2.
 
 ## The problem
 
@@ -10,16 +8,12 @@ AI agents working on a codebase have no memory between sessions. Every run re-di
 
 Human developers benefit too: notes written once stay available to every agent and collaborator working on the same project.
 
----
-
 ## How it works
 
 1. An MCP client (Claude Code, Cursor, any compliant host) connects to `https://your-server/mcp`.
-2. The client authenticates via GitHub OAuth2 — the full browser-based flow is handled automatically using Dynamic Client Registration (RFC 7591).
+2. The client authenticates via OAuth2 — the full browser-based flow is handled automatically using Dynamic Client Registration (RFC 7591).
 3. The issued JWT carries scopes (`facts:read`, `facts:write`) that gate every tool call.
 4. Facts are stored in PostgreSQL with full-text search, soft-delete, and optional stable keys for upsert semantics.
-
----
 
 ## MCP tools
 
@@ -36,15 +30,13 @@ All tools require `facts:read`. Write tools require `facts:write`.
 
 See [`spec/facts.md`](spec/facts.md) for full input/output schemas.
 
----
-
 ## Quickstart
 
 ### Prerequisites
 
 - Go 1.26+
 - Docker (for local Postgres)
-- A [GitHub OAuth2 app](https://github.com/settings/developers) with callback URL set to `http://localhost:8088/auth/github/callback`
+- A [GitHub app](https://github.com/settings/developers) with callback URL set to `http://localhost:8088/auth/github/callback`
 
 ### Run locally
 
@@ -73,9 +65,7 @@ The `bin/start-dev` script wraps this: it generates `key.jwk` if missing, then r
 npx @modelcontextprotocol/inspector
 ```
 
-Point it at `http://localhost:8088/mcp`. The inspector walks through the full GitHub OAuth2 browser flow.
-
----
+Point it at `http://localhost:8088/mcp`. The inspector walks through the full OAuth2 browser flow.
 
 ## Configuration
 
@@ -84,14 +74,12 @@ All configuration is via environment variables.
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
 | `HTTP_LISTEN_ADDR` | `localhost:8088` | No | TCP listen address |
-| `SERVER_URL` | `http://localhost:8088` | No | Public base URL — used in OAuth2 discovery documents |
-| `GITHUB_CLIENT_ID` | — | Yes | GitHub OAuth2 app client ID |
-| `GITHUB_CLIENT_SECRET` | — | Yes | GitHub OAuth2 app client secret |
-| `DATABASE_URL` | — | Yes | PostgreSQL connection string (pgx DSN) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | No | OTLP collector endpoint. Omit to disable telemetry entirely. |
-| `OTEL_EXPORTER_OTLP_HEADERS` | — | No | e.g. `x-honeycomb-team=<key>` |
-
----
+| `SERVER_URL` | `http://localhost:8088` | No | Public base URL, used in OAuth2 discovery documents |
+| `GITHUB_CLIENT_ID` | (none) | Yes | GitHub app client ID |
+| `GITHUB_CLIENT_SECRET` | (none) | Yes | GitHub app client secret |
+| `DATABASE_URL` | (none) | Yes | PostgreSQL connection string (pgx DSN) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | No | OTLP collector endpoint. Omit to disable telemetry entirely. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (none) | No | e.g. `x-honeycomb-team=<key>` |
 
 ## Commands
 
@@ -100,28 +88,26 @@ starlogz-server http     --jwk-path <path>   # Run the MCP HTTP server
 starlogz-server keygen   --output <path>      # Generate an ES384 signing key (JWK)
 ```
 
-`keygen` prints the public key fingerprint (SHA256) on success. Store `key.jwk` securely — it signs every token the server issues.
-
----
+`keygen` prints the public key fingerprint (SHA256) on success. Store `key.jwk` securely; it signs every token the server issues.
 
 ## Authentication
 
 starlogz implements a standards-compliant OAuth2 authorization server:
 
-- **Discovery:** `/.well-known/oauth-authorization-server` (RFC 8414)
-- **Dynamic Client Registration:** `/oauth2/register` (RFC 7591, unauthenticated)
-- **Authorization:** `/oauth2/authorize` — PKCE required (S256 only)
-- **Token:** `/oauth2/token` — `authorization_code` grant only
-- **JWKS:** `/.well-known/jwks` — public key set, cached 24 h
-- **Logout:** `/auth/logout` — revokes the bearer token; JTI added to in-memory blocklist
+- **Discovery** `/.well-known/oauth-authorization-server` (RFC 8414)
+- **Dynamic Client Registration** `/oauth2/register` (RFC 7591, unauthenticated)
+- **Authorization** `/oauth2/authorize` — PKCE required (S256 only)
+- **Token** `/oauth2/token` — `authorization_code` grant only
+- **JWKS** `/.well-known/jwks` — public key set, cached 24 h
+- **Logout** `/auth/logout` — revokes the bearer token; JTI added to in-memory blocklist
 
 Tokens are ES384-signed JWTs with a 7-day expiry. Every token includes a `jti` (UUID v4) checked against the revocation blocklist on each request.
 
 GitHub scopes requested: `read:user`, `user:email`. If the primary email is private, the server falls back to the `/user/emails` endpoint to obtain a verified address.
 
-See [`spec/auth.md`](spec/auth.md) for the full flow.
+GitHub is the only supported identity provider right now. Additional providers (GitLab, Google, and others) are planned using [`golang.org/x/oauth2`](https://pkg.go.dev/golang.org/x/oauth2).
 
----
+See [`spec/auth.md`](spec/auth.md) for the full flow.
 
 ## Database
 
@@ -129,11 +115,11 @@ PostgreSQL is the only backing store. The schema is applied automatically at sta
 
 ### Schema overview
 
-**`users`** — created or upserted on each successful GitHub login.
+`users`: created or upserted on each successful GitHub login.
 
-**`projects`** — owned by one user, addressed by `(owner_id, slug)`. Auto-created on first `fact_write`.
+`projects`: owned by one user, addressed by `(owner_id, slug)`. Auto-created on first `fact_write`.
 
-**`facts`** — the core table. Key fields:
+`facts`: the core table. Key fields:
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -152,8 +138,6 @@ Facts are never physically deleted. `deleted_at` gates all list and search queri
 ./bin/psql -c "SELECT count(*) FROM facts WHERE deleted_at IS NULL;"
 ```
 
----
-
 ## Tests
 
 ```bash
@@ -162,50 +146,26 @@ go test ./...
 
 Store tests spin up a real PostgreSQL container via `testcontainers-go`. Docker must be running.
 
-- **`internal/oidc/`** — full OAuth2 flow: DCR, PKCE authorization, token exchange, revocation
-- **`internal/server/`** — health endpoint, JWT middleware, MCP tool dispatch
-- **`internal/store/`** — user/project/fact CRUD, full-text search, soft-delete
-
----
+- `internal/oidc/` — full OAuth2 flow: DCR, PKCE authorization, token exchange, revocation
+- `internal/server/` — health endpoint, JWT middleware, MCP tool dispatch
+- `internal/store/` — user/project/fact CRUD, full-text search, soft-delete
 
 ## Observability
 
 Traces and metrics are exported via OTLP gRPC when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. All HTTP handlers are wrapped with `otelhttp`. Omitting the endpoint disables telemetry with no overhead.
 
----
+## Current limitations
 
-## Project layout
-
-```
-cmd/starlogz-server/         binary entry point, signal handling, logger init
-internal/commands/            kong command structs (http, keygen)
-internal/middleware/          HTTP middleware (access log, CORS)
-internal/oidc/                OAuth2/OIDC server — JWKS, discovery, DCR, JWT sign/verify, logout
-internal/server/              HTTP mux, MCP tool handlers, health endpoint
-internal/store/               PostgreSQL store — users, projects, facts; migration runner
-internal/store/migrations/    embedded SQL migration files
-internal/telemetry/           OTel init (traces + metrics via OTLP gRPC)
-spec/                         design specs (auth.md, facts.md)
-```
-
----
-
-## v0.1 constraints
-
-- **Personal projects only** — no org or team ownership
-- **No fact versioning** — keyed-fact updates overwrite content and tags in place
-- **No cross-user access control** — any authenticated user can read or write any project by slug
-- **English full-text only** — `to_tsvector('english', ...)` is hardcoded
-- **No pagination cursor** — `limit` is the only bound on list and search results
-- **`source_type` is always `human`** — API keys (which would set `agent`) are not yet implemented
-
----
+- Personal projects only, no org or team ownership
+- No fact versioning, keyed-fact updates overwrite content and tags in place
+- No cross-user access control, any authenticated user can read or write any project by slug
+- English full-text only, `to_tsvector('english', ...)` is hardcoded
+- No pagination, cursor `limit` is the only bound on list and search results
+- `source_type` is always `human` API keys (which would set `agent`) are not yet implemented
 
 ## Built with AI
 
 This project was built with [Claude](https://claude.ai) by Anthropic, using Claude Code as the primary development tool.
-
----
 
 ## License
 
