@@ -38,6 +38,26 @@ See [`spec/facts.md`](spec/facts.md) for full input/output schemas.
 - Docker (for local Postgres)
 - A [GitHub app](https://github.com/settings/developers) with callback URL set to `http://localhost:8088/auth/github/callback`
 
+### Install a release binary
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wolfeidau/starlogz/main/install.sh | bash
+```
+
+This downloads the latest release for your OS and architecture, verifies the SHA256 checksum, and installs `starlogz-server` to `/usr/local/bin`. Use `sudo` automatically if the directory is not writable.
+
+To install to a different directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wolfeidau/starlogz/main/install.sh | INSTALL_DIR=~/bin bash
+```
+
+Or download and run directly:
+
+```bash
+./install.sh --dir ~/bin
+```
+
 ### Run locally
 
 ```bash
