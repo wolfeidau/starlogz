@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/require"
 	"github.com/wolfeidau/starlogz/internal/oidc"
@@ -153,7 +154,7 @@ func TestMCP_NoAuth_Returns401(t *testing.T) {
 func TestMCP_ValidJWT_PassesAuth(t *testing.T) {
 	ts, oidcSrv := testFixture(t)
 
-	tokenString, err := oidcSrv.IssueJWT("12345678", "user@example.com", "facts:read")
+	tokenString, err := oidcSrv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{}`))

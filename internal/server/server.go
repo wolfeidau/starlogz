@@ -56,11 +56,28 @@ func (a *dcrClientStore) SaveClient(ctx context.Context, r oidc.ClientRecord) er
 	})
 }
 
+// grantStoreAdapter adapts *store.Store to oidc.GrantStore.
+type grantStoreAdapter struct{ s *store.Store }
+
+func (a *grantStoreAdapter) UpsertGrant(ctx context.Context, p oidc.GrantParams) error {
+	return a.s.UpsertGrant(ctx, store.Grant{
+		JTI:                p.JTI,
+		GitHubID:           p.GitHubID,
+		AccessToken:        p.AccessToken,
+		RefreshToken:       p.RefreshToken,
+		AccessTokenExpiry:  p.AccessTokenExpiry,
+		RefreshTokenExpiry: p.RefreshTokenExpiry,
+		JWTExpiry:          p.JWTExpiry,
+	})
+}
+
 // New builds the mux, wires all handlers, and returns a Server.
 func New(cfg Config) (*Server, error) {
 	var clients oidc.ClientStore
+	var grants oidc.GrantStore
 	if cfg.Store != nil {
 		clients = &dcrClientStore{s: cfg.Store}
+		grants = &grantStoreAdapter{s: cfg.Store}
 	}
 
 	oidcServer, err := oidc.NewServer(oidc.Config{
@@ -69,6 +86,7 @@ func New(cfg Config) (*Server, error) {
 		GitHubClientSecret: cfg.GitHubClientSecret,
 		Users:              cfg.Store,
 		Clients:            clients,
+		Grants:             grants,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)

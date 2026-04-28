@@ -213,7 +213,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	require.NotEmpty(t, jwksKid)
 
 	// Issue a JWT and decode its header to read the kid claim.
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read")
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
 	parts := strings.SplitN(tokenString, ".", 3)
@@ -630,7 +630,7 @@ func TestTokenHandler_WrongMethod(t *testing.T) {
 func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read")
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
 	// Token must be valid before logout
@@ -678,7 +678,7 @@ func TestLogoutHandler_WrongMethod(t *testing.T) {
 func TestVerifyJWT_ValidToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read facts:write")
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read facts:write", uuid.New().String())
 	require.NoError(t, err)
 
 	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -699,7 +699,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	a := newTestOIDCServer(t)
 	b := newTestOIDCServer(t)
 
-	tokenString, err := b.IssueJWT("12345678", "user@example.com", "facts:read")
+	tokenString, err := b.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
 	_, err = a.VerifyJWT(context.Background(), tokenString, nil)
@@ -709,7 +709,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 func TestVerifyJWT_RevokedToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read")
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
 	// Manually revoke by extracting jti via logout handler
@@ -726,7 +726,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read")
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
 	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))

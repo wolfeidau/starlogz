@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,11 +52,30 @@ func (s *Server) TokenHandler() http.Handler {
 			return
 		}
 
-		tokenString, err := s.IssueJWT(pc.sub, pc.email, pc.scope)
+		jti := uuid.New().String()
+		jwtExpiry := time.Now().Add(7 * 24 * time.Hour)
+
+		tokenString, err := s.IssueJWT(pc.sub, pc.email, pc.scope, jti)
 		if err != nil {
 			slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 			writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
 			return
+		}
+
+		if s.grants != nil && pc.accessToken != "" {
+			githubID, _ := strconv.ParseInt(pc.sub, 10, 64)
+			if err := s.grants.UpsertGrant(r.Context(), GrantParams{
+				JTI:                jti,
+				GitHubID:           githubID,
+				AccessToken:        pc.accessToken,
+				RefreshToken:       pc.refreshToken,
+				AccessTokenExpiry:  pc.accessTokenExpiry,
+				RefreshTokenExpiry: pc.refreshTokenExpiry,
+				JWTExpiry:          jwtExpiry,
+			}); err != nil {
+				// Log but don't fail the token exchange — the client still gets a valid JWT.
+				slog.Default().ErrorContext(r.Context(), "upsert grant failed", slog.Any("error", err))
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -71,8 +91,8 @@ func (s *Server) TokenHandler() http.Handler {
 	})
 }
 
-// IssueJWT signs and returns a new ES384 JWT for the given subject, email, and scope.
-func (s *Server) IssueJWT(sub, email, scope string) (string, error) {
+// IssueJWT signs and returns a new ES384 JWT for the given subject, email, scope, and JWT ID.
+func (s *Server) IssueJWT(sub, email, scope, jti string) (string, error) {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		Issuer(s.baseURL.String()).
@@ -82,7 +102,7 @@ func (s *Server) IssueJWT(sub, email, scope string) (string, error) {
 		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
 		Claim("email", email).
 		Claim("scope", scope).
-		Claim("jti", uuid.New().String()).
+		Claim("jti", jti).
 		Build()
 	if err != nil {
 		return "", fmt.Errorf("build token: %w", err)

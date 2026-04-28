@@ -341,6 +341,109 @@ func TestUpdateFact(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
+// --- Grants ---
+
+func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	var testKey [32]byte
+	copy(testKey[:], "test-key-0123456789abcdefghijklm")
+	st.SetEncryptionKey(testKey)
+
+	require.NoError(t, st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser"))
+
+	now := time.Now().UTC().Truncate(time.Second)
+	g := store.Grant{
+		JTI:                "test-jti-001",
+		GitHubID:           100,
+		AccessToken:        "gha_accesstoken123",
+		RefreshToken:       "ghr_refreshtoken456",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(6 * 30 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}
+
+	require.NoError(t, st.UpsertGrant(ctx, g))
+
+	got, err := st.GetGrant(ctx, "test-jti-001")
+	require.NoError(t, err)
+	require.Equal(t, g.JTI, got.JTI)
+	require.Equal(t, g.GitHubID, got.GitHubID)
+	require.Equal(t, g.AccessToken, got.AccessToken)
+	require.Equal(t, g.RefreshToken, got.RefreshToken)
+	require.WithinDuration(t, g.AccessTokenExpiry, got.AccessTokenExpiry, time.Second)
+	require.WithinDuration(t, g.RefreshTokenExpiry, got.RefreshTokenExpiry, time.Second)
+}
+
+func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	var testKey [32]byte
+	copy(testKey[:], "test-key-0123456789abcdefghijklm")
+	st.SetEncryptionKey(testKey)
+
+	require.NoError(t, st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser"))
+
+	now := time.Now().UTC()
+	expired := store.Grant{
+		JTI:                "expired-jti",
+		GitHubID:           200,
+		AccessToken:        "old-access",
+		RefreshToken:       "old-refresh",
+		AccessTokenExpiry:  now.Add(-10 * time.Hour),
+		RefreshTokenExpiry: now.Add(-1 * time.Hour),
+		JWTExpiry:          now.Add(-1 * time.Second), // already expired
+	}
+	require.NoError(t, st.UpsertGrant(ctx, expired))
+
+	// Confirm expired grant was inserted.
+	_, err := st.GetGrant(ctx, "expired-jti")
+	require.NoError(t, err)
+
+	// Upsert a new grant for the same user — triggers lazy prune of the expired one.
+	fresh := store.Grant{
+		JTI:                "fresh-jti",
+		GitHubID:           200,
+		AccessToken:        "new-access",
+		RefreshToken:       "new-refresh",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(180 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}
+	require.NoError(t, st.UpsertGrant(ctx, fresh))
+
+	_, err = st.GetGrant(ctx, "expired-jti")
+	require.ErrorIs(t, err, store.ErrNotFound, "expired grant must be pruned")
+
+	_, err = st.GetGrant(ctx, "fresh-jti")
+	require.NoError(t, err, "fresh grant must still exist")
+}
+
+func TestGetGrant_NotFound(t *testing.T) {
+	st := newTestStore(t)
+	var testKey [32]byte
+	copy(testKey[:], "test-key-0123456789abcdefghijklm")
+	st.SetEncryptionKey(testKey)
+
+	_, err := st.GetGrant(context.Background(), "no-such-jti")
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, st.UpsertUser(ctx, 300, "nokey@example.com", "nokey"))
+
+	err := st.UpsertGrant(ctx, store.Grant{
+		JTI:      "no-key-jti",
+		GitHubID: 300,
+	})
+	require.Error(t, err, "UpsertGrant without encryption key must fail")
+}
+
 // --- OAuth clients ---
 
 func TestSaveOAuthClient(t *testing.T) {
