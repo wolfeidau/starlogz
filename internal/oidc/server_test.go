@@ -691,6 +691,57 @@ func TestTokenHandler_WrongMethod(t *testing.T) {
 	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+func TestTokenHandler_GrantStoreSeam(t *testing.T) {
+	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	raw, err := jwk.Import(privkey)
+	require.NoError(t, err)
+
+	gs := &testGrantStore{}
+	srv, err := NewServer(Config{BaseURL: "http://example.com", Grants: gs}, raw)
+	require.NoError(t, err)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "grant-seam-code"
+	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
+	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
+	srv.storeCode(code, &pendingCode{
+		sub:                "99887766",
+		email:              "user@example.com",
+		scope:              "facts:read",
+		codeChallenge:      pkceChallenge(verifier),
+		redirectURI:        "https://client.example.com/callback",
+		createdAt:          time.Now(),
+		accessToken:        "gha_access_abc",
+		refreshToken:       "ghr_refresh_xyz",
+		accessTokenExpiry:  accessExpiry,
+		refreshTokenExpiry: refreshExpiry,
+	})
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, gs.calls, 1, "UpsertGrant must be called exactly once")
+
+	p := gs.calls[0]
+	require.Equal(t, int64(99887766), p.GitHubID)
+	require.NotEmpty(t, p.JTI)
+	require.Equal(t, "gha_access_abc", p.AccessToken)
+	require.Equal(t, "ghr_refresh_xyz", p.RefreshToken)
+	require.WithinDuration(t, accessExpiry, p.AccessTokenExpiry, time.Second)
+	require.WithinDuration(t, refreshExpiry, p.RefreshTokenExpiry, time.Second)
+	require.WithinDuration(t, time.Now().Add(7*24*time.Hour), p.JWTExpiry, 5*time.Second)
+}
+
 // --- Logout ---
 
 func TestLogoutHandler_RevokesToken(t *testing.T) {
@@ -907,7 +958,16 @@ func TestValidateRedirectURIs_RejectsWildcard(t *testing.T) {
 	require.Contains(t, err.Error(), "wildcard")
 }
 
-// --- DCR ClientStore wiring ---
+// --- Spies ---
+
+type testGrantStore struct {
+	calls []GrantParams
+}
+
+func (s *testGrantStore) UpsertGrant(_ context.Context, p GrantParams) error {
+	s.calls = append(s.calls, p)
+	return nil
+}
 
 type testClientStore struct {
 	records []ClientRecord
