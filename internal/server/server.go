@@ -39,7 +39,7 @@ type Server struct {
 	store   store.Store
 }
 
-// dcrClientStore adapts *store.Store to oidc.ClientStore.
+// dcrClientStore adapts store.Store to oidc.ClientStore.
 type dcrClientStore struct{ s store.Store }
 
 func (a *dcrClientStore) SaveClient(ctx context.Context, r oidc.ClientRecord) error {
@@ -56,7 +56,7 @@ func (a *dcrClientStore) SaveClient(ctx context.Context, r oidc.ClientRecord) er
 	})
 }
 
-// grantStoreAdapter adapts *store.Store to oidc.GrantStore.
+// grantStoreAdapter adapts store.Store to oidc.GrantStore.
 type grantStoreAdapter struct{ s store.Store }
 
 func (a *grantStoreAdapter) UpsertGrant(ctx context.Context, p oidc.GrantParams) error {

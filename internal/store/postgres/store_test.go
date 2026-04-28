@@ -15,9 +15,22 @@ import (
 	"github.com/wolfeidau/starlogz/internal/store/postgres"
 )
 
+// testEncKey is a fixed key used in grant tests that require encryption.
+var testEncKey = func() [32]byte {
+	var k [32]byte
+	copy(k[:], "test-key-0123456789abcdefghijklm")
+	return k
+}()
+
 // newTestStore starts a postgres container, runs migrations, and returns a Store.
 // The container is terminated when t finishes.
 func newTestStore(t *testing.T) *postgres.Store {
+	t.Helper()
+	return newTestStoreWithEnc(t, nil)
+}
+
+// newTestStoreWithEnc is like newTestStore but configures an encryptor at construction time.
+func newTestStoreWithEnc(t *testing.T, enc *store.Encryptor) *postgres.Store {
 	t.Helper()
 	ctx := context.Background()
 
@@ -37,7 +50,7 @@ func newTestStore(t *testing.T) *postgres.Store {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	st, err := postgres.New(ctx, dsn, nil)
+	st, err := postgres.New(ctx, dsn, enc)
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 
@@ -345,13 +358,8 @@ func TestUpdateFact(t *testing.T) {
 // --- Grants ---
 
 func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
-	st := newTestStore(t)
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
-
-	var testKey [32]byte
-	copy(testKey[:], "test-key-0123456789abcdefghijklm")
-	enc := store.NewEncryptor(testKey)
-	st.SetEncryptor(enc)
 
 	require.NoError(t, st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser"))
 
@@ -379,13 +387,8 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 }
 
 func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
-	st := newTestStore(t)
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
-
-	var testKey [32]byte
-	copy(testKey[:], "test-key-0123456789abcdefghijklm")
-	enc := store.NewEncryptor(testKey)
-	st.SetEncryptor(enc)
 
 	require.NoError(t, st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser"))
 
@@ -425,11 +428,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 }
 
 func TestGetGrant_NotFound(t *testing.T) {
-	st := newTestStore(t)
-	var testKey [32]byte
-	copy(testKey[:], "test-key-0123456789abcdefghijklm")
-	enc := store.NewEncryptor(testKey)
-	st.SetEncryptor(enc)
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 
 	_, err := st.GetGrant(context.Background(), "no-such-jti")
 	require.ErrorIs(t, err, store.ErrNotFound)

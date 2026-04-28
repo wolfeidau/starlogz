@@ -528,6 +528,7 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 		"code":          {code},
 		"code_verifier": {verifier},
 		"client_id":     {"test-client"},
+		"redirect_uri":  {"https://client.example.com/callback"},
 	}
 
 	// First use succeeds
@@ -586,6 +587,71 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {"wrong-verifier-that-is-also-long-enough-for-pkce"},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "redirect-mismatch-code"
+	srv.storeCode(code, &pendingCode{
+		sub:           "12345678",
+		email:         "user@example.com",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge(verifier),
+		redirectURI:   "https://client.example.com/callback",
+		createdAt:     time.Now(),
+	})
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"redirect_uri":  {"https://attacker.example.com/callback"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_MissingRedirectURI(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "missing-redirect-code"
+	srv.storeCode(code, &pendingCode{
+		sub:           "12345678",
+		email:         "user@example.com",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge(verifier),
+		redirectURI:   "https://client.example.com/callback",
+		createdAt:     time.Now(),
+	})
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		// redirect_uri intentionally absent
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))

@@ -109,7 +109,6 @@ type Grant struct {
 
 // OAuthClient is a registered OAuth2 client stored in the database.
 type OAuthClient struct {
-	ID                      uuid.UUID
 	ClientID                string
 	ClientName              string
 	RedirectURIs            []string

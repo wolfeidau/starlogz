@@ -29,10 +29,6 @@ func New(ctx context.Context, dsn string, enc *store.Encryptor) (*Store, error) 
 	return &Store{pool: pool, enc: enc}, nil
 }
 
-func (s *Store) SetEncryptor(enc *store.Encryptor) {
-	s.enc = enc
-}
-
 // Close releases all pooled connections.
 func (s *Store) Close() {
 	s.pool.Close()

@@ -18,11 +18,6 @@ func NewEncryptor(key [32]byte) *Encryptor {
 	return &Encryptor{key: &key}
 }
 
-// SetKey replaces the active encryption key.
-func (e *Encryptor) SetKey(key [32]byte) {
-	e.key = &key
-}
-
 // Seal encrypts plaintext and prepends a random nonce.
 func (e *Encryptor) Seal(plaintext string) ([]byte, error) {
 	if e.key == nil {
