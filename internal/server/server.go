@@ -29,18 +29,18 @@ type Config struct {
 	GitHubClientSecret string
 	PrivKey            jwk.Key
 	Logger             *slog.Logger
-	Store              *store.Store // nil is allowed; fact tools will return an error
+	Store              store.Store // nil is allowed; fact tools will return an error
 }
 
 // Server is the configured HTTP server ready to serve requests.
 type Server struct {
 	handler http.Handler
 	logger  *slog.Logger
-	store   *store.Store
+	store   store.Store
 }
 
 // dcrClientStore adapts *store.Store to oidc.ClientStore.
-type dcrClientStore struct{ s *store.Store }
+type dcrClientStore struct{ s store.Store }
 
 func (a *dcrClientStore) SaveClient(ctx context.Context, r oidc.ClientRecord) error {
 	return a.s.SaveOAuthClient(ctx, store.OAuthClient{
@@ -57,7 +57,7 @@ func (a *dcrClientStore) SaveClient(ctx context.Context, r oidc.ClientRecord) er
 }
 
 // grantStoreAdapter adapts *store.Store to oidc.GrantStore.
-type grantStoreAdapter struct{ s *store.Store }
+type grantStoreAdapter struct{ s store.Store }
 
 func (a *grantStoreAdapter) UpsertGrant(ctx context.Context, p oidc.GrantParams) error {
 	return a.s.UpsertGrant(ctx, store.Grant{

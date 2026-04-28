@@ -18,10 +18,10 @@ import (
 type mcpServer struct {
 	logger *slog.Logger
 	server *mcp.Server
-	store  *store.Store
+	store  store.Store
 }
 
-func newMCPServer(logger *slog.Logger, st *store.Store) *mcpServer {
+func newMCPServer(logger *slog.Logger, st store.Store) *mcpServer {
 	ms := &mcpServer{
 		logger: logger,
 		server: mcp.NewServer(&mcp.Implementation{Name: name}, nil),
