@@ -161,6 +161,9 @@ func (s *Store) GetProjectBySlug(ctx context.Context, ownerID uuid.UUID, slug st
 // UpsertGrant inserts or replaces a grant row and lazily prunes expired grants
 // for the same GitHub user within the same transaction.
 func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
+	if s.enc == nil {
+		return fmt.Errorf("encryption key not configured")
+	}
 	encAccess, err := s.enc.Seal(g.AccessToken)
 	if err != nil {
 		return fmt.Errorf("encrypt access token: %w", err)
@@ -207,6 +210,9 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 
 // GetGrant fetches and decrypts a grant by JWT ID.
 func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("encryption key not configured")
+	}
 	var g store.Grant
 	var encAccess, encRefresh []byte
 
