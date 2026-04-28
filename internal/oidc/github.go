@@ -21,15 +21,19 @@ type pendingAuth struct {
 	createdAt     time.Time
 }
 
-// pendingCode holds the identity and PKCE challenge waiting for the token exchange.
+// pendingCode holds the identity, PKCE challenge, and GitHub App tokens waiting for the token exchange.
 type pendingCode struct {
-	sub           string // GitHub user ID as decimal string
-	email         string
-	scope         string
-	codeChallenge string
-	redirectURI   string
-	clientID      string
-	createdAt     time.Time
+	sub                string // GitHub user ID as decimal string
+	email              string
+	scope              string
+	codeChallenge      string
+	redirectURI        string
+	clientID           string
+	createdAt          time.Time
+	accessToken        string
+	refreshToken       string
+	accessTokenExpiry  time.Time
+	refreshTokenExpiry time.Time
 }
 
 type githubUser struct {

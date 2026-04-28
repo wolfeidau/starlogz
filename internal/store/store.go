@@ -16,7 +16,8 @@ var ErrNotFound = errors.New("not found")
 
 // Store wraps a pgxpool and exposes domain-level query methods.
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	encKey *[32]byte
 }
 
 // New connects to PostgreSQL and returns a Store. Call Migrate before first use.
@@ -26,6 +27,12 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	return &Store{pool: pool}, nil
+}
+
+// SetEncryptionKey configures the key used to encrypt and decrypt stored GitHub tokens.
+// Must be called before any grant operations.
+func (s *Store) SetEncryptionKey(key [32]byte) {
+	s.encKey = &key
 }
 
 // Close releases all pooled connections.

@@ -25,6 +25,23 @@ type UserUpserter interface {
 	UpsertUser(ctx context.Context, githubID int64, email, login string) error
 }
 
+// GrantParams holds the data needed to persist an authorization grant.
+type GrantParams struct {
+	JTI                string
+	GitHubID           int64
+	AccessToken        string
+	RefreshToken       string
+	AccessTokenExpiry  time.Time
+	RefreshTokenExpiry time.Time
+	JWTExpiry          time.Time
+}
+
+// GrantStore persists authorization grants with associated GitHub App tokens.
+// Implemented by *store.Store via grantStoreAdapter in internal/server; nil skips persistence.
+type GrantStore interface {
+	UpsertGrant(ctx context.Context, p GrantParams) error
+}
+
 // Config holds construction parameters for Server.
 type Config struct {
 	BaseURL            string
@@ -32,6 +49,7 @@ type Config struct {
 	GitHubClientSecret string
 	Users              UserUpserter // optional
 	Clients            ClientStore  // optional; if set, DCR registrations are persisted
+	Grants             GrantStore   // optional; if set, GitHub App tokens are persisted per grant
 }
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
@@ -45,6 +63,7 @@ type Server struct {
 	githubOAuth *oauth2.Config
 	users       UserUpserter
 	clients     ClientStore
+	grants      GrantStore
 
 	revokedMu sync.RWMutex
 	revoked   map[string]time.Time // jti → expiry
@@ -110,6 +129,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		githubOAuth: newGitHubOAuthConfig(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
 		users:       cfg.Users,
 		clients:     cfg.Clients,
+		grants:      cfg.Grants,
 		revoked:     make(map[string]time.Time),
 		pending:     make(map[string]*pendingAuth),
 		codes:       make(map[string]*pendingCode),
