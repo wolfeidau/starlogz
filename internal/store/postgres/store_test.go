@@ -449,7 +449,7 @@ func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 
 // --- OAuth clients ---
 
-func TestSaveOAuthClient(t *testing.T) {
+func TestSaveClient(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
@@ -466,10 +466,10 @@ func TestSaveOAuthClient(t *testing.T) {
 		ExpiresAt:               now.Add(90 * 24 * time.Hour),
 	}
 
-	require.NoError(t, st.SaveOAuthClient(ctx, c))
+	require.NoError(t, st.SaveClient(ctx, c))
 }
 
-func TestSaveOAuthClient_DuplicateClientID(t *testing.T) {
+func TestSaveClient_DuplicateClientID(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
@@ -485,9 +485,9 @@ func TestSaveOAuthClient_DuplicateClientID(t *testing.T) {
 		ExpiresAt:               now.Add(90 * 24 * time.Hour),
 	}
 
-	require.NoError(t, st.SaveOAuthClient(ctx, c))
+	require.NoError(t, st.SaveClient(ctx, c))
 
 	c.ClientName = "Second"
-	err := st.SaveOAuthClient(ctx, c)
+	err := st.SaveClient(ctx, c)
 	require.Error(t, err, "saving a duplicate client_id must return an error")
 }

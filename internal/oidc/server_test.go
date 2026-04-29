@@ -23,6 +23,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/store"
 	"golang.org/x/oauth2"
 )
 
@@ -476,7 +477,6 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 		scope:         "facts:read facts:write",
 		codeChallenge: pkceChallenge(verifier),
 		redirectURI:   "https://client.example.com/callback",
-		clientID:      "test-client",
 		createdAt:     time.Now(),
 	})
 
@@ -521,7 +521,6 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 		scope:         "facts:read",
 		codeChallenge: pkceChallenge(verifier),
 		redirectURI:   "https://client.example.com/callback",
-		clientID:      "test-client",
 		createdAt:     time.Now(),
 	})
 
@@ -581,7 +580,6 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 		scope:         "facts:read",
 		codeChallenge: pkceChallenge("correct-verifier-that-is-long-enough-to-be-valid"),
 		redirectURI:   "https://client.example.com/callback",
-		clientID:      "test-client",
 		createdAt:     time.Now(),
 	})
 
@@ -1033,11 +1031,11 @@ func TestValidateRedirectURIs_RejectsWildcard(t *testing.T) {
 // --- Spies ---
 
 type testGrantStore struct {
-	calls []GrantParams
+	calls []store.Grant
 }
 
-func (s *testGrantStore) UpsertGrant(_ context.Context, p GrantParams) error {
-	s.calls = append(s.calls, p)
+func (s *testGrantStore) UpsertGrant(_ context.Context, g store.Grant) error {
+	s.calls = append(s.calls, g)
 	return nil
 }
 
@@ -1071,28 +1069,28 @@ func (m *mockGitHubConnector) ExchangeCode(_ context.Context, _ string) (*oauth2
 }
 
 type testClientStore struct {
-	records []ClientRecord
+	records []store.OAuthClient
 }
 
-func (s *testClientStore) SaveClient(_ context.Context, r ClientRecord) error {
-	s.records = append(s.records, r)
+func (s *testClientStore) SaveClient(_ context.Context, c store.OAuthClient) error {
+	s.records = append(s.records, c)
 	return nil
 }
 
 func TestDCRHandler_PersistsToClientStore(t *testing.T) {
 	srv := newTestOIDCServer(t)
-	store := &testClientStore{}
+	cs := &testClientStore{}
 
 	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"My Client","scope":"facts:read"}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.dcrHandler(store).ServeHTTP(w, req)
+	srv.dcrHandler(cs).ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusCreated, w.Code)
-	require.Len(t, store.records, 1)
+	require.Len(t, cs.records, 1)
 
-	r := store.records[0]
+	r := cs.records[0]
 	require.NotEmpty(t, r.ClientID)
 	require.Equal(t, "My Client", r.ClientName)
 	require.Equal(t, []string{"https://client.example.com/callback"}, r.RedirectURIs)

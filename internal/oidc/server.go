@@ -15,6 +15,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"github.com/wolfeidau/starlogz/internal/store"
 )
 
 // UserUpserter persists user identity on successful GitHub login.
@@ -23,21 +24,10 @@ type UserUpserter interface {
 	UpsertUser(ctx context.Context, githubID int64, email, login string) error
 }
 
-// GrantParams holds the data needed to persist an authorization grant.
-type GrantParams struct {
-	JTI                string
-	GitHubID           int64
-	AccessToken        string
-	RefreshToken       string
-	AccessTokenExpiry  time.Time
-	RefreshTokenExpiry time.Time
-	JWTExpiry          time.Time
-}
-
 // GrantStore persists authorization grants with associated GitHub App tokens.
-// Implemented by store.Store via grantStoreAdapter in internal/server; nil skips persistence.
+// store.Store satisfies this interface directly.
 type GrantStore interface {
-	UpsertGrant(ctx context.Context, p GrantParams) error
+	UpsertGrant(ctx context.Context, g store.Grant) error
 }
 
 // Config holds construction parameters for Server.

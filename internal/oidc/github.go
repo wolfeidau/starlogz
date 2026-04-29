@@ -13,7 +13,6 @@ import (
 
 // pendingAuth holds the client's PKCE and redirect params while the user is at GitHub.
 type pendingAuth struct {
-	clientID      string
 	redirectURI   string
 	scope         string
 	codeChallenge string
@@ -28,7 +27,6 @@ type pendingCode struct {
 	scope              string
 	codeChallenge      string
 	redirectURI        string
-	clientID           string
 	createdAt          time.Time
 	accessToken        string
 	refreshToken       string

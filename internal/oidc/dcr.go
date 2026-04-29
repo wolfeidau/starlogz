@@ -6,25 +6,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/wolfeidau/starlogz/internal/store"
 )
 
-// ClientRecord is the oidc-layer view of a DCR registration, using only stdlib types.
-// It is passed to ClientStore.SaveClient and must not import external package types.
-type ClientRecord struct {
-	ClientID                string
-	ClientName              string
-	TokenEndpointAuthMethod string
-	Scope                   string
-	RedirectURIs            []string
-	GrantTypes              []string
-	ResponseTypes           []string
-	IssuedAt                time.Time
-	ExpiresAt               time.Time
-}
-
 // ClientStore persists client registrations from Dynamic Client Registration.
+// store.Store satisfies this interface directly.
 type ClientStore interface {
-	SaveClient(ctx context.Context, r ClientRecord) error
+	SaveClient(ctx context.Context, c store.OAuthClient) error
 }
 
 // clientRegistrationTTL is how long a registered client remains valid.

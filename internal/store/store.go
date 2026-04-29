@@ -35,7 +35,7 @@ type Store interface {
 	ListFacts(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Fact, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
 
-	SaveOAuthClient(ctx context.Context, c OAuthClient) error
+	SaveClient(ctx context.Context, c OAuthClient) error
 }
 
 // User is a GitHub-authenticated user stored in the database.

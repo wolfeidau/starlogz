@@ -447,9 +447,9 @@ func scanFacts(rows pgx.Rows) ([]*store.Fact, error) {
 	return facts, rows.Err()
 }
 
-// SaveOAuthClient persists a new OAuth2 client registration.
+// SaveClient persists a new OAuth2 client registration.
 // Returns an error if a client with the same client_id already exists.
-func (s *Store) SaveOAuthClient(ctx context.Context, c store.OAuthClient) error {
+func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients
 			(client_id, client_name, redirect_uris, grant_types, response_types,

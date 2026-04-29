@@ -16,6 +16,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	storepkg "github.com/wolfeidau/starlogz/internal/store"
 )
 
 // LogoutHandler handles POST /auth/logout. It verifies the bearer token,
@@ -165,7 +166,7 @@ func (s *Server) TokenHandler() http.Handler {
 
 		if s.grants != nil && pc.accessToken != "" {
 			githubID, _ := strconv.ParseInt(pc.sub, 10, 64)
-			if err := s.grants.UpsertGrant(r.Context(), GrantParams{
+			if err := s.grants.UpsertGrant(r.Context(), storepkg.Grant{
 				JTI:                jti,
 				GitHubID:           githubID,
 				AccessToken:        pc.accessToken,
@@ -247,7 +248,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 		clientID := uuid.New().String()
 
 		if store != nil {
-			rec := ClientRecord{
+			rec := storepkg.OAuthClient{
 				ClientID:                clientID,
 				ClientName:              req.ClientName,
 				TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
@@ -315,7 +316,6 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			scope:              pending.scope,
 			codeChallenge:      pending.codeChallenge,
 			redirectURI:        pending.redirectURI,
-			clientID:           pending.clientID,
 			createdAt:          time.Now(),
 			accessToken:        githubToken.AccessToken,
 			refreshToken:       githubToken.RefreshToken,
@@ -391,7 +391,6 @@ func (s *Server) AuthorizeHandler() http.Handler {
 
 		githubState := uuid.New().String()
 		s.storePending(githubState, &pendingAuth{
-			clientID:      q.Get("client_id"),
 			redirectURI:   redirectURI,
 			scope:         scope,
 			codeChallenge: codeChallenge,
