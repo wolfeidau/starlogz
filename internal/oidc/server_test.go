@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 )
 
 func newTestOIDCServer(t *testing.T) *Server {
@@ -742,6 +744,76 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(7*24*time.Hour), p.JWTExpiry, 5*time.Second)
 }
 
+// --- GitHub callback ---
+
+func TestGitHubCallbackHandler_WrongMethod(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/auth/github/callback", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestGitHubCallbackHandler_InvalidState(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=no-such-state&code=anything", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGitHubCallbackHandler_ExchangeError(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.github = &mockGitHubConnector{err: fmt.Errorf("GitHub is down")}
+
+	srv.storePending("valid-state", &pendingAuth{
+		redirectURI:   "https://client.example.com/callback",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge("verifier"),
+		createdAt:     time.Now(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=valid-state&code=bad-code", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadGateway, w.Code)
+}
+
+func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
+	us := &testUserUpserter{}
+	srv := newTestOIDCServer(t)
+	srv.users = us
+	srv.github = &mockGitHubConnector{
+		token: &oauth2.Token{AccessToken: "gha_test", RefreshToken: "ghr_test"},
+		identity: &githubIdentity{
+			ID:    42,
+			Email: "dev@example.com",
+			Login: "devuser",
+		},
+	}
+
+	srv.storePending("cb-state", &pendingAuth{
+		redirectURI:   "https://client.example.com/callback",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge("verifier"),
+		createdAt:     time.Now(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=cb-state&code=code", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+	require.Len(t, us.calls, 1)
+	require.Equal(t, int64(42), us.calls[0].githubID)
+	require.Equal(t, "dev@example.com", us.calls[0].email)
+	require.Equal(t, "devuser", us.calls[0].login)
+
+	// Authorization code must be set in the redirect location.
+	loc := w.Header().Get("Location")
+	require.Contains(t, loc, "code=")
+}
+
 // --- Logout ---
 
 func TestLogoutHandler_RevokesToken(t *testing.T) {
@@ -967,6 +1039,35 @@ type testGrantStore struct {
 func (s *testGrantStore) UpsertGrant(_ context.Context, p GrantParams) error {
 	s.calls = append(s.calls, p)
 	return nil
+}
+
+type upsertCall struct {
+	githubID int64
+	email    string
+	login    string
+}
+
+type testUserUpserter struct {
+	calls []upsertCall
+}
+
+func (u *testUserUpserter) UpsertUser(_ context.Context, githubID int64, email, login string) error {
+	u.calls = append(u.calls, upsertCall{githubID, email, login})
+	return nil
+}
+
+type mockGitHubConnector struct {
+	identity *githubIdentity
+	token    *oauth2.Token
+	err      error
+}
+
+func (m *mockGitHubConnector) AuthCodeURL(state string) string {
+	return "https://github.com/login/oauth/authorize?state=" + state
+}
+
+func (m *mockGitHubConnector) ExchangeCode(_ context.Context, _ string) (*oauth2.Token, *githubIdentity, error) {
+	return m.token, m.identity, m.err
 }
 
 type testClientStore struct {

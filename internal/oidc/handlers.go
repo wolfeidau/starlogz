@@ -16,7 +16,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"golang.org/x/oauth2"
 )
 
 // LogoutHandler handles POST /auth/logout. It verifies the bearer token,
@@ -295,18 +294,10 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			return
 		}
 
-		githubToken, err := s.githubOAuth.Exchange(r.Context(), q.Get("code"))
+		githubToken, identity, err := s.github.ExchangeCode(r.Context(), q.Get("code"))
 		if err != nil {
-			slog.Default().ErrorContext(r.Context(), "GitHub code exchange failed", slog.Any("error", err))
-			http.Error(w, "failed to exchange code with GitHub", http.StatusBadGateway)
-			return
-		}
-
-		httpClient := s.githubOAuth.Client(r.Context(), githubToken)
-		identity, err := fetchGitHubIdentity(r.Context(), httpClient)
-		if err != nil {
-			slog.Default().ErrorContext(r.Context(), "GitHub identity fetch failed", slog.Any("error", err))
-			http.Error(w, "failed to fetch GitHub identity", http.StatusBadGateway)
+			slog.Default().ErrorContext(r.Context(), "GitHub exchange failed", slog.Any("error", err))
+			http.Error(w, "failed to authenticate with GitHub", http.StatusBadGateway)
 			return
 		}
 
@@ -408,7 +399,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			createdAt:     time.Now(),
 		})
 
-		authURL := s.githubOAuth.AuthCodeURL(githubState, oauth2.AccessTypeOnline)
+		authURL := s.github.AuthCodeURL(githubState)
 		http.Redirect(w, r, authURL, http.StatusFound)
 	})
 }

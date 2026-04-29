@@ -48,14 +48,45 @@ type githubEmail struct {
 	Verified bool   `json:"verified"`
 }
 
-func newGitHubOAuthConfig(clientID, clientSecret, callbackURL string) *oauth2.Config {
-	return &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Scopes:       []string{"read:user", "user:email"},
-		Endpoint:     githuboauth.Endpoint,
-		RedirectURL:  callbackURL,
+// gitHubConnector abstracts the GitHub OAuth2 exchange so it can be replaced in tests.
+type gitHubConnector interface {
+	// AuthCodeURL returns the URL to redirect the user to for GitHub login.
+	AuthCodeURL(state string) string
+	// ExchangeCode exchanges an authorization code for a token and resolved identity.
+	ExchangeCode(ctx context.Context, code string) (*oauth2.Token, *githubIdentity, error)
+}
+
+// oauthGitHubConnector is the production implementation backed by *oauth2.Config.
+type oauthGitHubConnector struct {
+	cfg *oauth2.Config
+}
+
+func newGitHubConnector(clientID, clientSecret, callbackURL string) *oauthGitHubConnector {
+	return &oauthGitHubConnector{
+		cfg: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Scopes:       []string{"read:user", "user:email"},
+			Endpoint:     githuboauth.Endpoint,
+			RedirectURL:  callbackURL,
+		},
 	}
+}
+
+func (c *oauthGitHubConnector) AuthCodeURL(state string) string {
+	return c.cfg.AuthCodeURL(state, oauth2.AccessTypeOnline)
+}
+
+func (c *oauthGitHubConnector) ExchangeCode(ctx context.Context, code string) (*oauth2.Token, *githubIdentity, error) {
+	token, err := c.cfg.Exchange(ctx, code)
+	if err != nil {
+		return nil, nil, fmt.Errorf("exchange code: %w", err)
+	}
+	identity, err := fetchGitHubIdentity(ctx, c.cfg.Client(ctx, token))
+	if err != nil {
+		return nil, nil, err
+	}
+	return token, identity, nil
 }
 
 func (s *Server) storePending(githubState string, p *pendingAuth) {

@@ -15,7 +15,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"golang.org/x/oauth2"
 )
 
 // UserUpserter persists user identity on successful GitHub login.
@@ -59,7 +58,7 @@ type Server struct {
 	jwksJSON    []byte
 	authMeta    *oauthex.AuthServerMeta
 	resMeta     *oauthex.ProtectedResourceMetadata
-	githubOAuth *oauth2.Config
+	github      gitHubConnector
 	users       UserUpserter
 	clients     ClientStore
 	grants      GrantStore
@@ -125,7 +124,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		jwksJSON:    jwksJSON,
 		authMeta:    buildAuthServerMeta(base),
 		resMeta:     buildProtectedResourceMeta(base),
-		githubOAuth: newGitHubOAuthConfig(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		github:      newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
 		users:       cfg.Users,
 		clients:     cfg.Clients,
 		grants:      cfg.Grants,
