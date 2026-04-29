@@ -2,14 +2,10 @@ package oidc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
 )
 
 // ClientRecord is the oidc-layer view of a DCR registration, using only stdlib types.
@@ -62,13 +58,4 @@ func validateRedirectURIs(uris []string) error {
 		}
 	}
 	return nil
-}
-
-func writeDCRError(w http.ResponseWriter, code, description string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(&oauthex.ClientRegistrationError{
-		ErrorCode:        code,
-		ErrorDescription: description,
-	})
 }

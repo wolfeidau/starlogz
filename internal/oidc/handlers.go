@@ -206,7 +206,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 
 		var req oauthex.ClientRegistrationMetadata
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeDCRError(w, "invalid_client_metadata", "failed to parse request body", http.StatusBadRequest)
+			writeOAuthError(w, "invalid_client_metadata", "failed to parse request body", http.StatusBadRequest)
 			return
 		}
 
@@ -219,17 +219,17 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 		)
 
 		if len(req.RedirectURIs) == 0 {
-			writeDCRError(w, "invalid_client_metadata", "redirect_uris is required", http.StatusBadRequest)
+			writeOAuthError(w, "invalid_client_metadata", "redirect_uris is required", http.StatusBadRequest)
 			return
 		}
 
 		if err := validateRedirectURIs(req.RedirectURIs); err != nil {
-			writeDCRError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
+			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		if req.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != "none" {
-			writeDCRError(w, "invalid_client_metadata", "only token_endpoint_auth_method=none is supported", http.StatusBadRequest)
+			writeOAuthError(w, "invalid_client_metadata", "only token_endpoint_auth_method=none is supported", http.StatusBadRequest)
 			return
 		}
 
@@ -260,7 +260,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 			}
 			if err := store.SaveClient(r.Context(), rec); err != nil {
 				slog.Default().ErrorContext(r.Context(), "failed to persist DCR client", slog.Any("error", err))
-				writeDCRError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
+				writeOAuthError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
 				return
 			}
 		}
