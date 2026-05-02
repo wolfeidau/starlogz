@@ -181,8 +181,8 @@ func TestWriteFact_InsertWithoutKey(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotEqual(t, f1.ID, f2.ID, "keyless facts get distinct IDs")
-	require.Equal(t, "", f1.Key)
-	require.Equal(t, "", f2.Key)
+	require.Empty(t, f1.Key)
+	require.Empty(t, f2.Key)
 }
 
 func TestSearchFacts(t *testing.T) {

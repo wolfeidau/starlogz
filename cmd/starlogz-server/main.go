@@ -20,7 +20,7 @@ var (
 	version = "devel"
 	cli     struct {
 		HTTP    commands.HTTPCmd   `cmd:"" help:"http mcp server using streamable HTTP transport."`
-		Keygen commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
+		Keygen  commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
 		Version kong.VersionFlag
 	}
 )
