@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,30 +15,19 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"golang.org/x/oauth2"
+	"github.com/wolfeidau/starlogz/internal/store"
 )
 
 // UserUpserter persists user identity on successful GitHub login.
-// Implemented by *store.Store; nil is accepted (skips persistence).
+// Implemented by store.Store via *postgres.Store; nil is accepted (skips persistence).
 type UserUpserter interface {
 	UpsertUser(ctx context.Context, githubID int64, email, login string) error
 }
 
-// GrantParams holds the data needed to persist an authorization grant.
-type GrantParams struct {
-	JTI                string
-	GitHubID           int64
-	AccessToken        string
-	RefreshToken       string
-	AccessTokenExpiry  time.Time
-	RefreshTokenExpiry time.Time
-	JWTExpiry          time.Time
-}
-
 // GrantStore persists authorization grants with associated GitHub App tokens.
-// Implemented by *store.Store via grantStoreAdapter in internal/server; nil skips persistence.
+// store.Store satisfies this interface directly.
 type GrantStore interface {
-	UpsertGrant(ctx context.Context, p GrantParams) error
+	UpsertGrant(ctx context.Context, g store.Grant) error
 }
 
 // Config holds construction parameters for Server.
@@ -60,7 +48,7 @@ type Server struct {
 	jwksJSON    []byte
 	authMeta    *oauthex.AuthServerMeta
 	resMeta     *oauthex.ProtectedResourceMetadata
-	githubOAuth *oauth2.Config
+	github      gitHubConnector
 	users       UserUpserter
 	clients     ClientStore
 	grants      GrantStore
@@ -126,7 +114,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		jwksJSON:    jwksJSON,
 		authMeta:    buildAuthServerMeta(base),
 		resMeta:     buildProtectedResourceMeta(base),
-		githubOAuth: newGitHubOAuthConfig(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		github:      newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
 		users:       cfg.Users,
 		clients:     cfg.Clients,
 		grants:      cfg.Grants,
@@ -233,95 +221,27 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	}, nil
 }
 
-// LogoutHandler handles POST /auth/logout. It verifies the bearer token,
-// extracts the jti and exp claims, and adds the token to the revocation blocklist.
-func (s *Server) LogoutHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+// IssueJWT signs and returns a new ES384 JWT for the given subject, email, scope, and JWT ID.
+func (s *Server) IssueJWT(sub, email, scope, jti string) (string, error) {
+	now := time.Now()
+	tok, err := jwt.NewBuilder().
+		Issuer(s.baseURL.String()).
+		Subject(sub).
+		IssuedAt(now).
+		Expiration(now.Add(7*24*time.Hour)).
+		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
+		Claim("email", email).
+		Claim("scope", scope).
+		Claim("jti", jti).
+		Build()
+	if err != nil {
+		return "", fmt.Errorf("build token: %w", err)
+	}
 
-		const prefix = "Bearer "
-		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, prefix) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"unauthorized","error_description":"missing bearer token"}`))
-			return
-		}
-		tokenString := authHeader[len(prefix):]
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES384(), s.privkey))
+	if err != nil {
+		return "", fmt.Errorf("sign token: %w", err)
+	}
 
-		tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), s.pubkey))
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"token verification failed"}`))
-			return
-		}
-
-		var jti string
-		if err := tok.Get("jti", &jti); err != nil || jti == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"missing jti claim"}`))
-			return
-		}
-
-		exp, ok := tok.Expiration()
-		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"missing expiration claim"}`))
-			return
-		}
-
-		s.RevokeToken(jti, exp)
-		w.WriteHeader(http.StatusNoContent)
-	})
+	return string(signed), nil
 }
-
-// JWKSHandler serves the public key set for token verification by clients.
-func (s *Server) JWKSHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if _, err := w.Write(s.jwksJSON); err != nil {
-			slog.Default().Error("failed to write JWKS response", slog.Any("error", err))
-		}
-	})
-}
-
-// DiscoveryHandler serves the OAuth2 authorization server metadata document.
-// Register at both /.well-known/oauth-authorization-server (RFC 8414) and
-// /.well-known/openid-configuration (OIDC fallback) — the go-sdk client tries
-// the RFC 8414 path first when the issuer URL has no path component.
-func (s *Server) DiscoveryHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		if err := json.NewEncoder(w).Encode(s.authMeta); err != nil {
-			slog.Default().Error("failed to write discovery response", slog.Any("error", err))
-		}
-	})
-}
-

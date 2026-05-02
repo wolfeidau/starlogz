@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,6 +23,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/store"
+	"golang.org/x/oauth2"
 )
 
 func newTestOIDCServer(t *testing.T) *Server {
@@ -474,7 +477,6 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 		scope:         "facts:read facts:write",
 		codeChallenge: pkceChallenge(verifier),
 		redirectURI:   "https://client.example.com/callback",
-		clientID:      "test-client",
 		createdAt:     time.Now(),
 	})
 
@@ -519,7 +521,6 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 		scope:         "facts:read",
 		codeChallenge: pkceChallenge(verifier),
 		redirectURI:   "https://client.example.com/callback",
-		clientID:      "test-client",
 		createdAt:     time.Now(),
 	})
 
@@ -528,6 +529,7 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 		"code":          {code},
 		"code_verifier": {verifier},
 		"client_id":     {"test-client"},
+		"redirect_uri":  {"https://client.example.com/callback"},
 	}
 
 	// First use succeeds
@@ -578,7 +580,6 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 		scope:         "facts:read",
 		codeChallenge: pkceChallenge("correct-verifier-that-is-long-enough-to-be-valid"),
 		redirectURI:   "https://client.example.com/callback",
-		clientID:      "test-client",
 		createdAt:     time.Now(),
 	})
 
@@ -586,6 +587,71 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {"wrong-verifier-that-is-also-long-enough-for-pkce"},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "redirect-mismatch-code"
+	srv.storeCode(code, &pendingCode{
+		sub:           "12345678",
+		email:         "user@example.com",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge(verifier),
+		redirectURI:   "https://client.example.com/callback",
+		createdAt:     time.Now(),
+	})
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"redirect_uri":  {"https://attacker.example.com/callback"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_MissingRedirectURI(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "missing-redirect-code"
+	srv.storeCode(code, &pendingCode{
+		sub:           "12345678",
+		email:         "user@example.com",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge(verifier),
+		redirectURI:   "https://client.example.com/callback",
+		createdAt:     time.Now(),
+	})
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		// redirect_uri intentionally absent
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
@@ -623,6 +689,127 @@ func TestTokenHandler_WrongMethod(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.TokenHandler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestTokenHandler_GrantStoreSeam(t *testing.T) {
+	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	raw, err := jwk.Import(privkey)
+	require.NoError(t, err)
+
+	gs := &testGrantStore{}
+	srv, err := NewServer(Config{BaseURL: "http://example.com", Grants: gs}, raw)
+	require.NoError(t, err)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "grant-seam-code"
+	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
+	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
+	srv.storeCode(code, &pendingCode{
+		sub:                "99887766",
+		email:              "user@example.com",
+		scope:              "facts:read",
+		codeChallenge:      pkceChallenge(verifier),
+		redirectURI:        "https://client.example.com/callback",
+		createdAt:          time.Now(),
+		accessToken:        "gha_access_abc",
+		refreshToken:       "ghr_refresh_xyz",
+		accessTokenExpiry:  accessExpiry,
+		refreshTokenExpiry: refreshExpiry,
+	})
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, gs.calls, 1, "UpsertGrant must be called exactly once")
+
+	p := gs.calls[0]
+	require.Equal(t, int64(99887766), p.GitHubID)
+	require.NotEmpty(t, p.JTI)
+	require.Equal(t, "gha_access_abc", p.AccessToken)
+	require.Equal(t, "ghr_refresh_xyz", p.RefreshToken)
+	require.WithinDuration(t, accessExpiry, p.AccessTokenExpiry, time.Second)
+	require.WithinDuration(t, refreshExpiry, p.RefreshTokenExpiry, time.Second)
+	require.WithinDuration(t, time.Now().Add(7*24*time.Hour), p.JWTExpiry, 5*time.Second)
+}
+
+// --- GitHub callback ---
+
+func TestGitHubCallbackHandler_WrongMethod(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/auth/github/callback", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestGitHubCallbackHandler_InvalidState(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=no-such-state&code=anything", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGitHubCallbackHandler_ExchangeError(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.github = &mockGitHubConnector{err: fmt.Errorf("GitHub is down")}
+
+	srv.storePending("valid-state", &pendingAuth{
+		redirectURI:   "https://client.example.com/callback",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge("verifier"),
+		createdAt:     time.Now(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=valid-state&code=bad-code", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadGateway, w.Code)
+}
+
+func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
+	us := &testUserUpserter{}
+	srv := newTestOIDCServer(t)
+	srv.users = us
+	srv.github = &mockGitHubConnector{
+		token: &oauth2.Token{AccessToken: "gha_test", RefreshToken: "ghr_test"},
+		identity: &githubIdentity{
+			ID:    42,
+			Email: "dev@example.com",
+			Login: "devuser",
+		},
+	}
+
+	srv.storePending("cb-state", &pendingAuth{
+		redirectURI:   "https://client.example.com/callback",
+		scope:         "facts:read",
+		codeChallenge: pkceChallenge("verifier"),
+		createdAt:     time.Now(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=cb-state&code=code", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+	require.Len(t, us.calls, 1)
+	require.Equal(t, int64(42), us.calls[0].githubID)
+	require.Equal(t, "dev@example.com", us.calls[0].email)
+	require.Equal(t, "devuser", us.calls[0].login)
+
+	// Authorization code must be set in the redirect location.
+	loc := w.Header().Get("Location")
+	require.Contains(t, loc, "code=")
 }
 
 // --- Logout ---
@@ -841,31 +1028,69 @@ func TestValidateRedirectURIs_RejectsWildcard(t *testing.T) {
 	require.Contains(t, err.Error(), "wildcard")
 }
 
-// --- DCR ClientStore wiring ---
+// --- Spies ---
 
-type testClientStore struct {
-	records []ClientRecord
+type testGrantStore struct {
+	calls []store.Grant
 }
 
-func (s *testClientStore) SaveClient(_ context.Context, r ClientRecord) error {
-	s.records = append(s.records, r)
+func (s *testGrantStore) UpsertGrant(_ context.Context, g store.Grant) error {
+	s.calls = append(s.calls, g)
+	return nil
+}
+
+type upsertCall struct {
+	githubID int64
+	email    string
+	login    string
+}
+
+type testUserUpserter struct {
+	calls []upsertCall
+}
+
+func (u *testUserUpserter) UpsertUser(_ context.Context, githubID int64, email, login string) error {
+	u.calls = append(u.calls, upsertCall{githubID, email, login})
+	return nil
+}
+
+type mockGitHubConnector struct {
+	identity *githubIdentity
+	token    *oauth2.Token
+	err      error
+}
+
+func (m *mockGitHubConnector) AuthCodeURL(state string) string {
+	return "https://github.com/login/oauth/authorize?state=" + state
+}
+
+func (m *mockGitHubConnector) ExchangeCode(_ context.Context, _ string) (*oauth2.Token, *githubIdentity, error) {
+	return m.token, m.identity, m.err
+}
+
+type testClientStore struct {
+	records []store.OAuthClient
+}
+
+func (s *testClientStore) SaveClient(_ context.Context, c store.OAuthClient) error {
+	s.records = append(s.records, c)
 	return nil
 }
 
 func TestDCRHandler_PersistsToClientStore(t *testing.T) {
 	srv := newTestOIDCServer(t)
-	store := &testClientStore{}
+	cs := &testClientStore{}
 
 	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"My Client","scope":"facts:read"}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.dcrHandler(store).ServeHTTP(w, req)
+	srv.dcrHandler(cs).ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusCreated, w.Code)
-	require.Len(t, store.records, 1)
+	require.Len(t, cs.records, 1)
 
-	r := store.records[0]
+	r := cs.records[0]
 	require.NotEmpty(t, r.ClientID)
 	require.Equal(t, "My Client", r.ClientName)
 	require.Equal(t, []string{"https://client.example.com/callback"}, r.RedirectURIs)

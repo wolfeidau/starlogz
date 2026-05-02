@@ -1,4 +1,4 @@
-package store_test
+package postgres_test
 
 import (
 	"context"
@@ -9,22 +9,36 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	postgrescont "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/store/postgres"
 )
+
+// testEncKey is a fixed key used in grant tests that require encryption.
+var testEncKey = func() [32]byte {
+	var k [32]byte
+	copy(k[:], "test-key-0123456789abcdefghijklm")
+	return k
+}()
 
 // newTestStore starts a postgres container, runs migrations, and returns a Store.
 // The container is terminated when t finishes.
-func newTestStore(t *testing.T) *store.Store {
+func newTestStore(t *testing.T) *postgres.Store {
+	t.Helper()
+	return newTestStoreWithEnc(t, nil)
+}
+
+// newTestStoreWithEnc is like newTestStore but configures an encryptor at construction time.
+func newTestStoreWithEnc(t *testing.T, enc *store.Encryptor) *postgres.Store {
 	t.Helper()
 	ctx := context.Background()
 
-	ctr, err := postgres.Run(ctx,
+	ctr, err := postgrescont.Run(ctx,
 		"postgres:18-alpine",
-		postgres.WithDatabase("testdb"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
+		postgrescont.WithDatabase("testdb"),
+		postgrescont.WithUsername("test"),
+		postgrescont.WithPassword("test"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2),
@@ -36,7 +50,7 @@ func newTestStore(t *testing.T) *store.Store {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	st, err := store.New(ctx, dsn)
+	st, err := postgres.New(ctx, dsn, enc)
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 
@@ -111,7 +125,7 @@ func TestGetProjectBySlug_NotFound(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func testUserAndProject(t *testing.T, st *store.Store, githubID int64) (*store.User, *store.Project) {
+func testUserAndProject(t *testing.T, st *postgres.Store, githubID int64) (*store.User, *store.Project) {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, st.UpsertUser(ctx, githubID, "u@example.com", "u"))
@@ -344,12 +358,8 @@ func TestUpdateFact(t *testing.T) {
 // --- Grants ---
 
 func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
-	st := newTestStore(t)
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
-
-	var testKey [32]byte
-	copy(testKey[:], "test-key-0123456789abcdefghijklm")
-	st.SetEncryptionKey(testKey)
 
 	require.NoError(t, st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser"))
 
@@ -377,12 +387,8 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 }
 
 func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
-	st := newTestStore(t)
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
-
-	var testKey [32]byte
-	copy(testKey[:], "test-key-0123456789abcdefghijklm")
-	st.SetEncryptionKey(testKey)
 
 	require.NoError(t, st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser"))
 
@@ -422,10 +428,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 }
 
 func TestGetGrant_NotFound(t *testing.T) {
-	st := newTestStore(t)
-	var testKey [32]byte
-	copy(testKey[:], "test-key-0123456789abcdefghijklm")
-	st.SetEncryptionKey(testKey)
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 
 	_, err := st.GetGrant(context.Background(), "no-such-jti")
 	require.ErrorIs(t, err, store.ErrNotFound)
@@ -446,7 +449,7 @@ func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 
 // --- OAuth clients ---
 
-func TestSaveOAuthClient(t *testing.T) {
+func TestSaveClient(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
@@ -463,10 +466,10 @@ func TestSaveOAuthClient(t *testing.T) {
 		ExpiresAt:               now.Add(90 * 24 * time.Hour),
 	}
 
-	require.NoError(t, st.SaveOAuthClient(ctx, c))
+	require.NoError(t, st.SaveClient(ctx, c))
 }
 
-func TestSaveOAuthClient_DuplicateClientID(t *testing.T) {
+func TestSaveClient_DuplicateClientID(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
@@ -482,9 +485,9 @@ func TestSaveOAuthClient_DuplicateClientID(t *testing.T) {
 		ExpiresAt:               now.Add(90 * 24 * time.Hour),
 	}
 
-	require.NoError(t, st.SaveOAuthClient(ctx, c))
+	require.NoError(t, st.SaveClient(ctx, c))
 
 	c.ClientName = "Second"
-	err := st.SaveOAuthClient(ctx, c)
+	err := st.SaveClient(ctx, c)
 	require.Error(t, err, "saving a duplicate client_id must return an error")
 }

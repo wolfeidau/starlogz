@@ -3,51 +3,39 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ErrNotFound is returned when a queried row does not exist.
 var ErrNotFound = errors.New("not found")
 
-// Store wraps a pgxpool and exposes domain-level query methods.
-type Store struct {
-	pool   *pgxpool.Pool
-	encKey *[32]byte
-}
+// Store is the interface satisfied by the postgres.Store implementation.
+type Store interface {
+	Ping(ctx context.Context) error
+	Migrate(ctx context.Context, logger *slog.Logger) error
+	Close()
 
-// New connects to PostgreSQL and returns a Store. Call Migrate before first use.
-func New(ctx context.Context, dsn string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
-	}
-	return &Store{pool: pool}, nil
-}
+	UpsertUser(ctx context.Context, githubID int64, email, login string) error
+	GetUserByGitHubID(ctx context.Context, githubID int64) (*User, error)
 
-// SetEncryptionKey configures the key used to encrypt and decrypt stored GitHub tokens.
-// Must be called before any grant operations.
-func (s *Store) SetEncryptionKey(key [32]byte) {
-	s.encKey = &key
-}
+	EnsureProject(ctx context.Context, ownerID uuid.UUID, slug, name string) (*Project, error)
+	ListProjects(ctx context.Context, ownerID uuid.UUID) ([]*Project, error)
+	GetProjectBySlug(ctx context.Context, ownerID uuid.UUID, slug string) (*Project, error)
 
-// Close releases all pooled connections.
-func (s *Store) Close() {
-	s.pool.Close()
-}
+	UpsertGrant(ctx context.Context, g Grant) error
+	GetGrant(ctx context.Context, jti string) (*Grant, error)
 
-// Ping verifies the database connection is alive.
-func (s *Store) Ping(ctx context.Context) error {
-	return s.pool.Ping(ctx)
-}
+	WriteFact(ctx context.Context, p WriteFactParams) (*Fact, error)
+	UpdateFact(ctx context.Context, p UpdateFactParams) (*Fact, error)
+	DeleteFact(ctx context.Context, factID uuid.UUID) error
+	SearchFacts(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Fact, error)
+	ListFacts(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Fact, error)
+	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
 
-// Migrate runs all pending SQL migrations.
-func (s *Store) Migrate(ctx context.Context, logger *slog.Logger) error {
-	return RunMigrations(ctx, s.pool, logger)
+	SaveClient(ctx context.Context, c OAuthClient) error
 }
 
 // User is a GitHub-authenticated user stored in the database.
@@ -104,4 +92,30 @@ type UpdateFactParams struct {
 type TagCount struct {
 	Name  string
 	Count int
+}
+
+// Grant holds a single authorization grant with the associated GitHub App tokens.
+// Tokens are stored encrypted at rest; this struct carries plaintext values.
+type Grant struct {
+	JTI                string
+	GitHubID           int64
+	AccessToken        string
+	RefreshToken       string
+	AccessTokenExpiry  time.Time
+	RefreshTokenExpiry time.Time
+	JWTExpiry          time.Time
+	UpdatedAt          time.Time
+}
+
+// OAuthClient is a registered OAuth2 client stored in the database.
+type OAuthClient struct {
+	ClientID                string
+	ClientName              string
+	RedirectURIs            []string
+	GrantTypes              []string
+	ResponseTypes           []string
+	TokenEndpointAuthMethod string
+	Scope                   string
+	IssuedAt                time.Time
+	ExpiresAt               time.Time
 }
