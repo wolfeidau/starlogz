@@ -42,16 +42,16 @@ type Config struct {
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
 type Server struct {
-	baseURL     *url.URL
-	privkey     jwk.Key
-	pubkey      jwk.Key
-	jwksJSON    []byte
-	authMeta    *oauthex.AuthServerMeta
-	resMeta     *oauthex.ProtectedResourceMetadata
-	github      gitHubConnector
-	users       UserUpserter
-	clients     ClientStore
-	grants      GrantStore
+	baseURL  *url.URL
+	privkey  jwk.Key
+	pubkey   jwk.Key
+	jwksJSON []byte
+	authMeta *oauthex.AuthServerMeta
+	resMeta  *oauthex.ProtectedResourceMetadata
+	github   gitHubConnector
+	users    UserUpserter
+	clients  ClientStore
+	grants   GrantStore
 
 	revokedMu sync.RWMutex
 	revoked   map[string]time.Time // jti → expiry
@@ -108,19 +108,19 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 	}
 
 	return &Server{
-		baseURL:     base,
-		privkey:     privkey,
-		pubkey:      pubkey,
-		jwksJSON:    jwksJSON,
-		authMeta:    buildAuthServerMeta(base),
-		resMeta:     buildProtectedResourceMeta(base),
-		github:      newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
-		users:       cfg.Users,
-		clients:     cfg.Clients,
-		grants:      cfg.Grants,
-		revoked:     make(map[string]time.Time),
-		pending:     make(map[string]*pendingAuth),
-		codes:       make(map[string]*pendingCode),
+		baseURL:  base,
+		privkey:  privkey,
+		pubkey:   pubkey,
+		jwksJSON: jwksJSON,
+		authMeta: buildAuthServerMeta(base),
+		resMeta:  buildProtectedResourceMeta(base),
+		github:   newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		users:    cfg.Users,
+		clients:  cfg.Clients,
+		grants:   cfg.Grants,
+		revoked:  make(map[string]time.Time),
+		pending:  make(map[string]*pendingAuth),
+		codes:    make(map[string]*pendingCode),
 	}, nil
 }
 

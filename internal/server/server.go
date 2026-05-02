@@ -112,7 +112,7 @@ func (s *Server) Run(ctx context.Context, l net.Listener) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	go func() {
+	go func() { //nolint:gosec // context.Background() is intentional: ctx is already cancelled at this point
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

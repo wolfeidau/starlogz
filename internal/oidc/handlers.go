@@ -118,6 +118,7 @@ func (s *Server) TokenHandler() http.Handler {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		if err := r.ParseForm(); err != nil {
 			writeOAuthError(w, "invalid_request", "failed to parse request body", http.StatusBadRequest)
 			return
@@ -274,7 +275,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
+		if err := json.NewEncoder(w).Encode(resp); err != nil { //nolint:gosec // intentional: DCR response includes client_secret by spec
 			slog.Default().Error("failed to write DCR response", slog.Any("error", err))
 		}
 	})

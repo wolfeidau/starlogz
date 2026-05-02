@@ -440,9 +440,9 @@ func TestAuthorizeHandler_WrongResponseType(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
 	q := url.Values{
-		"response_type": {"token"},
-		"redirect_uri":  {"https://client.example.com/callback"},
-		"code_challenge": {pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")},
+		"response_type":         {"token"},
+		"redirect_uri":          {"https://client.example.com/callback"},
+		"code_challenge":        {pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")},
 		"code_challenge_method": {"S256"},
 	}
 
@@ -705,7 +705,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	code := "grant-seam-code"
 	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
 	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
-	srv.storeCode(code, &pendingCode{
+	srv.storeCode(code, &pendingCode{ //nolint:gosec // test fixture tokens, not real credentials
 		sub:                "99887766",
 		email:              "user@example.com",
 		scope:              "facts:read",
