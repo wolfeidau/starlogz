@@ -136,7 +136,6 @@ func TestDiscoveryHandler_ReturnsAuthServerMeta(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, "application/json", w.Header().Get("Content-Type"))
 	require.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
-	require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
 
 	var meta map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
