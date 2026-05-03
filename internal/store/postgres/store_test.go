@@ -246,7 +246,7 @@ func TestDeleteFact(t *testing.T) {
 	f, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "to delete", Tags: []string{}, SourceType: "agent", CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	require.NoError(t, st.DeleteFact(ctx, f.ID))
+	require.NoError(t, st.DeleteFact(ctx, p.OrgID, f.ID))
 
 	// Deleted fact must not appear in list.
 	facts, err := st.ListFacts(ctx, p.ID, "", 10)
@@ -254,12 +254,12 @@ func TestDeleteFact(t *testing.T) {
 	require.Empty(t, facts)
 
 	// Double-delete returns ErrNotFound.
-	require.ErrorIs(t, st.DeleteFact(ctx, f.ID), store.ErrNotFound)
+	require.ErrorIs(t, st.DeleteFact(ctx, p.OrgID, f.ID), store.ErrNotFound)
 }
 
 func TestDeleteFact_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	err := st.DeleteFact(context.Background(), uuid.New())
+	err := st.DeleteFact(context.Background(), uuid.New(), uuid.New())
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
@@ -315,7 +315,7 @@ func TestListTags(t *testing.T) {
 	// Deleted facts must not contribute to counts.
 	f, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "gone", Tags: []string{"orphan"}, SourceType: "agent", CreatedBy: u.ID})
 	require.NoError(t, err)
-	require.NoError(t, st.DeleteFact(ctx, f.ID))
+	require.NoError(t, st.DeleteFact(ctx, p.OrgID, f.ID))
 
 	tags, err = st.ListTags(ctx, p.ID, 10)
 	require.NoError(t, err)
@@ -339,31 +339,31 @@ func TestUpdateFact(t *testing.T) {
 	require.NoError(t, err)
 
 	// Update content only — tags should be unchanged.
-	updated, err := st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Content: "updated content"})
+	updated, err := st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Content: "updated content"})
 	require.NoError(t, err)
 	require.Equal(t, "updated content", updated.Content)
 	require.Equal(t, []string{"v1"}, updated.Tags)
 
 	// Update tags only — content should be unchanged.
-	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Tags: []string{"v2", "patched"}})
+	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Tags: []string{"v2", "patched"}})
 	require.NoError(t, err)
 	require.Equal(t, "updated content", updated.Content)
 	require.Equal(t, []string{"v2", "patched"}, updated.Tags)
 
 	// Clear tags by passing an empty (non-nil) slice.
-	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Tags: []string{}})
+	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Tags: []string{}})
 	require.NoError(t, err)
 	require.Empty(t, updated.Tags)
 
 	// ErrNotFound on a missing fact.
 	require.ErrorIs(t, func() error {
-		_, err := st.UpdateFact(ctx, store.UpdateFactParams{FactID: uuid.New(), Content: "x"})
+		_, err := st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: uuid.New(), Content: "x"})
 		return err
 	}(), store.ErrNotFound)
 
 	// ErrNotFound after soft-delete.
-	require.NoError(t, st.DeleteFact(ctx, f.ID))
-	_, err = st.UpdateFact(ctx, store.UpdateFactParams{FactID: f.ID, Content: "too late"})
+	require.NoError(t, st.DeleteFact(ctx, p.OrgID, f.ID))
+	_, err = st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Content: "too late"})
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 

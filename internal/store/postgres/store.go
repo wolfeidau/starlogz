@@ -757,7 +757,7 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 	return tags, rows.Err()
 }
 
-// UpdateFact patches content and/or tags on an existing live fact.
+// UpdateFact patches content and/or tags on an existing live fact, scoped to orgID.
 func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*store.Fact, error) {
 	tags := p.Tags
 	if tags == nil {
@@ -769,8 +769,9 @@ func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*stor
 		  tags       = CASE WHEN $3 THEN $4 ELSE tags END,
 		  updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
+		  AND project_id IN (SELECT id FROM projects WHERE org_id = $5)
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at`,
-		p.FactID, p.Content, p.Tags != nil, tags)
+		p.FactID, p.Content, p.Tags != nil, tags, p.OrgID)
 	f, err := scanFact(row)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, store.ErrNotFound
@@ -778,11 +779,13 @@ func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*stor
 	return f, err
 }
 
-// DeleteFact soft-deletes a fact. Returns ErrNotFound if it does not exist or is already deleted.
-func (s *Store) DeleteFact(ctx context.Context, factID uuid.UUID) error {
+// DeleteFact soft-deletes a fact, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.
+func (s *Store) DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error {
 	ct, err := s.pool.Exec(ctx, `
-		UPDATE facts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
-		factID)
+		UPDATE facts SET deleted_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+		  AND project_id IN (SELECT id FROM projects WHERE org_id = $2)`,
+		factID, orgID)
 	if err != nil {
 		return fmt.Errorf("delete fact: %w", err)
 	}

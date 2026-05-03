@@ -44,7 +44,7 @@ type Store interface {
 
 	WriteFact(ctx context.Context, p WriteFactParams) (*Fact, error)
 	UpdateFact(ctx context.Context, p UpdateFactParams) (*Fact, error)
-	DeleteFact(ctx context.Context, factID uuid.UUID) error
+	DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error
 	SearchFacts(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Fact, error)
 	ListFacts(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Fact, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
@@ -107,6 +107,7 @@ type WriteFactParams struct {
 // UpdateFactParams holds the inputs for Store.UpdateFact.
 // Empty Content means no change. Nil Tags means no change; non-nil (including empty) replaces tags.
 type UpdateFactParams struct {
+	OrgID   uuid.UUID
 	FactID  uuid.UUID
 	Content string
 	Tags    []string

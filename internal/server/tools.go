@@ -252,14 +252,15 @@ func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, i
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	if _, _, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID); err != nil {
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
 		return nil, nil, err
 	}
 	factID, err := uuid.Parse(in.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
 	}
-	err = ms.store.DeleteFact(ctx, factID)
+	err = ms.store.DeleteFact(ctx, org.ID, factID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("fact %q not found or already deleted", in.ID)
 	}
@@ -336,7 +337,8 @@ func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, i
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	if _, _, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID); err != nil {
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
 		return nil, nil, err
 	}
 	factID, err := uuid.Parse(in.ID)
@@ -344,6 +346,7 @@ func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, i
 		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
 	}
 	fact, err := ms.store.UpdateFact(ctx, store.UpdateFactParams{
+		OrgID:   org.ID,
 		FactID:  factID,
 		Content: in.Content,
 		Tags:    in.Tags,
