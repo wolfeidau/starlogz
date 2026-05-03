@@ -964,19 +964,144 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 		"GitHub refresh must be called with the stored GitHub refresh token, not our opaque one")
 	require.Len(t, gs.rotateCalls, 1)
 	require.Equal(t, oldRefresh, gs.rotateCalls[0].oldToken)
+	require.Equal(t, oldJTI, gs.rotateCalls[0].oldJTI, "old jti must be passed to RotateGrant for atomic revocation")
 	require.Equal(t, "gha_new_access", gs.rotateCalls[0].grant.AccessToken)
 	require.Equal(t, "ghr_new_refresh", gs.rotateCalls[0].grant.RefreshToken)
+	rotatedJTI := gs.rotateCalls[0].grant.JTI
+	require.NotEqual(t, oldJTI, rotatedJTI, "jti must rotate")
 
-	// Old JTI must be on the revocation list.
+	// refresh_token_expires_in is recomputed from the fresh GitHub refresh token —
+	// extractRefreshExpiry falls back to ~6 months when the upstream response doesn't
+	// carry refresh_token_expires_in (which is the case for the mock).
+	exp, ok := resp["refresh_token_expires_in"].(float64)
+	require.True(t, ok)
+	require.InDelta(t, exp, (6 * 30 * 24 * time.Hour).Seconds(), 60,
+		"refresh_token_expires_in must reflect the fresh GitHub refresh window")
+
+	// Old JTI must be on the revocation list (atomic with rotation).
 	revoked, err := srv.revocation.IsTokenRevoked(context.Background(), oldJTI)
 	require.NoError(t, err)
 	require.True(t, revoked, "previous JWT jti must be revoked after rotation")
 
-	// New JWT must verify and carry the rotated jti.
+	// New JWT must verify and carry the rotated jti, not the old one.
 	tokenString, _ := resp["access_token"].(string)
 	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
+
+	parsed, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
+	require.NoError(t, err)
+	var jtiClaim string
+	require.NoError(t, parsed.Get("jti", &jtiClaim))
+	require.Equal(t, rotatedJTI, jtiClaim, "JWT jti must match the rotated grant's JTI")
+	require.NotEqual(t, oldJTI, jtiClaim)
+}
+
+func TestTokenHandler_RefreshGrant_GrantMissingGitHubRefresh(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	gs.seed(store.Grant{
+		JTI:                uuid.New().String(),
+		OurRefreshToken:    "rt-no-gh-refresh",
+		ClientID:           "test-client",
+		RefreshToken:       "", // grant exists but its GitHub refresh token field is empty
+		RefreshTokenExpiry: time.Now().Add(time.Hour),
+		JWTExpiry:          time.Now().Add(time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"rt-no-gh-refresh"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+	require.Empty(t, gh.refreshCalls, "GitHub must not be called when the stored refresh token is empty")
+	require.Empty(t, gs.rotateCalls)
+}
+
+func TestTokenHandler_RefreshGrant_UpsertUserFails(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{
+		refreshToken: &oauth2.Token{
+			AccessToken:  "gha_new",
+			RefreshToken: "ghr_new",
+			Expiry:       time.Now().Add(8 * time.Hour),
+		},
+		identity: &githubIdentity{ID: 7, Email: "u@example.com", Login: "u"},
+	}
+	srv := newRefreshTestServer(t, gs, gh)
+	srv.users = &testUserUpserter{err: fmt.Errorf("db down")}
+
+	gs.seed(store.Grant{
+		JTI:                uuid.New().String(),
+		OurRefreshToken:    "rt-upsert-fail",
+		ClientID:           "test-client",
+		RefreshToken:       "ghr-old",
+		RefreshTokenExpiry: time.Now().Add(time.Hour),
+		JWTExpiry:          time.Now().Add(time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"rt-upsert-fail"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "server_error", errResp["error"])
+	require.Empty(t, gs.rotateCalls, "must not rotate when the user upsert fails")
+}
+
+func TestTokenHandler_RefreshGrant_EmptyGrantClientIDSkipsCheck(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{
+		refreshToken: &oauth2.Token{
+			AccessToken:  "gha_new",
+			RefreshToken: "ghr_new",
+			Expiry:       time.Now().Add(8 * time.Hour),
+		},
+		identity: &githubIdentity{ID: 99, Email: "u@example.com", Login: "u"},
+	}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	gs.seed(store.Grant{
+		JTI:                uuid.New().String(),
+		OurRefreshToken:    "rt-no-clientid",
+		ClientID:           "", // grant has no stored client_id — best-effort skip per v0.2 spec
+		Scope:              "facts:read",
+		RefreshToken:       "ghr-old",
+		RefreshTokenExpiry: time.Now().Add(time.Hour),
+		JWTExpiry:          time.Now().Add(time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"rt-no-clientid"},
+		"client_id":     {"any-client-id-works"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, gs.rotateCalls, 1, "rotation must proceed when grant.ClientID is empty")
 }
 
 func TestTokenHandler_RefreshGrant_UnknownToken(t *testing.T) {
@@ -1591,10 +1716,14 @@ type upsertCall struct {
 
 type testUserUpserter struct {
 	calls []upsertCall
+	err   error
 }
 
 func (u *testUserUpserter) UpsertUser(_ context.Context, githubID int64, email, login string) (*store.User, error) {
 	u.calls = append(u.calls, upsertCall{githubID, email, login})
+	if u.err != nil {
+		return nil, u.err
+	}
 	return &store.User{ID: uuid.New(), GitHubID: githubID, Email: email, Login: login}, nil
 }
 
