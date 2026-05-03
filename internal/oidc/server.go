@@ -223,14 +223,15 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	}, nil
 }
 
-// IssueJWT signs and returns a new ES384 JWT for the given subject, email, scope, and JWT ID.
-func (s *Server) IssueJWT(sub, email, scope, jti string) (string, error) {
-	now := time.Now()
+// IssueJWT signs and returns a new ES384 JWT for the given subject, email, scope,
+// JWT ID and expiration. The caller owns expiration so the value matches what's
+// recorded in the grant row and the revoked_tokens entry.
+func (s *Server) IssueJWT(sub, email, scope, jti string, exp time.Time) (string, error) {
 	tok, err := jwt.NewBuilder().
 		Issuer(s.baseURL.String()).
 		Subject(sub).
-		IssuedAt(now).
-		Expiration(now.Add(7*24*time.Hour)).
+		IssuedAt(time.Now()).
+		Expiration(exp).
 		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
 		Claim("email", email).
 		Claim("scope", scope).

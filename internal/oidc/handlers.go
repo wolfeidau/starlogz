@@ -192,7 +192,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	jti := uuid.New().String()
 	jwtExpiry := time.Now().Add(jwtTTL)
 
-	tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti)
+	tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti, jwtExpiry)
 	if err != nil {
 		slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
@@ -297,6 +297,22 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		return
 	}
 
+	// GitHub returned a fresh access token but no new refresh token, so the chain
+	// can't continue. GitHub has already invalidated our stored refresh token in
+	// rotation; tear the grant down and force re-auth.
+	if newGHToken.RefreshToken == "" {
+		slog.Default().ErrorContext(r.Context(), "GitHub refresh response missing refresh_token; dropping grant",
+			slog.String("jti", grant.JTI))
+		if err := s.revocation.RevokeToken(r.Context(), grant.JTI, grant.JWTExpiry); err != nil {
+			slog.Default().ErrorContext(r.Context(), "revoke jti for broken grant failed", slog.Any("error", err))
+		}
+		if err := s.grants.DeleteGrant(r.Context(), grant.JTI); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
+			slog.Default().ErrorContext(r.Context(), "delete broken grant failed", slog.Any("error", err))
+		}
+		writeOAuthError(w, "invalid_grant", "GitHub did not return a new refresh token; re-authentication required", http.StatusBadRequest)
+		return
+	}
+
 	sub := strconv.FormatInt(identity.ID, 10)
 	if s.users != nil {
 		user, uErr := s.users.UpsertUser(r.Context(), identity.ID, identity.Email, identity.Login)
@@ -341,7 +357,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		return
 	}
 
-	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI)
+	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI, newJWTExpiry)
 	if err != nil {
 		slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
