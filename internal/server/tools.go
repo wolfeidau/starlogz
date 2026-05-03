@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,7 +52,7 @@ func newMCPServer(logger *slog.Logger, st store.Store) *mcpServer {
 	}, ms.factDelete)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_list",
-		Description: "Lists all projects owned by the caller.",
+		Description: "Lists all projects in the caller's personal org.",
 	}, ms.projectList)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "fact_list_tags",
@@ -139,7 +138,7 @@ func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -147,7 +146,7 @@ func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest
 	if name == "" {
 		name = in.Slug
 	}
-	project, err := ms.store.EnsureProject(ctx, user.ID, in.Slug, name)
+	project, err := ms.store.EnsureProject(ctx, org.ID, user.ID, in.Slug, name)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ensure project: %w", err)
 	}
@@ -165,11 +164,11 @@ func (ms *mcpServer) factWrite(ctx context.Context, req *mcp.CallToolRequest, in
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
-	project, err := ms.store.EnsureProject(ctx, user.ID, in.Project, in.Project)
+	project, err := ms.store.EnsureProject(ctx, org.ID, user.ID, in.Project, in.Project)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ensure project: %w", err)
 	}
@@ -198,11 +197,11 @@ func (ms *mcpServer) factSearch(ctx context.Context, req *mcp.CallToolRequest, i
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
-	project, err := ms.store.GetProjectBySlug(ctx, user.ID, in.Project)
+	project, err := ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("project %q not found", in.Project)
 	}
@@ -224,11 +223,11 @@ func (ms *mcpServer) factList(ctx context.Context, req *mcp.CallToolRequest, in 
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
-	project, err := ms.store.GetProjectBySlug(ctx, user.ID, in.Project)
+	project, err := ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("project %q not found", in.Project)
 	}
@@ -253,14 +252,15 @@ func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, i
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	if _, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID); err != nil {
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
 		return nil, nil, err
 	}
 	factID, err := uuid.Parse(in.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
 	}
-	err = ms.store.DeleteFact(ctx, factID)
+	err = ms.store.DeleteFact(ctx, org.ID, factID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("fact %q not found or already deleted", in.ID)
 	}
@@ -274,11 +274,11 @@ func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, 
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
-	projects, err := ms.store.ListProjects(ctx, user.ID)
+	projects, err := ms.store.ListProjects(ctx, org.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list projects: %w", err)
 	}
@@ -304,11 +304,11 @@ func (ms *mcpServer) factListTags(ctx context.Context, req *mcp.CallToolRequest,
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	user, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID)
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
-	project, err := ms.store.GetProjectBySlug(ctx, user.ID, in.Project)
+	project, err := ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("project %q not found", in.Project)
 	}
@@ -337,7 +337,8 @@ func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, i
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	if _, err := ms.resolveUser(ctx, req.Extra.TokenInfo.UserID); err != nil {
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
 		return nil, nil, err
 	}
 	factID, err := uuid.Parse(in.ID)
@@ -345,6 +346,7 @@ func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, i
 		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
 	}
 	fact, err := ms.store.UpdateFact(ctx, store.UpdateFactParams{
+		OrgID:   org.ID,
 		FactID:  factID,
 		Content: in.Content,
 		Tags:    in.Tags,
@@ -371,16 +373,21 @@ func requireScope(req *mcp.CallToolRequest, scope string) error {
 	return nil
 }
 
-func (ms *mcpServer) resolveUser(ctx context.Context, userIDStr string) (*store.User, error) {
-	githubID, err := strconv.ParseInt(userIDStr, 10, 64)
+// resolveUserAndOrg looks up the user by UUID (from JWT sub) and their personal org.
+func (ms *mcpServer) resolveUserAndOrg(ctx context.Context, userIDStr string) (*store.User, *store.Org, error) {
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid user ID in token: %w", err)
+		return nil, nil, fmt.Errorf("invalid user ID in token: %w", err)
 	}
-	user, err := ms.store.GetUserByGitHubID(ctx, githubID)
+	user, err := ms.store.GetUserByID(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found — please re-authenticate: %w", err)
+		return nil, nil, fmt.Errorf("user not found — please re-authenticate: %w", err)
 	}
-	return user, nil
+	org, err := ms.store.GetPersonalOrgByUserID(ctx, user.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal org not found — please re-authenticate: %w", err)
+	}
+	return user, org, nil
 }
 
 func toFactResponses(facts []*store.Fact) []factResponse {

@@ -247,9 +247,9 @@ the new `org_id`.
 ### Model
 
 - **Personal org.** Created automatically the first time a user logs in.
-  Slug defaults to the GitHub login; if that slug is already taken by an
-  existing shared org, fall back to `{login}-{github_id}`. The user is the
-  sole `owner` member.
+  Slug is set to the GitHub login as a display name only — it is not a lookup
+  key and uniqueness is not enforced for personal orgs. The user is the sole
+  `owner` member.
 - **Shared org.** Created explicitly via `org_create`. Other users join via
   invitation. Roles are `owner`, `admin`, `member`.
 - **Project.** Belongs to one org. Slug is unique within the org. Created
@@ -263,11 +263,14 @@ the new `org_id`.
 ```sql
 CREATE TABLE orgs (
     id         UUID        PRIMARY KEY DEFAULT uuidv7(),
-    slug       TEXT        NOT NULL UNIQUE,
+    slug       TEXT        NOT NULL,
     name       TEXT        NOT NULL,
     kind       TEXT        NOT NULL CHECK (kind IN ('personal', 'shared')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Only shared org slugs are unique; personal org slugs are display names only.
+CREATE UNIQUE INDEX orgs_shared_slug_unique ON orgs (slug) WHERE kind = 'shared';
 
 CREATE TABLE org_members (
     org_id  UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
@@ -299,11 +302,13 @@ The end state of migration 1 is shown in [Database schema](#database-schema).
 
 1. INSERT into `users` ON CONFLICT (github_id) DO UPDATE — returns the row
    (existing or new) and a `created` flag.
-2. If `created`: INSERT into `orgs` with `kind='personal'`,
-   `slug=COALESCE(login, login||'-'||github_id)` (collision-safe), then
-   INSERT into `org_members` with role `owner`.
-3. Both inserts use ON CONFLICT DO NOTHING so concurrent first-logins
-   from the same user (rare but possible across instances) are idempotent.
+2. If `created`: INSERT into `orgs` with `kind='personal'`, `slug=login`
+   (display name only — no uniqueness constraint), then INSERT into
+   `org_members` with role `owner`.
+3. No CONFLICT clause is needed on either insert: the org is brand-new so
+   the member row cannot already exist, and personal org slugs are not unique.
+   Concurrent first-logins from the same user serialize on the users upsert —
+   only one transaction sees `created=true`.
 
 The store interface changes from `UpsertUser(ctx, githubID, email, login)
 error` to `UpsertUser(ctx, …) (*User, error)` so the handler can pass the
@@ -457,11 +462,13 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS orgs (
     id         UUID        PRIMARY KEY DEFAULT uuidv7(),
-    slug       TEXT        NOT NULL UNIQUE,
+    slug       TEXT        NOT NULL,
     name       TEXT        NOT NULL,
     kind       TEXT        NOT NULL CHECK (kind IN ('personal', 'shared')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS orgs_shared_slug_unique ON orgs (slug) WHERE kind = 'shared';
 
 CREATE TABLE IF NOT EXISTS org_members (
     org_id    UUID        NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
@@ -576,6 +583,20 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
 CREATE INDEX IF NOT EXISTS revoked_tokens_expires_at ON revoked_tokens (expires_at);
 
 INSERT INTO schema_migrations (version) VALUES (7) ON CONFLICT DO NOTHING;
+```
+
+### Migration 8 — personal org slug display-only
+
+```sql
+-- DROP CONSTRAINT IF EXISTS handles both existing databases (constraint present)
+-- and fresh databases initialised from the updated migration 1 (constraint absent).
+ALTER TABLE orgs DROP CONSTRAINT IF EXISTS orgs_slug_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS orgs_shared_slug_unique
+    ON orgs (slug)
+    WHERE kind = 'shared';
+
+INSERT INTO schema_migrations (version) VALUES (8) ON CONFLICT DO NOTHING;
 ```
 
 ---

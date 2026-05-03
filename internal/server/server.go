@@ -22,25 +22,41 @@ import (
 const name = "starlogz-mcp-server"
 
 // Config holds all parameters needed to construct the server.
-// Accepts a parsed jwk.Key so callers (tests or CLI) can supply keys however they like.
 type Config struct {
 	BaseURL            string
 	GitHubClientID     string
 	GitHubClientSecret string
 	PrivKey            jwk.Key
 	Logger             *slog.Logger
-	Store              store.Store // nil is allowed; fact tools will return an error
+	Store              store.Store          // nil is allowed; fact tools will return an error
+	AuthState          oidc.AuthStateStore  // if nil, Store is used
+	Revocation         oidc.RevocationStore // if nil, Store is used
+	ShutdownTimeout    time.Duration
 }
 
 // Server is the configured HTTP server ready to serve requests.
 type Server struct {
-	handler http.Handler
-	logger  *slog.Logger
-	store   store.Store
+	handler         http.Handler
+	logger          *slog.Logger
+	store           store.Store
+	shutdownTimeout time.Duration
 }
 
 // New builds the mux, wires all handlers, and returns a Server.
 func New(cfg Config) (*Server, error) {
+	shutdownTimeout := cfg.ShutdownTimeout
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = 30 * time.Second
+	}
+
+	authState := cfg.AuthState
+	if authState == nil {
+		authState = cfg.Store
+	}
+	revocation := cfg.Revocation
+	if revocation == nil {
+		revocation = cfg.Store
+	}
 	oidcServer, err := oidc.NewServer(oidc.Config{
 		BaseURL:            cfg.BaseURL,
 		GitHubClientID:     cfg.GitHubClientID,
@@ -48,12 +64,14 @@ func New(cfg Config) (*Server, error) {
 		Users:              cfg.Store,
 		Clients:            cfg.Store,
 		Grants:             cfg.Store,
+		AuthState:          authState,
+		Revocation:         revocation,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)
 	}
 
-	srv := &Server{logger: cfg.Logger, store: cfg.Store}
+	srv := &Server{logger: cfg.Logger, store: cfg.Store, shutdownTimeout: shutdownTimeout}
 
 	mcpSrv := newMCPServer(cfg.Logger, cfg.Store)
 
@@ -103,8 +121,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 // Run serves on l until ctx is cancelled, then shuts down gracefully.
+// Sequence: stop accepting → drain requests (shutdownTimeout) → close DB pool.
 func (s *Server) Run(ctx context.Context, l net.Listener) error {
-	srv := &http.Server{
+	httpSrv := &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 30 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -114,12 +133,12 @@ func (s *Server) Run(ctx context.Context, l net.Listener) error {
 
 	go func() { //nolint:gosec // context.Background() is intentional: ctx is already cancelled at this point
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		_ = httpSrv.Shutdown(shutdownCtx)
 	}()
 
-	if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := httpSrv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil

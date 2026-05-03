@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,13 +28,94 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// --- In-memory test implementations ---
+
+type inMemAuthState struct {
+	mu      sync.Mutex
+	pending map[string]store.PendingAuth
+	codes   map[string]store.AuthCode
+}
+
+func newInMemAuthState() *inMemAuthState {
+	return &inMemAuthState{
+		pending: make(map[string]store.PendingAuth),
+		codes:   make(map[string]store.AuthCode),
+	}
+}
+
+func (s *inMemAuthState) StorePendingAuth(_ context.Context, state string, p store.PendingAuth) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pending[state] = p
+	return nil
+}
+
+func (s *inMemAuthState) ConsumePendingAuth(_ context.Context, state string) (*store.PendingAuth, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.pending[state]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(s.pending, state)
+	return &p, nil
+}
+
+func (s *inMemAuthState) StoreAuthCode(_ context.Context, code string, c store.AuthCode) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codes[code] = c
+	return nil
+}
+
+func (s *inMemAuthState) ConsumeAuthCode(_ context.Context, code string) (*store.AuthCode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.codes[code]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(s.codes, code)
+	return &c, nil
+}
+
+type inMemRevocation struct {
+	mu      sync.RWMutex
+	revoked map[string]time.Time
+}
+
+func newInMemRevocation() *inMemRevocation {
+	return &inMemRevocation{revoked: make(map[string]time.Time)}
+}
+
+func (r *inMemRevocation) RevokeToken(_ context.Context, jti string, expiresAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.revoked[jti] = expiresAt
+	return nil
+}
+
+func (r *inMemRevocation) IsTokenRevoked(_ context.Context, jti string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	exp, ok := r.revoked[jti]
+	if !ok {
+		return false, nil
+	}
+	return exp.After(time.Now()), nil
+}
+
 func newTestOIDCServer(t *testing.T) *Server {
 	t.Helper()
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
 	raw, err := jwk.Import(privkey)
 	require.NoError(t, err)
-	srv, err := NewServer(Config{BaseURL: "http://example.com"}, raw)
+	srv, err := NewServer(Config{
+		BaseURL:    "http://example.com",
+		AuthState:  newInMemAuthState(),
+		Revocation: newInMemRevocation(),
+	}, raw)
 	require.NoError(t, err)
 	return srv
 }
@@ -133,10 +215,8 @@ func TestDiscoveryHandler_RFC8414_SpecCompliance(t *testing.T) {
 	var meta oauthex.AuthServerMeta
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
 
-	// RFC 8414 §2: issuer MUST be present and MUST be an https or http URL.
 	require.NotEmpty(t, meta.Issuer)
 
-	// All endpoint URLs must share the same origin as the issuer.
 	for _, ep := range []string{
 		meta.AuthorizationEndpoint,
 		meta.TokenEndpoint,
@@ -147,17 +227,10 @@ func TestDiscoveryHandler_RFC8414_SpecCompliance(t *testing.T) {
 		require.True(t, strings.HasPrefix(ep, meta.Issuer), "endpoint %q must be under issuer %q", ep, meta.Issuer)
 	}
 
-	// v0.1 only supports authorization_code with PKCE — no implicit, no refresh tokens.
 	require.Equal(t, []string{"code"}, meta.ResponseTypesSupported)
 	require.Equal(t, []string{"authorization_code"}, meta.GrantTypesSupported)
-
-	// PKCE is mandatory: only S256 is advertised (RFC 7636).
 	require.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
-
-	// Public clients only (RFC 7591 §2): no client_secret issued.
 	require.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
-
-	// All three application scopes must be advertised.
 	require.ElementsMatch(t, []string{"facts:read", "facts:write", "org:admin"}, meta.ScopesSupported)
 }
 
@@ -173,23 +246,15 @@ func TestProtectedResourceMetadata_RFC9728_SpecCompliance(t *testing.T) {
 	var meta oauthex.ProtectedResourceMetadata
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
 
-	// RFC 9728 §3: resource MUST identify the protected resource (the MCP endpoint).
 	require.NotEmpty(t, meta.Resource)
 	require.True(t, strings.HasSuffix(meta.Resource, "/mcp"), "resource %q must end in /mcp", meta.Resource)
 
-	// authorization_servers must contain the issuer URL, NOT the discovery URL.
-	// MCP clients construct the discovery URL themselves from the issuer (auth.md §Discovery documents).
 	require.Len(t, meta.AuthorizationServers, 1)
 	issuer := meta.AuthorizationServers[0]
 	require.NotContains(t, issuer, ".well-known", "authorization_servers must be the issuer, not the discovery URL")
 
-	// The issuer must also be the base of the resource URL.
 	require.True(t, strings.HasPrefix(meta.Resource, issuer), "resource %q must be under issuer %q", meta.Resource, issuer)
-
-	// Only Bearer header transport is supported (no query-param or form-body).
 	require.Equal(t, []string{"header"}, meta.BearerMethodsSupported)
-
-	// All three application scopes must be advertised.
 	require.ElementsMatch(t, []string{"facts:read", "facts:write", "org:admin"}, meta.ScopesSupported)
 }
 
@@ -198,7 +263,6 @@ func TestProtectedResourceMetadata_RFC9728_SpecCompliance(t *testing.T) {
 func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	// Fetch the JWKS and extract the single key's kid.
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks", nil)
 	w := httptest.NewRecorder()
 	srv.JWKSHandler().ServeHTTP(w, req)
@@ -215,7 +279,6 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	jwksKid := keySet.Keys[0].Kid
 	require.NotEmpty(t, jwksKid)
 
-	// Issue a JWT and decode its header to read the kid claim.
 	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
@@ -251,10 +314,9 @@ func TestDCRHandler_Success(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.NotEmpty(t, resp["client_id"])
-	require.Empty(t, resp["client_secret"]) // public clients only — no secret issued
+	require.Empty(t, resp["client_secret"])
 	require.NotZero(t, resp["client_id_issued_at"])
 
-	// Unsupported grant types normalised to authorization_code only (RFC 7591 §3.2.1)
 	grants, ok := resp["grant_types"].([]any)
 	require.True(t, ok)
 	require.Equal(t, []any{"authorization_code"}, grants)
@@ -294,7 +356,6 @@ func TestDCRHandler_UnsupportedAuthMethod(t *testing.T) {
 func TestDCRHandler_DefaultsApplied(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	// Minimal request — grant_types, response_types, and auth method should be defaulted
 	body := `{"redirect_uris":["https://client.example.com/callback"]}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -351,7 +412,6 @@ func TestAuthorizeHandler_DefaultsScope(t *testing.T) {
 		"redirect_uri":          {"https://client.example.com/callback"},
 		"code_challenge":        {pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")},
 		"code_challenge_method": {"S256"},
-		// no scope — server should default to facts:read
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
@@ -471,14 +531,14 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "test-auth-code-abc123"
-	srv.storeCode(code, &pendingCode{
-		sub:           "12345678",
-		email:         "user@example.com",
-		scope:         "facts:read facts:write",
-		codeChallenge: pkceChallenge(verifier),
-		redirectURI:   "https://client.example.com/callback",
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+		Sub:           "12345678",
+		GitHubID:      12345678,
+		Email:         "user@example.com",
+		Scope:         "facts:read facts:write",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   "https://client.example.com/callback",
+	}))
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -502,7 +562,6 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 	require.Equal(t, "Bearer", resp["token_type"])
 	require.Equal(t, "facts:read facts:write", resp["scope"])
 
-	// Issued JWT must be verifiable
 	tokenString, ok := resp["access_token"].(string)
 	require.True(t, ok)
 	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -515,14 +574,14 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "one-time-code-xyz"
-	srv.storeCode(code, &pendingCode{
-		sub:           "12345678",
-		email:         "user@example.com",
-		scope:         "facts:read",
-		codeChallenge: pkceChallenge(verifier),
-		redirectURI:   "https://client.example.com/callback",
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+		Sub:           "12345678",
+		GitHubID:      12345678,
+		Email:         "user@example.com",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   "https://client.example.com/callback",
+	}))
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -574,14 +633,14 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
 	code := "pkce-mismatch-code"
-	srv.storeCode(code, &pendingCode{
-		sub:           "12345678",
-		email:         "user@example.com",
-		scope:         "facts:read",
-		codeChallenge: pkceChallenge("correct-verifier-that-is-long-enough-to-be-valid"),
-		redirectURI:   "https://client.example.com/callback",
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+		Sub:           "12345678",
+		GitHubID:      12345678,
+		Email:         "user@example.com",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge("correct-verifier-that-is-long-enough-to-be-valid"),
+		RedirectURI:   "https://client.example.com/callback",
+	}))
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -606,14 +665,14 @@ func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "redirect-mismatch-code"
-	srv.storeCode(code, &pendingCode{
-		sub:           "12345678",
-		email:         "user@example.com",
-		scope:         "facts:read",
-		codeChallenge: pkceChallenge(verifier),
-		redirectURI:   "https://client.example.com/callback",
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+		Sub:           "12345678",
+		GitHubID:      12345678,
+		Email:         "user@example.com",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   "https://client.example.com/callback",
+	}))
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -638,14 +697,14 @@ func TestTokenHandler_MissingRedirectURI(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "missing-redirect-code"
-	srv.storeCode(code, &pendingCode{
-		sub:           "12345678",
-		email:         "user@example.com",
-		scope:         "facts:read",
-		codeChallenge: pkceChallenge(verifier),
-		redirectURI:   "https://client.example.com/callback",
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+		Sub:           "12345678",
+		GitHubID:      12345678,
+		Email:         "user@example.com",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   "https://client.example.com/callback",
+	}))
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -698,25 +757,31 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	require.NoError(t, err)
 
 	gs := &testGrantStore{}
-	srv, err := NewServer(Config{BaseURL: "http://example.com", Grants: gs}, raw)
+	authState := newInMemAuthState()
+	srv, err := NewServer(Config{
+		BaseURL:    "http://example.com",
+		Grants:     gs,
+		AuthState:  authState,
+		Revocation: newInMemRevocation(),
+	}, raw)
 	require.NoError(t, err)
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "grant-seam-code"
 	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
 	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
-	srv.storeCode(code, &pendingCode{ //nolint:gosec // test fixture tokens, not real credentials
-		sub:                "99887766",
-		email:              "user@example.com",
-		scope:              "facts:read",
-		codeChallenge:      pkceChallenge(verifier),
-		redirectURI:        "https://client.example.com/callback",
-		createdAt:          time.Now(),
-		accessToken:        "gha_access_abc",
-		refreshToken:       "ghr_refresh_xyz",
-		accessTokenExpiry:  accessExpiry,
-		refreshTokenExpiry: refreshExpiry,
-	})
+	require.NoError(t, authState.StoreAuthCode(context.Background(), code, store.AuthCode{ //nolint:gosec // test fixture tokens, not real credentials
+		Sub:                "99887766",
+		GitHubID:           99887766,
+		Email:              "user@example.com",
+		Scope:              "facts:read",
+		CodeChallenge:      pkceChallenge(verifier),
+		RedirectURI:        "https://client.example.com/callback",
+		AccessToken:        "gha_access_abc",
+		RefreshToken:       "ghr_refresh_xyz",
+		AccessTokenExpiry:  accessExpiry,
+		RefreshTokenExpiry: refreshExpiry,
+	}))
 
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -764,12 +829,11 @@ func TestGitHubCallbackHandler_ExchangeError(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	srv.github = &mockGitHubConnector{err: fmt.Errorf("GitHub is down")}
 
-	srv.storePending("valid-state", &pendingAuth{
-		redirectURI:   "https://client.example.com/callback",
-		scope:         "facts:read",
-		codeChallenge: pkceChallenge("verifier"),
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StorePendingAuth(context.Background(), "valid-state", store.PendingAuth{
+		RedirectURI:   "https://client.example.com/callback",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge("verifier"),
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=valid-state&code=bad-code", nil)
 	w := httptest.NewRecorder()
@@ -790,12 +854,11 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 		},
 	}
 
-	srv.storePending("cb-state", &pendingAuth{
-		redirectURI:   "https://client.example.com/callback",
-		scope:         "facts:read",
-		codeChallenge: pkceChallenge("verifier"),
-		createdAt:     time.Now(),
-	})
+	require.NoError(t, srv.authState.StorePendingAuth(context.Background(), "cb-state", store.PendingAuth{
+		RedirectURI:   "https://client.example.com/callback",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge("verifier"),
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=cb-state&code=code", nil)
 	w := httptest.NewRecorder()
@@ -807,7 +870,6 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 	require.Equal(t, "dev@example.com", us.calls[0].email)
 	require.Equal(t, "devuser", us.calls[0].login)
 
-	// Authorization code must be set in the redirect location.
 	loc := w.Header().Get("Location")
 	require.Contains(t, loc, "code=")
 }
@@ -820,7 +882,6 @@ func TestLogoutHandler_RevokesToken(t *testing.T) {
 	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
-	// Token must be valid before logout
 	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
 	require.NoError(t, err)
 
@@ -830,7 +891,6 @@ func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv.LogoutHandler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
 
-	// Token must be rejected after logout
 	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
 	require.Error(t, err)
 }
@@ -899,7 +959,6 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String())
 	require.NoError(t, err)
 
-	// Manually revoke by extracting jti via logout handler
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req.Header.Set("Authorization", "Bearer "+tokenString)
 	srv.LogoutHandler().ServeHTTP(httptest.NewRecorder(), req)
@@ -926,7 +985,6 @@ func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 
 // --- VerifyJWT aud / iss validation ---
 
-// signCustomToken builds and signs a JWT with the server's private key, using the given claims.
 func signCustomToken(t *testing.T, srv *Server, extra func(*jwt.Builder)) string {
 	t.Helper()
 	b := jwt.NewBuilder().
@@ -950,8 +1008,6 @@ func signCustomToken(t *testing.T, srv *Server, extra func(*jwt.Builder)) string
 func TestVerifyJWT_MissingAud(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	// Build a token that intentionally omits the aud claim by overriding it with empty.
-	// Because jwt.Builder stores claims by key, setting aud to nil removes it.
 	tok, err := jwt.NewBuilder().
 		Issuer("http://example.com").
 		Subject("12345678").
@@ -1039,6 +1095,18 @@ func (s *testGrantStore) UpsertGrant(_ context.Context, g store.Grant) error {
 	return nil
 }
 
+func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, _ string) (*store.Grant, error) {
+	return nil, store.ErrNotFound
+}
+
+func (s *testGrantStore) RotateGrant(_ context.Context, _ string, _ store.Grant) (*store.Grant, error) {
+	return nil, store.ErrNotFound
+}
+
+func (s *testGrantStore) DeleteGrant(_ context.Context, _ string) error {
+	return nil
+}
+
 type upsertCall struct {
 	githubID int64
 	email    string
@@ -1049,9 +1117,9 @@ type testUserUpserter struct {
 	calls []upsertCall
 }
 
-func (u *testUserUpserter) UpsertUser(_ context.Context, githubID int64, email, login string) error {
+func (u *testUserUpserter) UpsertUser(_ context.Context, githubID int64, email, login string) (*store.User, error) {
 	u.calls = append(u.calls, upsertCall{githubID, email, login})
-	return nil
+	return &store.User{ID: uuid.New(), GitHubID: githubID, Email: email, Login: login}, nil
 }
 
 type mockGitHubConnector struct {

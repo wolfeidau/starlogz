@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -39,26 +40,73 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
-// Migrate runs all pending SQL migrations.
+// Migrate runs all pending SQL migrations under an advisory lock.
 func (s *Store) Migrate(ctx context.Context, logger *slog.Logger) error {
 	return RunMigrations(ctx, s.pool, logger)
 }
 
-// UpsertUser creates or updates the user record from GitHub identity.
-// Implements oidc.UserUpserter.
-func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login string) error {
-	_, err := s.pool.Exec(ctx, `
+// UpsertUser creates or updates a user from GitHub identity. On first login a personal org
+// is created and the user is added as owner. Returns the user row.
+func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login string) (*store.User, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var idStr string
+	u := &store.User{}
+	var created bool
+	err = tx.QueryRow(ctx, `
 		INSERT INTO users (github_id, email, login)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (github_id) DO UPDATE
 		    SET email      = EXCLUDED.email,
 		        login      = EXCLUDED.login,
-		        updated_at = now()`,
-		githubID, email, login)
+		        updated_at = now()
+		RETURNING id, github_id, email, login, created_at, updated_at,
+		          (xmax = 0) AS created`,
+		githubID, email, login).
+		Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.CreatedAt, &u.UpdatedAt, &created)
 	if err != nil {
-		return fmt.Errorf("upsert user: %w", err)
+		return nil, fmt.Errorf("upsert user: %w", err)
 	}
-	return nil
+	if u.ID, err = uuid.Parse(idStr); err != nil {
+		return nil, fmt.Errorf("parse user id: %w", err)
+	}
+
+	if created {
+		// Personal org slug is the GitHub login used as a display name only.
+		// Uniqueness is not enforced for personal orgs — they are resolved via
+		// user ID, never by slug lookup.
+		var orgIDStr string
+		err = tx.QueryRow(ctx, `
+			INSERT INTO orgs (slug, name, kind)
+			VALUES ($1, $2, 'personal')
+			RETURNING id`,
+			login, login).Scan(&orgIDStr)
+		if err != nil {
+			return nil, fmt.Errorf("insert personal org: %w", err)
+		}
+
+		orgID, parseErr := uuid.Parse(orgIDStr)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse org id: %w", parseErr)
+		}
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO org_members (org_id, user_id, role)
+			VALUES ($1, $2, 'owner')`,
+			orgID, u.ID)
+		if err != nil {
+			return nil, fmt.Errorf("insert org member: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+	return u, nil
 }
 
 // GetUserByGitHubID looks up a user by GitHub numeric ID.
@@ -76,84 +124,144 @@ func (s *Store) GetUserByGitHubID(ctx context.Context, githubID int64) (*store.U
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
 	}
-	if u.ID, err = uuid.Parse(idStr); err != nil {
-		return nil, fmt.Errorf("parse user id: %w", err)
+	var parseErr error
+	if u.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+		return nil, fmt.Errorf("parse user id: %w", parseErr)
 	}
 	return u, nil
 }
 
+// GetUserByID looks up a user by internal UUID.
+// Returns ErrNotFound if no matching row exists.
+func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*store.User, error) {
+	u := &store.User{}
+	var idStr string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, github_id, email, login, created_at, updated_at
+		FROM users WHERE id = $1`,
+		id).Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by id: %w", err)
+	}
+	var parseErr error
+	if u.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+		return nil, fmt.Errorf("parse user id: %w", parseErr)
+	}
+	return u, nil
+}
+
+// GetPersonalOrgByUserID returns the personal org for the given user.
+// Returns ErrNotFound if the user has no personal org.
+func (s *Store) GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*store.Org, error) {
+	o := &store.Org{}
+	var idStr string
+	err := s.pool.QueryRow(ctx, `
+		SELECT o.id, o.slug, o.name, o.kind, o.created_at
+		FROM orgs o
+		JOIN org_members om ON om.org_id = o.id
+		WHERE om.user_id = $1 AND o.kind = 'personal'`,
+		userID).Scan(&idStr, &o.Slug, &o.Name, &o.Kind, &o.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get personal org: %w", err)
+	}
+	var parseErr error
+	if o.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+		return nil, fmt.Errorf("parse org id: %w", parseErr)
+	}
+	return o, nil
+}
+
 // EnsureProject creates the project if it does not exist and returns it.
 // If it already exists the name is updated to match the provided value.
-func (s *Store) EnsureProject(ctx context.Context, ownerID uuid.UUID, slug, name string) (*store.Project, error) {
-	var idStr, ownerIDStr string
+func (s *Store) EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*store.Project, error) {
 	p := &store.Project{}
+	var idStr, orgIDStr, createdByStr string
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO projects (owner_id, slug, name)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (owner_id, slug) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id, owner_id, slug, name, created_at`,
-		ownerID, slug, name).Scan(&idStr, &ownerIDStr, &p.Slug, &p.Name, &p.CreatedAt)
+		INSERT INTO projects (org_id, created_by, slug, name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (org_id, slug) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id, org_id, created_by, slug, name, created_at`,
+		orgID, createdBy, slug, name).
+		Scan(&idStr, &orgIDStr, &createdByStr, &p.Slug, &p.Name, &p.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("ensure project: %w", err)
 	}
-	if p.ID, err = uuid.Parse(idStr); err != nil {
-		return nil, fmt.Errorf("parse project id: %w", err)
+	var parseErr error
+	if p.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+		return nil, fmt.Errorf("parse project id: %w", parseErr)
 	}
-	if p.OwnerID, err = uuid.Parse(ownerIDStr); err != nil {
-		return nil, fmt.Errorf("parse owner id: %w", err)
+	if p.OrgID, parseErr = uuid.Parse(orgIDStr); parseErr != nil {
+		return nil, fmt.Errorf("parse org id: %w", parseErr)
+	}
+	if p.CreatedBy, parseErr = uuid.Parse(createdByStr); parseErr != nil {
+		return nil, fmt.Errorf("parse created_by: %w", parseErr)
 	}
 	return p, nil
 }
 
-// ListProjects returns all projects owned by the caller, ordered by name.
-func (s *Store) ListProjects(ctx context.Context, ownerID uuid.UUID) ([]*store.Project, error) {
+// ListProjects returns all projects in the org, ordered by name.
+func (s *Store) ListProjects(ctx context.Context, orgID uuid.UUID) ([]*store.Project, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, owner_id, slug, name, created_at
-		FROM projects WHERE owner_id = $1
+		SELECT id, org_id, created_by, slug, name, created_at
+		FROM projects WHERE org_id = $1
 		ORDER BY name`,
-		ownerID)
+		orgID)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 	defer rows.Close()
 	var projects []*store.Project
 	for rows.Next() {
-		var idStr, ownerIDStr string
 		p := &store.Project{}
-		if err := rows.Scan(&idStr, &ownerIDStr, &p.Slug, &p.Name, &p.CreatedAt); err != nil {
+		var idStr, orgIDStr, createdByStr string
+		if err := rows.Scan(&idStr, &orgIDStr, &createdByStr, &p.Slug, &p.Name, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}
-		if p.ID, err = uuid.Parse(idStr); err != nil {
-			return nil, fmt.Errorf("parse project id: %w", err)
+		var parseErr error
+		if p.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+			return nil, fmt.Errorf("parse project id: %w", parseErr)
 		}
-		if p.OwnerID, err = uuid.Parse(ownerIDStr); err != nil {
-			return nil, fmt.Errorf("parse owner id: %w", err)
+		if p.OrgID, parseErr = uuid.Parse(orgIDStr); parseErr != nil {
+			return nil, fmt.Errorf("parse org id: %w", parseErr)
+		}
+		if p.CreatedBy, parseErr = uuid.Parse(createdByStr); parseErr != nil {
+			return nil, fmt.Errorf("parse created_by: %w", parseErr)
 		}
 		projects = append(projects, p)
 	}
 	return projects, rows.Err()
 }
 
-// GetProjectBySlug fetches a project by owner and slug.
+// GetProjectBySlug fetches a project by org and slug.
 // Returns ErrNotFound if no matching row exists.
-func (s *Store) GetProjectBySlug(ctx context.Context, ownerID uuid.UUID, slug string) (*store.Project, error) {
-	var idStr, ownerIDStr string
+func (s *Store) GetProjectBySlug(ctx context.Context, orgID uuid.UUID, slug string) (*store.Project, error) {
 	p := &store.Project{}
+	var idStr, orgIDStr, createdByStr string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, owner_id, slug, name, created_at
-		FROM projects WHERE owner_id = $1 AND slug = $2`,
-		ownerID, slug).Scan(&idStr, &ownerIDStr, &p.Slug, &p.Name, &p.CreatedAt)
+		SELECT id, org_id, created_by, slug, name, created_at
+		FROM projects WHERE org_id = $1 AND slug = $2`,
+		orgID, slug).Scan(&idStr, &orgIDStr, &createdByStr, &p.Slug, &p.Name, &p.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get project: %w", err)
 	}
-	if p.ID, err = uuid.Parse(idStr); err != nil {
-		return nil, fmt.Errorf("parse project id: %w", err)
+	var parseErr error
+	if p.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+		return nil, fmt.Errorf("parse project id: %w", parseErr)
 	}
-	if p.OwnerID, err = uuid.Parse(ownerIDStr); err != nil {
-		return nil, fmt.Errorf("parse owner id: %w", err)
+	if p.OrgID, parseErr = uuid.Parse(orgIDStr); parseErr != nil {
+		return nil, fmt.Errorf("parse org id: %w", parseErr)
+	}
+	if p.CreatedBy, parseErr = uuid.Parse(createdByStr); parseErr != nil {
+		return nil, fmt.Errorf("parse created_by: %w", parseErr)
 	}
 	return p, nil
 }
@@ -179,18 +287,30 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	var ourRefreshToken *string
+	if g.OurRefreshToken != "" {
+		ourRefreshToken = &g.OurRefreshToken
+	}
+	var clientID *string
+	if g.ClientID != "" {
+		clientID = &g.ClientID
+	}
+
 	_, err = tx.Exec(ctx, `
-		INSERT INTO grants (jti, github_id, access_token, refresh_token,
+		INSERT INTO grants (jti, github_id, our_refresh_token, client_id,
+		                    access_token, refresh_token,
 		                    access_token_expiry, refresh_token_expiry, jwt_expiry)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (jti) DO UPDATE
-		    SET access_token          = EXCLUDED.access_token,
+		    SET our_refresh_token     = EXCLUDED.our_refresh_token,
+		        client_id             = EXCLUDED.client_id,
+		        access_token          = EXCLUDED.access_token,
 		        refresh_token         = EXCLUDED.refresh_token,
 		        access_token_expiry   = EXCLUDED.access_token_expiry,
 		        refresh_token_expiry  = EXCLUDED.refresh_token_expiry,
 		        jwt_expiry            = EXCLUDED.jwt_expiry,
 		        updated_at            = now()`,
-		g.JTI, g.GitHubID, encAccess, encRefresh,
+		g.JTI, g.GitHubID, ourRefreshToken, clientID, encAccess, encRefresh,
 		g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
 	)
 	if err != nil {
@@ -213,32 +333,304 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
 	}
+	return s.scanGrant(s.pool.QueryRow(ctx, `
+		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''),
+		       access_token, refresh_token,
+		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
+		FROM grants WHERE jti = $1`, jti))
+}
+
+// GetGrantByRefreshToken fetches and decrypts a grant by our_refresh_token.
+func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("encryption key not configured")
+	}
+	return s.scanGrant(s.pool.QueryRow(ctx, `
+		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''),
+		       access_token, refresh_token,
+		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
+		FROM grants WHERE our_refresh_token = $1`, token))
+}
+
+func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	var g store.Grant
 	var encAccess, encRefresh []byte
-
-	err := s.pool.QueryRow(ctx, `
-		SELECT jti, github_id, access_token, refresh_token,
-		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
-		FROM grants WHERE jti = $1`, jti).
-		Scan(&g.JTI, &g.GitHubID, &encAccess, &encRefresh,
-			&g.AccessTokenExpiry, &g.RefreshTokenExpiry, &g.JWTExpiry, &g.UpdatedAt)
+	err := row.Scan(&g.JTI, &g.GitHubID, &g.OurRefreshToken, &g.ClientID,
+		&encAccess, &encRefresh,
+		&g.AccessTokenExpiry, &g.RefreshTokenExpiry, &g.JWTExpiry, &g.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get grant: %w", err)
+		return nil, fmt.Errorf("scan grant: %w", err)
 	}
 
-	g.AccessToken, err = s.enc.Open(encAccess)
+	var decErr error
+	g.AccessToken, decErr = s.enc.Open(encAccess)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt access token: %w", decErr)
+	}
+	g.RefreshToken, decErr = s.enc.Open(encRefresh)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt refresh token: %w", decErr)
+	}
+	return &g, nil
+}
+
+// RotateGrant atomically replaces a grant row identified by oldToken with the new values in g.
+// Returns ErrNotFound if oldToken does not match any row (concurrent rotation race).
+func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant) (*store.Grant, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("encryption key not configured")
+	}
+	encAccess, err := s.enc.Seal(g.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt access token: %w", err)
+	}
+	encRefresh, err := s.enc.Seal(g.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt refresh token: %w", err)
+	}
+
+	var ourRefreshToken *string
+	if g.OurRefreshToken != "" {
+		ourRefreshToken = &g.OurRefreshToken
+	}
+	var clientID *string
+	if g.ClientID != "" {
+		clientID = &g.ClientID
+	}
+
+	var updated store.Grant
+	var encA, encR []byte
+	err = s.pool.QueryRow(ctx, `
+		UPDATE grants
+		SET jti                  = $2,
+		    our_refresh_token    = $3,
+		    client_id            = $4,
+		    access_token         = $5,
+		    refresh_token        = $6,
+		    access_token_expiry  = $7,
+		    refresh_token_expiry = $8,
+		    jwt_expiry           = $9,
+		    updated_at           = now()
+		WHERE our_refresh_token = $1
+		RETURNING jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''),
+		          access_token, refresh_token,
+		          access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at`,
+		oldToken, g.JTI, ourRefreshToken, clientID,
+		encAccess, encRefresh, g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
+	).Scan(&updated.JTI, &updated.GitHubID, &updated.OurRefreshToken, &updated.ClientID,
+		&encA, &encR,
+		&updated.AccessTokenExpiry, &updated.RefreshTokenExpiry, &updated.JWTExpiry, &updated.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("rotate grant: %w", err)
+	}
+
+	updated.AccessToken, err = s.enc.Open(encA)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt access token: %w", err)
 	}
-	g.RefreshToken, err = s.enc.Open(encRefresh)
+	updated.RefreshToken, err = s.enc.Open(encR)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt refresh token: %w", err)
 	}
+	return &updated, nil
+}
 
-	return &g, nil
+// DeleteGrant removes a grant row by jti.
+func (s *Store) DeleteGrant(ctx context.Context, jti string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM grants WHERE jti = $1`, jti)
+	if err != nil {
+		return fmt.Errorf("delete grant: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+// StorePendingAuth persists an authorization state with a 10-minute TTL.
+// Lazily prunes all expired rows in the same transaction.
+func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO pending_auths (state, client_id, redirect_uri, scope, code_challenge, client_state, expires_at)
+		VALUES ($1, NULLIF($2,''), $3, $4, $5, NULLIF($6,''), now() + interval '10 minutes')`,
+		state, p.ClientID, p.RedirectURI, p.Scope, p.CodeChallenge, p.ClientState)
+	if err != nil {
+		return fmt.Errorf("insert pending auth: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM pending_auths WHERE expires_at < now()`)
+	if err != nil {
+		return fmt.Errorf("prune pending auths: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ConsumePendingAuth atomically deletes and returns the pending auth for the given state.
+// Returns ErrNotFound for unknown or expired states.
+func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.PendingAuth, error) {
+	p := &store.PendingAuth{}
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM pending_auths
+		WHERE state = $1 AND expires_at > now()
+		RETURNING COALESCE(client_id,''), redirect_uri, scope, code_challenge, COALESCE(client_state,'')`,
+		state).Scan(&p.ClientID, &p.RedirectURI, &p.Scope, &p.CodeChallenge, &p.ClientState)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("consume pending auth: %w", err)
+	}
+	return p, nil
+}
+
+// StoreAuthCode persists an authorization code with a 5-minute TTL.
+// Lazily prunes all expired rows in the same transaction.
+func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode) error {
+	if s.enc == nil {
+		return fmt.Errorf("encryption key not configured")
+	}
+
+	encAccess := []byte{}
+	encRefresh := []byte{}
+	var err error
+	if c.AccessToken != "" {
+		encAccess, err = s.enc.Seal(c.AccessToken)
+		if err != nil {
+			return fmt.Errorf("encrypt access token: %w", err)
+		}
+	}
+	if c.RefreshToken != "" {
+		encRefresh, err = s.enc.Seal(c.RefreshToken)
+		if err != nil {
+			return fmt.Errorf("encrypt refresh token: %w", err)
+		}
+	}
+
+	var accessExpiry, refreshExpiry *time.Time
+	if !c.AccessTokenExpiry.IsZero() {
+		accessExpiry = &c.AccessTokenExpiry
+	}
+	if !c.RefreshTokenExpiry.IsZero() {
+		refreshExpiry = &c.RefreshTokenExpiry
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO auth_codes
+		    (code, sub, github_id, email, scope, code_challenge, redirect_uri, client_id,
+		     access_token, refresh_token, access_token_expiry, refresh_token_expiry, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, $11, $12,
+		        now() + interval '5 minutes')`,
+		code, c.Sub, c.GitHubID, c.Email, c.Scope, c.CodeChallenge, c.RedirectURI, c.ClientID,
+		encAccess, encRefresh, accessExpiry, refreshExpiry)
+	if err != nil {
+		return fmt.Errorf("insert auth code: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM auth_codes WHERE expires_at < now()`)
+	if err != nil {
+		return fmt.Errorf("prune auth codes: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ConsumeAuthCode atomically deletes and returns the auth code record.
+// Returns ErrNotFound for unknown or expired codes.
+func (s *Store) ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCode, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("encryption key not configured")
+	}
+
+	c := &store.AuthCode{}
+	var encAccess, encRefresh []byte
+	var clientID *string
+	var accessExpiry, refreshExpiry *time.Time
+
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM auth_codes
+		WHERE code = $1 AND expires_at > now()
+		RETURNING sub, github_id, email, scope, code_challenge, redirect_uri,
+		          COALESCE(client_id,''), access_token, refresh_token,
+		          access_token_expiry, refresh_token_expiry`,
+		code).Scan(&c.Sub, &c.GitHubID, &c.Email, &c.Scope, &c.CodeChallenge, &c.RedirectURI,
+		&clientID, &encAccess, &encRefresh, &accessExpiry, &refreshExpiry)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("consume auth code: %w", err)
+	}
+	if clientID != nil {
+		c.ClientID = *clientID
+	}
+	if accessExpiry != nil {
+		c.AccessTokenExpiry = *accessExpiry
+	}
+	if refreshExpiry != nil {
+		c.RefreshTokenExpiry = *refreshExpiry
+	}
+
+	if len(encAccess) > 0 {
+		c.AccessToken, err = s.enc.Open(encAccess)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt access token: %w", err)
+		}
+	}
+	if len(encRefresh) > 0 {
+		c.RefreshToken, err = s.enc.Open(encRefresh)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt refresh token: %w", err)
+		}
+	}
+	return c, nil
+}
+
+// RevokeToken inserts a jti into the revoked_tokens table.
+// Idempotent on duplicate jti. Lazily prunes expired rows.
+func (s *Store) RevokeToken(ctx context.Context, jti string, expiresAt time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		WITH ins AS (
+		    INSERT INTO revoked_tokens (jti, expires_at)
+		    VALUES ($1, $2)
+		    ON CONFLICT (jti) DO NOTHING
+		)
+		DELETE FROM revoked_tokens WHERE expires_at < now()`,
+		jti, expiresAt)
+	if err != nil {
+		return fmt.Errorf("revoke token: %w", err)
+	}
+	return nil
+}
+
+// IsTokenRevoked returns true if the jti is present and not yet expired.
+func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM revoked_tokens WHERE jti = $1 AND expires_at > now())`,
+		jti).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check revocation: %w", err)
+	}
+	return exists, nil
 }
 
 // WriteFact creates or updates a fact. If Key is set and a live fact with that key exists in the
@@ -365,9 +757,7 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 	return tags, rows.Err()
 }
 
-// UpdateFact patches content and/or tags on an existing live fact.
-// Empty Content leaves content unchanged. Nil Tags leaves tags unchanged.
-// Returns ErrNotFound if the fact does not exist or is already deleted.
+// UpdateFact patches content and/or tags on an existing live fact, scoped to orgID.
 func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*store.Fact, error) {
 	tags := p.Tags
 	if tags == nil {
@@ -379,8 +769,9 @@ func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*stor
 		  tags       = CASE WHEN $3 THEN $4 ELSE tags END,
 		  updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
+		  AND project_id IN (SELECT id FROM projects WHERE org_id = $5)
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at`,
-		p.FactID, p.Content, p.Tags != nil, tags)
+		p.FactID, p.Content, p.Tags != nil, tags, p.OrgID)
 	f, err := scanFact(row)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, store.ErrNotFound
@@ -388,11 +779,13 @@ func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*stor
 	return f, err
 }
 
-// DeleteFact soft-deletes a fact. Returns ErrNotFound if it does not exist or is already deleted.
-func (s *Store) DeleteFact(ctx context.Context, factID uuid.UUID) error {
+// DeleteFact soft-deletes a fact, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.
+func (s *Store) DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error {
 	ct, err := s.pool.Exec(ctx, `
-		UPDATE facts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
-		factID)
+		UPDATE facts SET deleted_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+		  AND project_id IN (SELECT id FROM projects WHERE org_id = $2)`,
+		factID, orgID)
 	if err != nil {
 		return fmt.Errorf("delete fact: %w", err)
 	}
@@ -412,14 +805,15 @@ func scanFact(row pgx.Row) (*store.Fact, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan fact: %w", err)
 	}
-	if f.ID, err = uuid.Parse(idStr); err != nil {
-		return nil, fmt.Errorf("parse fact id: %w", err)
+	var parseErr error
+	if f.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+		return nil, fmt.Errorf("parse fact id: %w", parseErr)
 	}
-	if f.ProjectID, err = uuid.Parse(projectIDStr); err != nil {
-		return nil, fmt.Errorf("parse project id: %w", err)
+	if f.ProjectID, parseErr = uuid.Parse(projectIDStr); parseErr != nil {
+		return nil, fmt.Errorf("parse project id: %w", parseErr)
 	}
-	if f.CreatedBy, err = uuid.Parse(createdByStr); err != nil {
-		return nil, fmt.Errorf("parse created_by: %w", err)
+	if f.CreatedBy, parseErr = uuid.Parse(createdByStr); parseErr != nil {
+		return nil, fmt.Errorf("parse created_by: %w", parseErr)
 	}
 	return f, nil
 }
@@ -432,15 +826,15 @@ func scanFacts(rows pgx.Rows) ([]*store.Fact, error) {
 		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.SourceType, &createdByStr, &f.CreatedAt, &f.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan fact: %w", err)
 		}
-		var err error
-		if f.ID, err = uuid.Parse(idStr); err != nil {
-			return nil, fmt.Errorf("parse fact id: %w", err)
+		var parseErr error
+		if f.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+			return nil, fmt.Errorf("parse fact id: %w", parseErr)
 		}
-		if f.ProjectID, err = uuid.Parse(projectIDStr); err != nil {
-			return nil, fmt.Errorf("parse project id: %w", err)
+		if f.ProjectID, parseErr = uuid.Parse(projectIDStr); parseErr != nil {
+			return nil, fmt.Errorf("parse project id: %w", parseErr)
 		}
-		if f.CreatedBy, err = uuid.Parse(createdByStr); err != nil {
-			return nil, fmt.Errorf("parse created_by: %w", err)
+		if f.CreatedBy, parseErr = uuid.Parse(createdByStr); parseErr != nil {
+			return nil, fmt.Errorf("parse created_by: %w", parseErr)
 		}
 		facts = append(facts, f)
 	}
@@ -448,7 +842,6 @@ func scanFacts(rows pgx.Rows) ([]*store.Fact, error) {
 }
 
 // SaveClient persists a new OAuth2 client registration.
-// Returns an error if a client with the same client_id already exists.
 func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients

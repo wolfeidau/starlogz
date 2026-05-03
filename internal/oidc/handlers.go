@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -20,7 +20,7 @@ import (
 )
 
 // LogoutHandler handles POST /auth/logout. It verifies the bearer token,
-// extracts the jti and exp claims, and adds the token to the revocation blocklist.
+// extracts the jti and exp claims, and revokes the token.
 func (s *Server) LogoutHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -62,7 +62,10 @@ func (s *Server) LogoutHandler() http.Handler {
 			return
 		}
 
-		s.RevokeToken(jti, exp)
+		if err := s.revocation.RevokeToken(r.Context(), jti, exp); err != nil {
+			// Log but still 204 — the token will expire naturally.
+			slog.Default().ErrorContext(r.Context(), "revoke token failed", slog.Any("error", err))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 }
@@ -84,9 +87,6 @@ func (s *Server) JWKSHandler() http.Handler {
 }
 
 // DiscoveryHandler serves the OAuth2 authorization server metadata document.
-// Register at both /.well-known/oauth-authorization-server (RFC 8414) and
-// /.well-known/openid-configuration (OIDC fallback) — the go-sdk client tries
-// the RFC 8414 path first when the issuer URL has no path component.
 func (s *Server) DiscoveryHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -136,21 +136,26 @@ func (s *Server) TokenHandler() http.Handler {
 			return
 		}
 
-		pc, ok := s.consumeCode(code)
-		if !ok {
+		pc, err := s.authState.ConsumeAuthCode(r.Context(), code)
+		if errors.Is(err, storepkg.ErrNotFound) {
 			writeOAuthError(w, "invalid_grant", "invalid or expired authorization code", http.StatusBadRequest)
 			return
 		}
+		if err != nil {
+			slog.Default().ErrorContext(r.Context(), "consume auth code failed", slog.Any("error", err))
+			writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+			return
+		}
 
-		// RFC 6749 §4.1.3: redirect_uri must be present and identical to the one in the authorization request.
-		if r.FormValue("redirect_uri") != pc.redirectURI {
+		// RFC 6749 §4.1.3: redirect_uri must be present and identical.
+		if r.FormValue("redirect_uri") != pc.RedirectURI {
 			writeOAuthError(w, "invalid_grant", "redirect_uri does not match authorization request", http.StatusBadRequest)
 			return
 		}
 
 		// Verify PKCE: BASE64URL(SHA256(code_verifier)) must equal stored code_challenge.
 		h := sha256.Sum256([]byte(codeVerifier))
-		if base64.RawURLEncoding.EncodeToString(h[:]) != pc.codeChallenge {
+		if base64.RawURLEncoding.EncodeToString(h[:]) != pc.CodeChallenge {
 			writeOAuthError(w, "invalid_grant", "code_verifier does not match code_challenge", http.StatusBadRequest)
 			return
 		}
@@ -158,22 +163,22 @@ func (s *Server) TokenHandler() http.Handler {
 		jti := uuid.New().String()
 		jwtExpiry := time.Now().Add(7 * 24 * time.Hour)
 
-		tokenString, err := s.IssueJWT(pc.sub, pc.email, pc.scope, jti)
+		tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti)
 		if err != nil {
 			slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 			writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 
-		if s.grants != nil && pc.accessToken != "" {
-			githubID, _ := strconv.ParseInt(pc.sub, 10, 64)
+		if s.grants != nil && pc.AccessToken != "" {
 			if err := s.grants.UpsertGrant(r.Context(), storepkg.Grant{
 				JTI:                jti,
-				GitHubID:           githubID,
-				AccessToken:        pc.accessToken,
-				RefreshToken:       pc.refreshToken,
-				AccessTokenExpiry:  pc.accessTokenExpiry,
-				RefreshTokenExpiry: pc.refreshTokenExpiry,
+				GitHubID:           pc.GitHubID,
+				ClientID:           pc.ClientID,
+				AccessToken:        pc.AccessToken,
+				RefreshToken:       pc.RefreshToken,
+				AccessTokenExpiry:  pc.AccessTokenExpiry,
+				RefreshTokenExpiry: pc.RefreshTokenExpiry,
 				JWTExpiry:          jwtExpiry,
 			}); err != nil {
 				// Log but don't fail the token exchange — the client still gets a valid JWT.
@@ -187,7 +192,7 @@ func (s *Server) TokenHandler() http.Handler {
 			"access_token": tokenString,
 			"token_type":   "Bearer",
 			"expires_in":   int(7 * 24 * time.Hour / time.Second),
-			"scope":        pc.scope,
+			"scope":        pc.Scope,
 		}); err != nil {
 			slog.Default().ErrorContext(r.Context(), "failed to write token response", slog.Any("error", err))
 		}
@@ -235,8 +240,6 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 			return
 		}
 
-		// Normalise to the supported subset — always authorization_code only.
-		// RFC 7591 §3.2.1: server registers the supported subset rather than rejecting.
 		req.GrantTypes = []string{"authorization_code"}
 		if len(req.ResponseTypes) == 0 {
 			req.ResponseTypes = []string{"code"}
@@ -290,9 +293,14 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 
 		q := r.URL.Query()
 
-		pending, ok := s.consumePending(q.Get("state"))
-		if !ok {
+		pending, err := s.authState.ConsumePendingAuth(r.Context(), q.Get("state"))
+		if errors.Is(err, storepkg.ErrNotFound) {
 			http.Error(w, "invalid or expired state", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			slog.Default().ErrorContext(r.Context(), "consume pending auth failed", slog.Any("error", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
@@ -303,28 +311,38 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			return
 		}
 
+		// sub is the internal user UUID; fall back to GitHub numeric ID only when no user store is wired (tests).
+		sub := strconv.FormatInt(identity.ID, 10)
 		if s.users != nil {
-			if err := s.users.UpsertUser(r.Context(), identity.ID, identity.Email, identity.Login); err != nil {
-				// Log but don't fail the login — user still gets a token even if the DB is momentarily down.
-				slog.Default().ErrorContext(r.Context(), "upsert user failed", slog.Any("error", err))
+			user, uErr := s.users.UpsertUser(r.Context(), identity.ID, identity.Email, identity.Login)
+			if uErr != nil {
+				slog.Default().ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
 			}
+			sub = user.ID.String()
 		}
 
 		code := uuid.New().String()
-		s.storeCode(code, &pendingCode{
-			sub:                strconv.FormatInt(identity.ID, 10),
-			email:              identity.Email,
-			scope:              pending.scope,
-			codeChallenge:      pending.codeChallenge,
-			redirectURI:        pending.redirectURI,
-			createdAt:          time.Now(),
-			accessToken:        githubToken.AccessToken,
-			refreshToken:       githubToken.RefreshToken,
-			accessTokenExpiry:  githubToken.Expiry,
-			refreshTokenExpiry: extractRefreshExpiry(githubToken),
-		})
+		if err := s.authState.StoreAuthCode(r.Context(), code, storepkg.AuthCode{
+			Sub:                sub,
+			GitHubID:           identity.ID,
+			Email:              identity.Email,
+			Scope:              pending.Scope,
+			CodeChallenge:      pending.CodeChallenge,
+			RedirectURI:        pending.RedirectURI,
+			ClientID:           pending.ClientID,
+			AccessToken:        githubToken.AccessToken,
+			RefreshToken:       githubToken.RefreshToken,
+			AccessTokenExpiry:  githubToken.Expiry,
+			RefreshTokenExpiry: extractRefreshExpiry(githubToken),
+		}); err != nil {
+			slog.Default().ErrorContext(r.Context(), "store auth code failed", slog.Any("error", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 
-		redirectTo, err := url.Parse(pending.redirectURI)
+		redirectTo, err := url.Parse(pending.RedirectURI)
 		if err != nil {
 			slog.Default().ErrorContext(r.Context(), "invalid redirect URI in pending auth", slog.Any("error", err))
 			http.Error(w, "invalid redirect_uri", http.StatusInternalServerError)
@@ -333,15 +351,15 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 
 		rq := redirectTo.Query()
 		rq.Set("code", code)
-		if pending.clientState != "" {
-			rq.Set("state", pending.clientState)
+		if pending.ClientState != "" {
+			rq.Set("state", pending.ClientState)
 		}
 		redirectTo.RawQuery = rq.Encode()
 
 		slog.Default().InfoContext(r.Context(), "GitHub auth complete",
 			slog.String("login", identity.Login),
 			slog.String("email", identity.Email),
-			slog.String("sub", fmt.Sprintf("%d", identity.ID)),
+			slog.String("sub", sub),
 		)
 
 		http.Redirect(w, r, redirectTo.String(), http.StatusFound)
@@ -391,13 +409,17 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		}
 
 		githubState := uuid.New().String()
-		s.storePending(githubState, &pendingAuth{
-			redirectURI:   redirectURI,
-			scope:         scope,
-			codeChallenge: codeChallenge,
-			clientState:   q.Get("state"),
-			createdAt:     time.Now(),
-		})
+		if err := s.authState.StorePendingAuth(r.Context(), githubState, storepkg.PendingAuth{
+			ClientID:      q.Get("client_id"),
+			RedirectURI:   redirectURI,
+			Scope:         scope,
+			CodeChallenge: codeChallenge,
+			ClientState:   q.Get("state"),
+		}); err != nil {
+			slog.Default().ErrorContext(r.Context(), "store pending auth failed", slog.Any("error", err))
+			writeOAuthError(w, "server_error", "failed to store authorization state", http.StatusInternalServerError)
+			return
+		}
 
 		authURL := s.github.AuthCodeURL(githubState)
 		http.Redirect(w, r, authURL, http.StatusFound)

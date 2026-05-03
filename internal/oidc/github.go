@@ -11,29 +11,6 @@ import (
 	githuboauth "golang.org/x/oauth2/github"
 )
 
-// pendingAuth holds the client's PKCE and redirect params while the user is at GitHub.
-type pendingAuth struct {
-	redirectURI   string
-	scope         string
-	codeChallenge string
-	clientState   string
-	createdAt     time.Time
-}
-
-// pendingCode holds the identity, PKCE challenge, and GitHub App tokens waiting for the token exchange.
-type pendingCode struct {
-	sub                string // GitHub user ID as decimal string
-	email              string
-	scope              string
-	codeChallenge      string
-	redirectURI        string
-	createdAt          time.Time
-	accessToken        string
-	refreshToken       string
-	accessTokenExpiry  time.Time
-	refreshTokenExpiry time.Time
-}
-
 type githubUser struct {
 	ID    int64  `json:"id"`
 	Login string `json:"login"`
@@ -85,58 +62,6 @@ func (c *oauthGitHubConnector) ExchangeCode(ctx context.Context, code string) (*
 		return nil, nil, err
 	}
 	return token, identity, nil
-}
-
-func (s *Server) storePending(githubState string, p *pendingAuth) {
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	s.pending[githubState] = p
-	now := time.Now()
-	for k, v := range s.pending {
-		if now.Sub(v.createdAt) > 10*time.Minute {
-			delete(s.pending, k)
-		}
-	}
-}
-
-func (s *Server) consumePending(githubState string) (*pendingAuth, bool) {
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	p, ok := s.pending[githubState]
-	if !ok {
-		return nil, false
-	}
-	delete(s.pending, githubState)
-	if time.Since(p.createdAt) > 10*time.Minute {
-		return nil, false
-	}
-	return p, true
-}
-
-func (s *Server) storeCode(code string, pc *pendingCode) {
-	s.codesMu.Lock()
-	defer s.codesMu.Unlock()
-	s.codes[code] = pc
-	now := time.Now()
-	for k, v := range s.codes {
-		if now.Sub(v.createdAt) > 5*time.Minute {
-			delete(s.codes, k)
-		}
-	}
-}
-
-func (s *Server) consumeCode(code string) (*pendingCode, bool) {
-	s.codesMu.Lock()
-	defer s.codesMu.Unlock()
-	pc, ok := s.codes[code]
-	if !ok {
-		return nil, false
-	}
-	delete(s.codes, code)
-	if time.Since(pc.createdAt) > 5*time.Minute {
-		return nil, false
-	}
-	return pc, true
 }
 
 // githubIdentity is the resolved identity returned by fetchGitHubIdentity.
