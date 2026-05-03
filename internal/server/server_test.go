@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,13 +11,64 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/require"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
+	"github.com/wolfeidau/starlogz/internal/store"
 )
+
+// memAuthState is a minimal in-memory AuthStateStore for tests.
+type memAuthState struct {
+	pending map[string]store.PendingAuth
+	codes   map[string]store.AuthCode
+}
+
+func newMemAuthState() *memAuthState {
+	return &memAuthState{pending: map[string]store.PendingAuth{}, codes: map[string]store.AuthCode{}}
+}
+
+func (m *memAuthState) StorePendingAuth(_ context.Context, state string, p store.PendingAuth) error {
+	m.pending[state] = p
+	return nil
+}
+func (m *memAuthState) ConsumePendingAuth(_ context.Context, state string) (*store.PendingAuth, error) {
+	p, ok := m.pending[state]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(m.pending, state)
+	return &p, nil
+}
+func (m *memAuthState) StoreAuthCode(_ context.Context, code string, c store.AuthCode) error {
+	m.codes[code] = c
+	return nil
+}
+func (m *memAuthState) ConsumeAuthCode(_ context.Context, code string) (*store.AuthCode, error) {
+	c, ok := m.codes[code]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(m.codes, code)
+	return &c, nil
+}
+
+// memRevocation is a minimal in-memory RevocationStore for tests.
+type memRevocation struct{ revoked map[string]struct{} }
+
+func newMemRevocation() *memRevocation { return &memRevocation{revoked: map[string]struct{}{}} }
+
+func (m *memRevocation) RevokeToken(_ context.Context, jti string, _ time.Time) error {
+	m.revoked[jti] = struct{}{}
+	return nil
+}
+func (m *memRevocation) IsTokenRevoked(_ context.Context, jti string) (bool, error) {
+	_, ok := m.revoked[jti]
+	return ok, nil
+}
 
 // testFixture returns a running httptest.Server and an oidc.Server that shares the same
 // signing key, so tests can issue valid JWTs for authenticated requests.
@@ -28,13 +80,21 @@ func testFixture(t *testing.T) (*httptest.Server, *oidc.Server) {
 	raw, err := jwk.Import(privkey)
 	require.NoError(t, err)
 
-	oidcSrv, err := oidc.NewServer(oidc.Config{BaseURL: "http://localhost"}, raw)
+	revocation := newMemRevocation()
+
+	oidcSrv, err := oidc.NewServer(oidc.Config{
+		BaseURL:    "http://localhost",
+		AuthState:  newMemAuthState(),
+		Revocation: revocation,
+	}, raw)
 	require.NoError(t, err)
 
 	srv, err := server.New(server.Config{
-		BaseURL: "http://localhost",
-		PrivKey: raw,
-		Logger:  slog.Default(),
+		BaseURL:    "http://localhost",
+		PrivKey:    raw,
+		Logger:     slog.Default(),
+		AuthState:  newMemAuthState(),
+		Revocation: revocation,
 	})
 	require.NoError(t, err)
 

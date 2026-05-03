@@ -28,7 +28,9 @@ type Config struct {
 	GitHubClientSecret string
 	PrivKey            jwk.Key
 	Logger             *slog.Logger
-	Store              store.Store // nil is allowed; fact tools will return an error
+	Store              store.Store          // nil is allowed; fact tools will return an error
+	AuthState          oidc.AuthStateStore  // if nil, Store is used
+	Revocation         oidc.RevocationStore // if nil, Store is used
 	ShutdownTimeout    time.Duration
 }
 
@@ -47,6 +49,14 @@ func New(cfg Config) (*Server, error) {
 		shutdownTimeout = 30 * time.Second
 	}
 
+	authState := cfg.AuthState
+	if authState == nil {
+		authState = cfg.Store
+	}
+	revocation := cfg.Revocation
+	if revocation == nil {
+		revocation = cfg.Store
+	}
 	oidcServer, err := oidc.NewServer(oidc.Config{
 		BaseURL:            cfg.BaseURL,
 		GitHubClientID:     cfg.GitHubClientID,
@@ -54,8 +64,8 @@ func New(cfg Config) (*Server, error) {
 		Users:              cfg.Store,
 		Clients:            cfg.Store,
 		Grants:             cfg.Store,
-		AuthState:          cfg.Store,
-		Revocation:         cfg.Store,
+		AuthState:          authState,
+		Revocation:         revocation,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)
