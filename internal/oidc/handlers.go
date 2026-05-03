@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -360,7 +359,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		slog.Default().InfoContext(r.Context(), "GitHub auth complete",
 			slog.String("login", identity.Login),
 			slog.String("email", identity.Email),
-			slog.String("sub", fmt.Sprintf("%s", sub)),
+			slog.String("sub", sub),
 		)
 
 		http.Redirect(w, r, redirectTo.String(), http.StatusFound)

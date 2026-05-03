@@ -50,10 +50,10 @@ type Config struct {
 	BaseURL            string
 	GitHubClientID     string
 	GitHubClientSecret string
-	Users              UserUpserter   // optional; nil skips user persistence
-	Clients            ClientStore    // optional; nil skips DCR persistence
-	Grants             GrantStore     // optional; nil skips grant persistence
-	AuthState          AuthStateStore // required
+	Users              UserUpserter    // optional; nil skips user persistence
+	Clients            ClientStore     // optional; nil skips DCR persistence
+	Grants             GrantStore      // optional; nil skips grant persistence
+	AuthState          AuthStateStore  // required
 	Revocation         RevocationStore // required
 }
 
