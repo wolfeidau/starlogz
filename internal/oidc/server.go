@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -19,15 +18,31 @@ import (
 )
 
 // UserUpserter persists user identity on successful GitHub login.
-// Implemented by store.Store via *postgres.Store; nil is accepted (skips persistence).
+// Implemented by store.Store via *postgres.Store.
 type UserUpserter interface {
-	UpsertUser(ctx context.Context, githubID int64, email, login string) error
+	UpsertUser(ctx context.Context, githubID int64, email, login string) (*store.User, error)
 }
 
 // GrantStore persists authorization grants with associated GitHub App tokens.
-// store.Store satisfies this interface directly.
 type GrantStore interface {
 	UpsertGrant(ctx context.Context, g store.Grant) error
+	GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error)
+	RotateGrant(ctx context.Context, oldToken string, g store.Grant) (*store.Grant, error)
+	DeleteGrant(ctx context.Context, jti string) error
+}
+
+// AuthStateStore persists transient OAuth2 authorization state.
+type AuthStateStore interface {
+	StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error
+	ConsumePendingAuth(ctx context.Context, state string) (*store.PendingAuth, error)
+	StoreAuthCode(ctx context.Context, code string, c store.AuthCode) error
+	ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCode, error)
+}
+
+// RevocationStore persists revoked JWT IDs.
+type RevocationStore interface {
+	RevokeToken(ctx context.Context, jti string, expiresAt time.Time) error
+	IsTokenRevoked(ctx context.Context, jti string) (bool, error)
 }
 
 // Config holds construction parameters for Server.
@@ -35,38 +50,38 @@ type Config struct {
 	BaseURL            string
 	GitHubClientID     string
 	GitHubClientSecret string
-	Users              UserUpserter // optional
-	Clients            ClientStore  // optional; if set, DCR registrations are persisted
-	Grants             GrantStore   // optional; if set, GitHub App tokens are persisted per grant
+	Users              UserUpserter   // optional; nil skips user persistence
+	Clients            ClientStore    // optional; nil skips DCR persistence
+	Grants             GrantStore     // optional; nil skips grant persistence
+	AuthState          AuthStateStore // required
+	Revocation         RevocationStore // required
 }
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
 type Server struct {
-	baseURL  *url.URL
-	privkey  jwk.Key
-	pubkey   jwk.Key
-	jwksJSON []byte
-	authMeta *oauthex.AuthServerMeta
-	resMeta  *oauthex.ProtectedResourceMetadata
-	github   gitHubConnector
-	users    UserUpserter
-	clients  ClientStore
-	grants   GrantStore
-
-	revokedMu sync.RWMutex
-	revoked   map[string]time.Time // jti → expiry
-
-	pendingMu sync.Mutex
-	pending   map[string]*pendingAuth // github state → pending authorization
-
-	codesMu sync.Mutex
-	codes   map[string]*pendingCode // auth code → pending token exchange
+	baseURL    *url.URL
+	privkey    jwk.Key
+	pubkey     jwk.Key
+	jwksJSON   []byte
+	authMeta   *oauthex.AuthServerMeta
+	resMeta    *oauthex.ProtectedResourceMetadata
+	github     gitHubConnector
+	users      UserUpserter
+	clients    ClientStore
+	grants     GrantStore
+	authState  AuthStateStore
+	revocation RevocationStore
 }
 
 // NewServer constructs an OIDC Server from config and a loaded private key.
-// It derives and assigns a key ID to both keys, pre-marshals the JWKS document,
-// and builds the OAuth2 metadata documents.
 func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
+	if cfg.AuthState == nil {
+		return nil, fmt.Errorf("Config.AuthState is required")
+	}
+	if cfg.Revocation == nil {
+		return nil, fmt.Errorf("Config.Revocation is required")
+	}
+
 	base, err := url.Parse(cfg.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse base URL: %w", err)
@@ -108,19 +123,18 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 	}
 
 	return &Server{
-		baseURL:  base,
-		privkey:  privkey,
-		pubkey:   pubkey,
-		jwksJSON: jwksJSON,
-		authMeta: buildAuthServerMeta(base),
-		resMeta:  buildProtectedResourceMeta(base),
-		github:   newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
-		users:    cfg.Users,
-		clients:  cfg.Clients,
-		grants:   cfg.Grants,
-		revoked:  make(map[string]time.Time),
-		pending:  make(map[string]*pendingAuth),
-		codes:    make(map[string]*pendingCode),
+		baseURL:    base,
+		privkey:    privkey,
+		pubkey:     pubkey,
+		jwksJSON:   jwksJSON,
+		authMeta:   buildAuthServerMeta(base),
+		resMeta:    buildProtectedResourceMeta(base),
+		github:     newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		users:      cfg.Users,
+		clients:    cfg.Clients,
+		grants:     cfg.Grants,
+		authState:  cfg.AuthState,
+		revocation: cfg.Revocation,
 	}, nil
 }
 
@@ -134,28 +148,12 @@ func (s *Server) ProtectedResourceMeta() *oauthex.ProtectedResourceMetadata {
 	return s.resMeta
 }
 
-// ResourceMetadataURL returns the URL of the protected resource metadata endpoint,
-// for use in WWW-Authenticate headers on 401 responses.
+// ResourceMetadataURL returns the URL of the protected resource metadata endpoint.
 func (s *Server) ResourceMetadataURL() string {
 	return s.baseURL.JoinPath("/.well-known/oauth-protected-resource").String()
 }
 
-// RevokeToken adds a jti to the blocklist until its expiry. Safe for concurrent use.
-// On each call, expired entries are pruned to bound memory growth.
-func (s *Server) RevokeToken(jti string, exp time.Time) {
-	s.revokedMu.Lock()
-	defer s.revokedMu.Unlock()
-	s.revoked[jti] = exp
-	now := time.Now()
-	for id, expiry := range s.revoked {
-		if expiry.Before(now) {
-			delete(s.revoked, id)
-		}
-	}
-}
-
 // VerifyJWT validates a bearer token and returns auth info.
-// Compatible with auth.RequireBearerToken's verify function signature.
 func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Request) (*auth.TokenInfo, error) {
 	verifiedToken, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), s.pubkey))
 	if err != nil {
@@ -188,9 +186,10 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: missing jti claim", auth.ErrInvalidToken)
 	}
 
-	s.revokedMu.RLock()
-	_, revoked := s.revoked[jti]
-	s.revokedMu.RUnlock()
+	revoked, err := s.revocation.IsTokenRevoked(ctx, jti)
+	if err != nil {
+		return nil, fmt.Errorf("%w: revocation check failed: %v", auth.ErrInvalidToken, err)
+	}
 	if revoked {
 		return nil, fmt.Errorf("%w: token has been revoked", auth.ErrInvalidToken)
 	}

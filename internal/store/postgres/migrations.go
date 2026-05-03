@@ -4,10 +4,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,10 +17,35 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// RunMigrations executes all pending SQL migrations in version order.
-// Each migration file must end with INSERT INTO schema_migrations (version) VALUES (N) ON CONFLICT DO NOTHING;
+// migrationLockKey is the Postgres advisory lock key used to serialise concurrent migration runs.
+// Derived from fnv64a("starlogz-migrations") so it is unique to this project.
+var migrationLockKey = func() int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("starlogz-migrations"))
+	return int64(h.Sum64())
+}()
+
+// RunMigrations executes all pending SQL migrations in version order under an advisory lock.
+// Only one process holds the lock at a time; others block until migrations finish.
+// The lock acquisition times out after 60 seconds to prevent indefinite blocking.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	logger.InfoContext(ctx, "running database migrations")
+
+	lockCtx, lockCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer lockCancel()
+
+	conn, err := pool.Acquire(lockCtx)
+	if err != nil {
+		return fmt.Errorf("acquire connection for migration lock: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(lockCtx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationLockKey)
+	}()
 
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {

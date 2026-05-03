@@ -18,15 +18,29 @@ type Store interface {
 	Migrate(ctx context.Context, logger *slog.Logger) error
 	Close()
 
-	UpsertUser(ctx context.Context, githubID int64, email, login string) error
+	UpsertUser(ctx context.Context, githubID int64, email, login string) (*User, error)
 	GetUserByGitHubID(ctx context.Context, githubID int64) (*User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 
-	EnsureProject(ctx context.Context, ownerID uuid.UUID, slug, name string) (*Project, error)
-	ListProjects(ctx context.Context, ownerID uuid.UUID) ([]*Project, error)
-	GetProjectBySlug(ctx context.Context, ownerID uuid.UUID, slug string) (*Project, error)
+	GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*Org, error)
+
+	EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*Project, error)
+	ListProjects(ctx context.Context, orgID uuid.UUID) ([]*Project, error)
+	GetProjectBySlug(ctx context.Context, orgID uuid.UUID, slug string) (*Project, error)
 
 	UpsertGrant(ctx context.Context, g Grant) error
 	GetGrant(ctx context.Context, jti string) (*Grant, error)
+	GetGrantByRefreshToken(ctx context.Context, token string) (*Grant, error)
+	RotateGrant(ctx context.Context, oldToken string, g Grant) (*Grant, error)
+	DeleteGrant(ctx context.Context, jti string) error
+
+	StorePendingAuth(ctx context.Context, state string, p PendingAuth) error
+	ConsumePendingAuth(ctx context.Context, state string) (*PendingAuth, error)
+	StoreAuthCode(ctx context.Context, code string, c AuthCode) error
+	ConsumeAuthCode(ctx context.Context, code string) (*AuthCode, error)
+
+	RevokeToken(ctx context.Context, jti string, expiresAt time.Time) error
+	IsTokenRevoked(ctx context.Context, jti string) (bool, error)
 
 	WriteFact(ctx context.Context, p WriteFactParams) (*Fact, error)
 	UpdateFact(ctx context.Context, p UpdateFactParams) (*Fact, error)
@@ -48,10 +62,20 @@ type User struct {
 	UpdatedAt time.Time
 }
 
-// Project is a named container for facts owned by a single user.
+// Org is a tenant boundary; every project belongs to exactly one org.
+type Org struct {
+	ID        uuid.UUID
+	Slug      string
+	Name      string
+	Kind      string // "personal" or "shared"
+	CreatedAt time.Time
+}
+
+// Project is a named container for facts owned by an org.
 type Project struct {
 	ID        uuid.UUID
-	OwnerID   uuid.UUID
+	OrgID     uuid.UUID
+	CreatedBy uuid.UUID
 	Slug      string
 	Name      string
 	CreatedAt time.Time
@@ -99,6 +123,8 @@ type TagCount struct {
 type Grant struct {
 	JTI                string
 	GitHubID           int64
+	OurRefreshToken    string
+	ClientID           string
 	AccessToken        string
 	RefreshToken       string
 	AccessTokenExpiry  time.Time
@@ -118,4 +144,29 @@ type OAuthClient struct {
 	Scope                   string
 	IssuedAt                time.Time
 	ExpiresAt               time.Time
+}
+
+// PendingAuth holds client PKCE and redirect params across the GitHub OAuth2 redirect leg.
+type PendingAuth struct {
+	ClientID      string
+	RedirectURI   string
+	Scope         string
+	CodeChallenge string
+	ClientState   string
+}
+
+// AuthCode holds identity and GitHub tokens between the GitHub callback and token exchange.
+// Tokens are stored encrypted at rest; this struct carries plaintext values.
+type AuthCode struct {
+	Sub                string // internal user UUID (JWT sub)
+	GitHubID           int64  // GitHub numeric ID (for grant creation)
+	Email              string
+	Scope              string
+	CodeChallenge      string
+	RedirectURI        string
+	ClientID           string
+	AccessToken        string
+	RefreshToken       string
+	AccessTokenExpiry  time.Time
+	RefreshTokenExpiry time.Time
 }

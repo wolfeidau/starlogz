@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/wolfeidau/starlogz/internal/server"
@@ -14,13 +15,14 @@ import (
 )
 
 type HTTPCmd struct {
-	ListenAddr         string `help:"The address to listen on." default:"localhost:8088" env:"HTTP_LISTEN_ADDR"`
-	BaseServerURL      string `help:"The base URL of this server." default:"http://localhost:8088" env:"SERVER_URL"`
-	JWKPath            string `help:"Path to the JSON web key used to sign auth tokens." required:""`
-	GitHubClientID     string `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
-	GitHubClientSecret string `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
-	DatabaseURL        string `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
-	TokenEncryptionKey string `help:"Base64-encoded 32-byte key for encrypting stored GitHub tokens." env:"TOKEN_ENCRYPTION_KEY" required:""`
+	ListenAddr         string        `help:"The address to listen on." default:"localhost:8088" env:"HTTP_LISTEN_ADDR"`
+	BaseServerURL      string        `help:"The base URL of this server." default:"http://localhost:8088" env:"SERVER_URL"`
+	JWKPath            string        `help:"Path to the JSON web key used to sign auth tokens." required:""`
+	GitHubClientID     string        `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
+	GitHubClientSecret string        `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
+	DatabaseURL        string        `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
+	TokenEncryptionKey string        `help:"Base64-encoded 32-byte key for encrypting stored GitHub tokens." env:"TOKEN_ENCRYPTION_KEY" required:""`
+	ShutdownTimeout    time.Duration `help:"Maximum time to wait for in-flight requests before exiting." default:"30s" env:"SHUTDOWN_TIMEOUT"`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -58,6 +60,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		PrivKey:            privkey,
 		Logger:             globals.Logger,
 		Store:              st,
+		ShutdownTimeout:    c.ShutdownTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)

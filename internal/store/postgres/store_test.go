@@ -68,7 +68,8 @@ func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 12345, "alice@example.com", "alice"))
+	_, err := st.UpsertUser(ctx, 12345, "alice@example.com", "alice")
+	require.NoError(t, err)
 
 	u, err := st.GetUserByGitHubID(ctx, 12345)
 	require.NoError(t, err)
@@ -78,7 +79,8 @@ func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, u.ID)
 
 	// Update email and login on re-upsert.
-	require.NoError(t, st.UpsertUser(ctx, 12345, "alice2@example.com", "alice2"))
+	_, err = st.UpsertUser(ctx, 12345, "alice2@example.com", "alice2")
+	require.NoError(t, err)
 	u2, err := st.GetUserByGitHubID(ctx, 12345)
 	require.NoError(t, err)
 	require.Equal(t, u.ID, u2.ID, "ID must not change on upsert")
@@ -96,18 +98,21 @@ func TestEnsureProject_CreateAndIdempotent(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 1, "bob@example.com", "bob"))
+	_, err := st.UpsertUser(ctx, 1, "bob@example.com", "bob")
+	require.NoError(t, err)
 	u, err := st.GetUserByGitHubID(ctx, 1)
 	require.NoError(t, err)
+	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
+	require.NoError(t, err)
 
-	p, err := st.EnsureProject(ctx, u.ID, "my-proj", "My Project")
+	p, err := st.EnsureProject(ctx, org.ID, u.ID, "my-proj", "My Project")
 	require.NoError(t, err)
 	require.Equal(t, "my-proj", p.Slug)
 	require.Equal(t, "My Project", p.Name)
 	require.NotEqual(t, uuid.Nil, p.ID)
 
 	// Idempotent call with new name — name should update.
-	p2, err := st.EnsureProject(ctx, u.ID, "my-proj", "My Project Renamed")
+	p2, err := st.EnsureProject(ctx, org.ID, u.ID, "my-proj", "My Project Renamed")
 	require.NoError(t, err)
 	require.Equal(t, p.ID, p2.ID, "ID must not change")
 	require.Equal(t, "My Project Renamed", p2.Name)
@@ -117,21 +122,25 @@ func TestGetProjectBySlug_NotFound(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 2, "c@example.com", "c"))
+	_, err := st.UpsertUser(ctx, 2, "c@example.com", "c")
+	require.NoError(t, err)
 	u, err := st.GetUserByGitHubID(ctx, 2)
 	require.NoError(t, err)
+	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
+	require.NoError(t, err)
 
-	_, err = st.GetProjectBySlug(ctx, u.ID, "no-such-project")
+	_, err = st.GetProjectBySlug(ctx, org.ID, "no-such-project")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func testUserAndProject(t *testing.T, st *postgres.Store, githubID int64) (*store.User, *store.Project) {
 	t.Helper()
 	ctx := context.Background()
-	require.NoError(t, st.UpsertUser(ctx, githubID, "u@example.com", "u"))
-	u, err := st.GetUserByGitHubID(ctx, githubID)
+	u, err := st.UpsertUser(ctx, githubID, "u@example.com", "u")
 	require.NoError(t, err)
-	p, err := st.EnsureProject(ctx, u.ID, "proj", "Project")
+	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
+	require.NoError(t, err)
+	p, err := st.EnsureProject(ctx, org.ID, u.ID, "proj", "Project")
 	require.NoError(t, err)
 	return u, p
 }
@@ -258,21 +267,24 @@ func TestListProjects(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 60, "d@example.com", "d"))
+	_, err := st.UpsertUser(ctx, 60, "d@example.com", "d")
+	require.NoError(t, err)
 	u, err := st.GetUserByGitHubID(ctx, 60)
+	require.NoError(t, err)
+	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
 	require.NoError(t, err)
 
 	// No projects yet.
-	projects, err := st.ListProjects(ctx, u.ID)
+	projects, err := st.ListProjects(ctx, org.ID)
 	require.NoError(t, err)
 	require.Empty(t, projects)
 
-	_, err = st.EnsureProject(ctx, u.ID, "beta", "Beta")
+	_, err = st.EnsureProject(ctx, org.ID, u.ID, "beta", "Beta")
 	require.NoError(t, err)
-	_, err = st.EnsureProject(ctx, u.ID, "alpha", "Alpha")
+	_, err = st.EnsureProject(ctx, org.ID, u.ID, "alpha", "Alpha")
 	require.NoError(t, err)
 
-	projects, err = st.ListProjects(ctx, u.ID)
+	projects, err = st.ListProjects(ctx, org.ID)
 	require.NoError(t, err)
 	require.Len(t, projects, 2)
 	// Ordered by name ascending.
@@ -361,7 +373,8 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser"))
+	_, err := st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser")
+	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	g := store.Grant{
@@ -390,7 +403,8 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser"))
+	_, err := st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser")
+	require.NoError(t, err)
 
 	now := time.Now().UTC()
 	expired := store.Grant{
@@ -405,7 +419,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	require.NoError(t, st.UpsertGrant(ctx, expired))
 
 	// Confirm expired grant was inserted.
-	_, err := st.GetGrant(ctx, "expired-jti")
+	_, err = st.GetGrant(ctx, "expired-jti")
 	require.NoError(t, err)
 
 	// Upsert a new grant for the same user — triggers lazy prune of the expired one.
@@ -438,9 +452,10 @@ func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, st.UpsertUser(ctx, 300, "nokey@example.com", "nokey"))
+	_, err := st.UpsertUser(ctx, 300, "nokey@example.com", "nokey")
+	require.NoError(t, err)
 
-	err := st.UpsertGrant(ctx, store.Grant{
+	err = st.UpsertGrant(ctx, store.Grant{
 		JTI:      "no-key-jti",
 		GitHubID: 300,
 	})
