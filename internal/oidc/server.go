@@ -24,10 +24,13 @@ type UserUpserter interface {
 }
 
 // GrantStore persists authorization grants with associated GitHub App tokens.
+// RotateGrant atomically swaps the grant row and records the old jti as revoked,
+// so a failure of either step leaves both tokens valid (current state) rather
+// than the new token live and the old one un-revoked.
 type GrantStore interface {
 	UpsertGrant(ctx context.Context, g store.Grant) error
 	GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error)
-	RotateGrant(ctx context.Context, oldToken string, g store.Grant) (*store.Grant, error)
+	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error)
 	DeleteGrant(ctx context.Context, jti string) error
 }
 
@@ -220,14 +223,15 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	}, nil
 }
 
-// IssueJWT signs and returns a new ES384 JWT for the given subject, email, scope, and JWT ID.
-func (s *Server) IssueJWT(sub, email, scope, jti string) (string, error) {
-	now := time.Now()
+// IssueJWT signs and returns a new ES384 JWT for the given subject, email, scope,
+// JWT ID and expiration. The caller owns expiration so the value matches what's
+// recorded in the grant row and the revoked_tokens entry.
+func (s *Server) IssueJWT(sub, email, scope, jti string, exp time.Time) (string, error) {
 	tok, err := jwt.NewBuilder().
 		Issuer(s.baseURL.String()).
 		Subject(sub).
-		IssuedAt(now).
-		Expiration(now.Add(7*24*time.Hour)).
+		IssuedAt(time.Now()).
+		Expiration(exp).
 		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
 		Claim("email", email).
 		Claim("scope", scope).

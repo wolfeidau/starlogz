@@ -14,7 +14,7 @@ func buildAuthServerMeta(base *url.URL) *oauthex.AuthServerMeta {
 		JWKSURI:                           base.JoinPath("/.well-known/jwks").String(),
 		RegistrationEndpoint:              base.JoinPath("/oauth2/register").String(),
 		ResponseTypesSupported:            []string{"code"},
-		GrantTypesSupported:               []string{"authorization_code"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
 		ScopesSupported:                   []string{"facts:read", "facts:write", "org:admin"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
 		TokenEndpointAuthMethodsSupported: []string{"none"},

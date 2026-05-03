@@ -297,20 +297,21 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO grants (jti, github_id, our_refresh_token, client_id,
+		INSERT INTO grants (jti, github_id, our_refresh_token, client_id, scope,
 		                    access_token, refresh_token,
 		                    access_token_expiry, refresh_token_expiry, jwt_expiry)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (jti) DO UPDATE
 		    SET our_refresh_token     = EXCLUDED.our_refresh_token,
 		        client_id             = EXCLUDED.client_id,
+		        scope                 = EXCLUDED.scope,
 		        access_token          = EXCLUDED.access_token,
 		        refresh_token         = EXCLUDED.refresh_token,
 		        access_token_expiry   = EXCLUDED.access_token_expiry,
 		        refresh_token_expiry  = EXCLUDED.refresh_token_expiry,
 		        jwt_expiry            = EXCLUDED.jwt_expiry,
 		        updated_at            = now()`,
-		g.JTI, g.GitHubID, ourRefreshToken, clientID, encAccess, encRefresh,
+		g.JTI, g.GitHubID, ourRefreshToken, clientID, g.Scope, encAccess, encRefresh,
 		g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
 	)
 	if err != nil {
@@ -334,7 +335,7 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 		return nil, fmt.Errorf("encryption key not configured")
 	}
 	return s.scanGrant(s.pool.QueryRow(ctx, `
-		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''),
+		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
 		       access_token, refresh_token,
 		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
 		FROM grants WHERE jti = $1`, jti))
@@ -346,7 +347,7 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 		return nil, fmt.Errorf("encryption key not configured")
 	}
 	return s.scanGrant(s.pool.QueryRow(ctx, `
-		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''),
+		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
 		       access_token, refresh_token,
 		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
 		FROM grants WHERE our_refresh_token = $1`, token))
@@ -355,7 +356,7 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	var g store.Grant
 	var encAccess, encRefresh []byte
-	err := row.Scan(&g.JTI, &g.GitHubID, &g.OurRefreshToken, &g.ClientID,
+	err := row.Scan(&g.JTI, &g.GitHubID, &g.OurRefreshToken, &g.ClientID, &g.Scope,
 		&encAccess, &encRefresh,
 		&g.AccessTokenExpiry, &g.RefreshTokenExpiry, &g.JWTExpiry, &g.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -377,9 +378,10 @@ func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	return &g, nil
 }
 
-// RotateGrant atomically replaces a grant row identified by oldToken with the new values in g.
-// Returns ErrNotFound if oldToken does not match any row (concurrent rotation race).
-func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant) (*store.Grant, error) {
+// RotateGrant atomically replaces a grant row identified by oldToken and records
+// the old jti as revoked in the same transaction. Returns ErrNotFound if oldToken
+// does not match any row (concurrent rotation race).
+func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
 	}
@@ -401,26 +403,33 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant)
 		clientID = &g.ClientID
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var updated store.Grant
 	var encA, encR []byte
-	err = s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE grants
 		SET jti                  = $2,
 		    our_refresh_token    = $3,
 		    client_id            = $4,
-		    access_token         = $5,
-		    refresh_token        = $6,
-		    access_token_expiry  = $7,
-		    refresh_token_expiry = $8,
-		    jwt_expiry           = $9,
+		    scope                = $5,
+		    access_token         = $6,
+		    refresh_token        = $7,
+		    access_token_expiry  = $8,
+		    refresh_token_expiry = $9,
+		    jwt_expiry           = $10,
 		    updated_at           = now()
 		WHERE our_refresh_token = $1
-		RETURNING jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''),
+		RETURNING jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
 		          access_token, refresh_token,
 		          access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at`,
-		oldToken, g.JTI, ourRefreshToken, clientID,
+		oldToken, g.JTI, ourRefreshToken, clientID, g.Scope,
 		encAccess, encRefresh, g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
-	).Scan(&updated.JTI, &updated.GitHubID, &updated.OurRefreshToken, &updated.ClientID,
+	).Scan(&updated.JTI, &updated.GitHubID, &updated.OurRefreshToken, &updated.ClientID, &updated.Scope,
 		&encA, &encR,
 		&updated.AccessTokenExpiry, &updated.RefreshTokenExpiry, &updated.JWTExpiry, &updated.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -428,6 +437,21 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("rotate grant: %w", err)
+	}
+
+	if oldJTI != "" {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO revoked_tokens (jti, expires_at)
+			VALUES ($1, $2)
+			ON CONFLICT (jti) DO NOTHING`,
+			oldJTI, oldJWTExpiry)
+		if err != nil {
+			return nil, fmt.Errorf("revoke old jti: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit rotate grant: %w", err)
 	}
 
 	updated.AccessToken, err = s.enc.Open(encA)

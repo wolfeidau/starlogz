@@ -14,6 +14,7 @@ var supportedScopes = map[string]bool{
 
 func writeOAuthError(w http.ResponseWriter, errCode, description string, status int) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"error":             errCode,

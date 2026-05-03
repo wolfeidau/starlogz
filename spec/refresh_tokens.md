@@ -267,6 +267,10 @@ The `grants` table additions (`our_refresh_token`, `client_id`, the unique
 index) are owned by `spec/persistence.md` migration 4. See that spec for
 the SQL.
 
+Migration 9 (`9_grants_scope.sql`) adds a `scope TEXT NOT NULL DEFAULT ''`
+column so the refresh grant can echo the original grant's scope back to the
+client without re-deriving it from a consumed auth code.
+
 `our_refresh_token` and `client_id` are nullable to accommodate grants
 created without a GitHub refresh token (test/CLI scenarios with no
 GitHub App configured). The refresh handler treats either being null as

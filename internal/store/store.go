@@ -31,7 +31,7 @@ type Store interface {
 	UpsertGrant(ctx context.Context, g Grant) error
 	GetGrant(ctx context.Context, jti string) (*Grant, error)
 	GetGrantByRefreshToken(ctx context.Context, token string) (*Grant, error)
-	RotateGrant(ctx context.Context, oldToken string, g Grant) (*Grant, error)
+	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g Grant) (*Grant, error)
 	DeleteGrant(ctx context.Context, jti string) error
 
 	StorePendingAuth(ctx context.Context, state string, p PendingAuth) error
@@ -126,6 +126,7 @@ type Grant struct {
 	GitHubID           int64
 	OurRefreshToken    string
 	ClientID           string
+	Scope              string
 	AccessToken        string
 	RefreshToken       string
 	AccessTokenExpiry  time.Time
