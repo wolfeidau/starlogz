@@ -108,8 +108,7 @@ func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login str
 
 		_, err = tx.Exec(ctx, `
 			INSERT INTO org_members (org_id, user_id, role)
-			VALUES ($1, $2, 'owner')
-			ON CONFLICT DO NOTHING`,
+			VALUES ($1, $2, 'owner')`,
 			orgID, u.ID)
 		if err != nil {
 			return nil, fmt.Errorf("insert org member: %w", err)
@@ -516,7 +515,8 @@ func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode
 		return fmt.Errorf("encryption key not configured")
 	}
 
-	var encAccess, encRefresh []byte
+	encAccess := []byte{}
+	encRefresh := []byte{}
 	var err error
 	if c.AccessToken != "" {
 		encAccess, err = s.enc.Seal(c.AccessToken)

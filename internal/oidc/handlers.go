@@ -312,16 +312,16 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			return
 		}
 
-		// sub is the JWT sub claim; use internal UUID when a user store is present.
+		// sub is the internal user UUID; fall back to GitHub numeric ID only when no user store is wired (tests).
 		sub := strconv.FormatInt(identity.ID, 10)
 		if s.users != nil {
 			user, uErr := s.users.UpsertUser(r.Context(), identity.ID, identity.Email, identity.Login)
 			if uErr != nil {
-				// Log but don't fail the login — user still gets a token even if DB is momentarily down.
 				slog.Default().ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
-			} else {
-				sub = user.ID.String()
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
 			}
+			sub = user.ID.String()
 		}
 
 		code := uuid.New().String()
