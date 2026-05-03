@@ -160,7 +160,7 @@ list or search results.
 
 ## PostgreSQL schema
 
-See `internal/store/migrations/1_initial_schema.sql`.
+See `internal/store/postgres/migrations/1_initial_schema.sql`.
 
 ---
 

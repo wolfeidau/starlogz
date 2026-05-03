@@ -36,7 +36,7 @@ See [`spec/facts.md`](spec/facts.md) for full input/output schemas.
 
 - Go 1.26+
 - Docker (for local Postgres)
-- A [GitHub app](https://github.com/settings/developers) with callback URL set to `http://localhost:8088/auth/github/callback`
+- A [GitHub App](https://github.com/settings/apps) (not an OAuth App) with the callback URL set to `http://localhost:8088/auth/github/callback` and **Expire user authorization tokens** enabled
 
 ### Install a release binary
 
@@ -123,7 +123,9 @@ starlogz implements a standards-compliant OAuth2 authorization server:
 
 Tokens are ES384-signed JWTs with a 7-day expiry. Every token includes a `jti` (UUID v4) checked against the revocation blocklist on each request.
 
-GitHub scopes requested: `read:user`, `user:email`. If the primary email is private, the server falls back to the `/user/emails` endpoint to obtain a verified address.
+**GitHub App required.** starlogz uses a GitHub App (not an OAuth App) as its identity provider. Create one at [github.com/settings/apps](https://github.com/settings/apps) and enable **Expire user authorization tokens** in its settings — this causes GitHub to issue short-lived access tokens (8 h) alongside a long-lived refresh token (~184 days), which starlogz stores encrypted in the `grants` table for future silent renewal.
+
+User permissions requested: `read:user`, `user:email`. If the primary email is private, the server falls back to the `/user/emails` endpoint to obtain a verified address.
 
 GitHub is the only supported identity provider right now. Additional providers (GitLab, Google, and others) are planned using [`golang.org/x/oauth2`](https://pkg.go.dev/golang.org/x/oauth2).
 

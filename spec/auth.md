@@ -23,6 +23,13 @@ Starlogz acts as both OAuth2 Authorization Server and MCP Resource Server.
 GitHub is the upstream identity provider — users authenticate with GitHub,
 and Starlogz issues its own signed JWTs for subsequent API calls.
 
+**GitHub App required.** Starlogz must be configured with a GitHub App (not
+an OAuth App). The GitHub App must have **Expire user authorization tokens**
+enabled. This causes GitHub to issue short-lived access tokens (8 h TTL) and
+long-lived refresh tokens (~184 days), which Starlogz stores encrypted in the
+`grants` table. Without expiring tokens, the grants table will contain empty
+refresh tokens and the v0.2 silent renewal flow will not function.
+
 ```
 MCP Client                Starlogz                    GitHub
     |                        |                           |
@@ -228,7 +235,7 @@ Client registrations are persisted to the `oauth_clients` table with a 90-day TT
 }
 ```
 
-No `client_secret` is issued. Client registrations are not persisted in v0.1.
+No `client_secret` is issued.
 
 ### Error response (400 Bad Request)
 
@@ -278,7 +285,7 @@ Claims:
 | Claim | Type | Description |
 |-------|------|-------------|
 | `iss` | string | Issuer — the server's base URL |
-| `sub` | string | GitHub user ID as decimal string (v0.1); will be internal UUID once the `users` table is added |
+| `sub` | string | GitHub user ID as decimal string; will become the internal `users.id` UUID in v0.2 |
 | `aud` | string[] | Audience — `["<base-url>/mcp"]`; required by MCP spec (RFC 8707) |
 | `email` | string | User's primary email |
 | `scope` | string | Space-delimited list of granted scopes |
@@ -313,6 +320,32 @@ process. A server restart clears it, meaning previously revoked tokens become
 valid again until their `exp`. Acceptable for v0.1; v0.2 will persist the
 blocklist to a `revoked_tokens` table in Postgres and clean it up via a
 background job keyed on `exp`.
+
+### GitHub App token persistence (grants table)
+
+During the token exchange step, the server persists the GitHub App access and
+refresh tokens to a `grants` table, keyed by `jti`. This allows future
+background token refresh without requiring the user to re-authenticate.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `jti` | text (PK) | JWT ID — matches the issued JWT |
+| `github_id` | int8 | FK → `users.github_id` |
+| `access_token` | bytea | GitHub access token, NaCl secretbox encrypted |
+| `refresh_token` | bytea | GitHub refresh token, NaCl secretbox encrypted |
+| `access_token_expiry` | timestamptz | |
+| `refresh_token_expiry` | timestamptz | |
+| `jwt_expiry` | timestamptz | Mirrors JWT `exp`; used for lazy pruning |
+| `updated_at` | timestamptz | |
+
+Tokens are encrypted with `golang.org/x/crypto/nacl/secretbox` (XSalsa20-Poly1305).
+Each row's ciphertext includes a prepended random 24-byte nonce.
+
+On each upsert, expired grants for the same `github_id` are lazily pruned within
+the same transaction (any row whose `jwt_expiry < now()` and `jti != current`).
+
+The `Encryptor` is optional — if not configured (e.g. in tests), grant
+persistence is skipped and the token exchange still completes successfully.
 
 ---
 
@@ -387,8 +420,8 @@ MCP clients construct the discovery URL from the issuer.
 - **No API key validation yet** — API key bearer tokens are not implemented;
   only JWTs from the GitHub OAuth2 flow are verified
 - **`sub` is GitHub user ID** — the `sub` JWT claim is the GitHub numeric user
-  ID as a decimal string; it will become an internal UUID once the `users` table
-  is added in v0.2
+  ID as a decimal string; it will become `users.id` (internal UUID) in v0.2
+  now that the `users` table exists
 - **In-memory OAuth2 state** — pending authorizations (10 min TTL) and issued
   auth codes (5 min TTL) are stored in-process; a server restart during an
   active login flow will invalidate the state and require the user to start over
