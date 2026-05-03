@@ -456,7 +456,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	original := store.Grant{ //nolint:gosec // test fixture tokens
+	original := store.Grant{
 		JTI:                "rotate-jti-old",
 		GitHubID:           400,
 		OurRefreshToken:    "our-refresh-old",
@@ -476,7 +476,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.Equal(t, "facts:read facts:write", seeded.Scope)
 	require.Equal(t, "client-A", seeded.ClientID)
 
-	rotated := store.Grant{ //nolint:gosec // test fixture tokens
+	rotated := store.Grant{
 		JTI:                "rotate-jti-new",
 		GitHubID:           400,
 		OurRefreshToken:    "our-refresh-new",

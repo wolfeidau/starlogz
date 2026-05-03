@@ -33,11 +33,34 @@ func generateOpaqueToken() (string, error) {
 }
 
 // writeTokenResponse writes an RFC 6749 token endpoint response with no-store caching.
-func writeTokenResponse(ctx context.Context, w http.ResponseWriter, resp map[string]any) {
+// refreshToken/refreshExpiry are added only when refreshToken is non-empty.
+func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, refreshToken string, refreshExpiry time.Time) {
+	resp := map[string]any{
+		"access_token": jwt,
+		"token_type":   "Bearer",
+		"expires_in":   int(jwtTTL / time.Second),
+		"scope":        scope,
+	}
+	if refreshToken != "" {
+		resp["refresh_token"] = refreshToken
+		resp["refresh_token_expires_in"] = int(time.Until(refreshExpiry) / time.Second)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Default().ErrorContext(ctx, "failed to write token response", slog.Any("error", err))
+	}
+}
+
+// tearDownGrant revokes the JWT and deletes the grant row. Used when a grant is
+// known-bad (GitHub refresh expired, GitHub returned no refresh token) and the
+// client must re-authenticate. Failures are logged but never block the response.
+func (s *Server) tearDownGrant(ctx context.Context, jti string, jwtExpiry time.Time) {
+	if err := s.revocation.RevokeToken(ctx, jti, jwtExpiry); err != nil {
+		slog.Default().ErrorContext(ctx, "revoke jti for broken grant failed", slog.Any("error", err))
+	}
+	if err := s.grants.DeleteGrant(ctx, jti); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
+		slog.Default().ErrorContext(ctx, "delete broken grant failed", slog.Any("error", err))
 	}
 }
 
@@ -199,13 +222,6 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		return
 	}
 
-	resp := map[string]any{
-		"access_token": tokenString,
-		"token_type":   "Bearer",
-		"expires_in":   int(jwtTTL / time.Second),
-		"scope":        pc.Scope,
-	}
-
 	// Issue an opaque refresh token only when we have a GitHub refresh token to back it.
 	var ourRefreshToken string
 	if s.grants != nil && pc.AccessToken != "" {
@@ -235,12 +251,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		}
 	}
 
-	if ourRefreshToken != "" {
-		resp["refresh_token"] = ourRefreshToken
-		resp["refresh_token_expires_in"] = int(time.Until(pc.RefreshTokenExpiry) / time.Second)
-	}
-
-	writeTokenResponse(r.Context(), w, resp)
+	writeTokenResponse(r.Context(), w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry)
 }
 
 func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form url.Values) {
@@ -280,12 +291,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 
 	// If GitHub refresh token has already expired, drop the grant and force re-auth.
 	if !grant.RefreshTokenExpiry.IsZero() && time.Now().After(grant.RefreshTokenExpiry) {
-		if err := s.revocation.RevokeToken(r.Context(), grant.JTI, grant.JWTExpiry); err != nil {
-			slog.Default().ErrorContext(r.Context(), "revoke jti for expired grant failed", slog.Any("error", err))
-		}
-		if err := s.grants.DeleteGrant(r.Context(), grant.JTI); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
-			slog.Default().ErrorContext(r.Context(), "delete expired grant failed", slog.Any("error", err))
-		}
+		s.tearDownGrant(r.Context(), grant.JTI, grant.JWTExpiry)
 		writeOAuthError(w, "invalid_grant", "GitHub refresh token has expired", http.StatusBadRequest)
 		return
 	}
@@ -303,12 +309,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	if newGHToken.RefreshToken == "" {
 		slog.Default().ErrorContext(r.Context(), "GitHub refresh response missing refresh_token; dropping grant",
 			slog.String("jti", grant.JTI))
-		if err := s.revocation.RevokeToken(r.Context(), grant.JTI, grant.JWTExpiry); err != nil {
-			slog.Default().ErrorContext(r.Context(), "revoke jti for broken grant failed", slog.Any("error", err))
-		}
-		if err := s.grants.DeleteGrant(r.Context(), grant.JTI); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
-			slog.Default().ErrorContext(r.Context(), "delete broken grant failed", slog.Any("error", err))
-		}
+		s.tearDownGrant(r.Context(), grant.JTI, grant.JWTExpiry)
 		writeOAuthError(w, "invalid_grant", "GitHub did not return a new refresh token; re-authentication required", http.StatusBadRequest)
 		return
 	}
@@ -364,14 +365,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		return
 	}
 
-	writeTokenResponse(r.Context(), w, map[string]any{
-		"access_token":             tokenString,
-		"token_type":               "Bearer",
-		"expires_in":               int(jwtTTL / time.Second),
-		"scope":                    grant.Scope,
-		"refresh_token":            newOurRefreshToken,
-		"refresh_token_expires_in": int(time.Until(newGHRefreshExpiry) / time.Second),
-	})
+	writeTokenResponse(r.Context(), w, tokenString, grant.Scope, newOurRefreshToken, newGHRefreshExpiry)
 }
 
 // DCRHandler returns an HTTP handler for Dynamic Client Registration (RFC 7591).

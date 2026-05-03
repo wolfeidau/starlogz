@@ -770,7 +770,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	code := "grant-seam-code"
 	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
 	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
-	require.NoError(t, authState.StoreAuthCode(context.Background(), code, store.AuthCode{ //nolint:gosec // test fixture tokens, not real credentials
+	require.NoError(t, authState.StoreAuthCode(context.Background(), code, store.AuthCode{
 		Sub:                "99887766",
 		GitHubID:           99887766,
 		Email:              "user@example.com",
@@ -836,7 +836,7 @@ func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "auth-code-with-refresh"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{ //nolint:gosec // test fixture tokens
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
 		Sub:                "12345678",
 		GitHubID:           12345678,
 		Email:              "user@example.com",
@@ -878,7 +878,7 @@ func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "auth-code-no-refresh"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{ //nolint:gosec // test fixture
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -925,7 +925,7 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 
 	oldRefresh := "old-opaque-refresh-token"
 	oldJTI := uuid.New().String()
-	gs.seed(store.Grant{ //nolint:gosec // test fixture
+	gs.seed(store.Grant{
 		JTI:                oldJTI,
 		GitHubID:           12345678,
 		OurRefreshToken:    oldRefresh,
@@ -1003,7 +1003,7 @@ func TestTokenHandler_RefreshGrant_ClientIDMismatch(t *testing.T) {
 	gs := &testGrantStore{}
 	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
 
-	gs.seed(store.Grant{ //nolint:gosec // test fixture
+	gs.seed(store.Grant{
 		JTI:                uuid.New().String(),
 		OurRefreshToken:    "rt-mismatch",
 		ClientID:           "client-A",
@@ -1033,7 +1033,7 @@ func TestTokenHandler_RefreshGrant_GitHubRefreshExpired(t *testing.T) {
 	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
 
 	jti := uuid.New().String()
-	gs.seed(store.Grant{ //nolint:gosec // test fixture
+	gs.seed(store.Grant{
 		JTI:                jti,
 		OurRefreshToken:    "rt-expired",
 		ClientID:           "test-client",
@@ -1089,7 +1089,7 @@ func TestTokenHandler_RefreshGrant_GitHubRefreshAPIFails(t *testing.T) {
 	srv := newRefreshTestServer(t, gs, gh)
 
 	jti := uuid.New().String()
-	gs.seed(store.Grant{ //nolint:gosec // test fixture
+	gs.seed(store.Grant{
 		JTI:                jti,
 		OurRefreshToken:    "rt-gh-fail",
 		ClientID:           "test-client",
@@ -1126,7 +1126,7 @@ func TestTokenHandler_RefreshGrant_GitHubReturnsNoRefreshToken(t *testing.T) {
 	srv := newRefreshTestServer(t, gs, gh)
 
 	jti := uuid.New().String()
-	gs.seed(store.Grant{ //nolint:gosec // test fixture
+	gs.seed(store.Grant{
 		JTI:                jti,
 		OurRefreshToken:    "rt-noref",
 		ClientID:           "test-client",
@@ -1196,7 +1196,7 @@ func TestTokenHandler_RefreshGrant_RotateNotFound(t *testing.T) {
 	}
 	srv := newRefreshTestServer(t, gs, gh)
 
-	gs.seed(store.Grant{ //nolint:gosec // test fixture
+	gs.seed(store.Grant{
 		JTI:                uuid.New().String(),
 		OurRefreshToken:    "rt-race",
 		ClientID:           "test-client",
@@ -1603,10 +1603,9 @@ type mockGitHubConnector struct {
 	token    *oauth2.Token
 	err      error
 
-	refreshToken    *oauth2.Token
-	refreshIdentity *githubIdentity
-	refreshErr      error
-	refreshCalls    []string
+	refreshToken *oauth2.Token
+	refreshErr   error
+	refreshCalls []string
 }
 
 func (m *mockGitHubConnector) AuthCodeURL(state string) string {
@@ -1622,15 +1621,11 @@ func (m *mockGitHubConnector) RefreshToken(_ context.Context, refreshToken strin
 	if m.refreshErr != nil {
 		return nil, nil, m.refreshErr
 	}
-	id := m.refreshIdentity
-	if id == nil {
-		id = m.identity
-	}
 	tok := m.refreshToken
 	if tok == nil {
 		tok = m.token
 	}
-	return tok, id, nil
+	return tok, m.identity, nil
 }
 
 type testClientStore struct {
