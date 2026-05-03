@@ -55,8 +55,8 @@ Key env vars:
 |-----|---------|-------------|
 | `HTTP_LISTEN_ADDR` | `localhost:8088` | TCP listen address |
 | `SERVER_URL` | `http://localhost:8088` | Public base URL (used in discovery docs) |
-| `GITHUB_CLIENT_ID` | _(required)_ | GitHub OAuth2 app client ID |
-| `GITHUB_CLIENT_SECRET` | _(required)_ | GitHub OAuth2 app client secret |
+| `GITHUB_CLIENT_ID` | _(required)_ | GitHub App client ID |
+| `GITHUB_CLIENT_SECRET` | _(required)_ | GitHub App client secret |
 | `DATABASE_URL` | _(required)_ | PostgreSQL connection string (pgx DSN) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = disabled)_ | OTLP collector endpoint |
 | `OTEL_EXPORTER_OTLP_HEADERS` | — | e.g. Honeycomb API key |
