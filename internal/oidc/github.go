@@ -29,6 +29,8 @@ type gitHubConnector interface {
 	AuthCodeURL(state string) string
 	// ExchangeCode exchanges an authorization code for a token and resolved identity.
 	ExchangeCode(ctx context.Context, code string) (*oauth2.Token, *githubIdentity, error)
+	// RefreshToken exchanges a GitHub refresh token for a new token pair and identity.
+	RefreshToken(ctx context.Context, refreshToken string) (*oauth2.Token, *githubIdentity, error)
 }
 
 // oauthGitHubConnector is the production implementation backed by *oauth2.Config.
@@ -56,6 +58,21 @@ func (c *oauthGitHubConnector) ExchangeCode(ctx context.Context, code string) (*
 	token, err := c.cfg.Exchange(ctx, code)
 	if err != nil {
 		return nil, nil, fmt.Errorf("exchange code: %w", err)
+	}
+	identity, err := fetchGitHubIdentity(ctx, c.cfg.Client(ctx, token))
+	if err != nil {
+		return nil, nil, err
+	}
+	return token, identity, nil
+}
+
+// RefreshToken posts to GitHub's token endpoint with grant_type=refresh_token.
+// An empty AccessToken on the seed token forces the oauth2 library to call refresh.
+func (c *oauthGitHubConnector) RefreshToken(ctx context.Context, refreshToken string) (*oauth2.Token, *githubIdentity, error) {
+	src := c.cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
+	token, err := src.Token()
+	if err != nil {
+		return nil, nil, fmt.Errorf("refresh GitHub token: %w", err)
 	}
 	identity, err := fetchGitHubIdentity(ctx, c.cfg.Client(ctx, token))
 	if err != nil {

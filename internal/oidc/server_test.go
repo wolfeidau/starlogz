@@ -228,7 +228,7 @@ func TestDiscoveryHandler_RFC8414_SpecCompliance(t *testing.T) {
 	}
 
 	require.Equal(t, []string{"code"}, meta.ResponseTypesSupported)
-	require.Equal(t, []string{"authorization_code"}, meta.GrantTypesSupported)
+	require.Equal(t, []string{"authorization_code", "refresh_token"}, meta.GrantTypesSupported)
 	require.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
 	require.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
 	require.ElementsMatch(t, []string{"facts:read", "facts:write", "org:admin"}, meta.ScopesSupported)
@@ -807,6 +807,313 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(7*24*time.Hour), p.JWTExpiry, 5*time.Second)
 }
 
+// --- Refresh grant ---
+
+func newRefreshTestServer(t *testing.T, gs *testGrantStore, gh *mockGitHubConnector) *Server {
+	t.Helper()
+	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	raw, err := jwk.Import(privkey)
+	require.NoError(t, err)
+	srv, err := NewServer(Config{
+		BaseURL:    "http://example.com",
+		Grants:     gs,
+		AuthState:  newInMemAuthState(),
+		Revocation: newInMemRevocation(),
+	}, raw)
+	require.NoError(t, err)
+	if gh != nil {
+		srv.github = gh
+	}
+	return srv
+}
+
+func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, nil)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "auth-code-with-refresh"
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{ //nolint:gosec // test fixture tokens
+		Sub:                "12345678",
+		GitHubID:           12345678,
+		Email:              "user@example.com",
+		Scope:              "facts:read facts:write",
+		CodeChallenge:      pkceChallenge(verifier),
+		RedirectURI:        "https://client.example.com/callback",
+		ClientID:           "test-client",
+		AccessToken:        "gha_access",
+		RefreshToken:       "ghr_refresh",
+		AccessTokenExpiry:  time.Now().Add(8 * time.Hour),
+		RefreshTokenExpiry: time.Now().Add(180 * 24 * time.Hour),
+	}))
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"client_id":     {"test-client"},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp["refresh_token"], "refresh_token must be present when GH refresh token exists")
+	require.Greater(t, resp["refresh_token_expires_in"].(float64), float64(0))
+	require.Len(t, gs.calls, 1)
+	require.NotEmpty(t, gs.calls[0].OurRefreshToken)
+	require.Equal(t, "facts:read facts:write", gs.calls[0].Scope)
+}
+
+func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, nil)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "auth-code-no-refresh"
+	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{ //nolint:gosec // test fixture
+		Sub:           "12345678",
+		GitHubID:      12345678,
+		Email:         "user@example.com",
+		Scope:         "facts:read",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   "https://client.example.com/callback",
+		ClientID:      "test-client",
+		AccessToken:   "gha_access",
+		// RefreshToken empty — OAuth App, not GitHub App with expiring tokens.
+	}))
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"client_id":     {"test-client"},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	_, hasRefresh := resp["refresh_token"]
+	require.False(t, hasRefresh, "no refresh_token should be issued without a GitHub refresh token")
+	require.Len(t, gs.calls, 1)
+	require.Empty(t, gs.calls[0].OurRefreshToken)
+}
+
+func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{
+		refreshToken: &oauth2.Token{
+			AccessToken:  "gha_new_access",
+			RefreshToken: "ghr_new_refresh",
+			Expiry:       time.Now().Add(8 * time.Hour),
+		},
+		identity: &githubIdentity{ID: 12345678, Email: "user@example.com", Login: "user"},
+	}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	oldRefresh := "old-opaque-refresh-token"
+	oldJTI := uuid.New().String()
+	gs.seed(store.Grant{ //nolint:gosec // test fixture
+		JTI:                oldJTI,
+		GitHubID:           12345678,
+		OurRefreshToken:    oldRefresh,
+		ClientID:           "test-client",
+		Scope:              "facts:read facts:write",
+		AccessToken:        "gha_old_access",
+		RefreshToken:       "ghr_old_refresh",
+		AccessTokenExpiry:  time.Now().Add(1 * time.Hour),
+		RefreshTokenExpiry: time.Now().Add(180 * 24 * time.Hour),
+		JWTExpiry:          time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {oldRefresh},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp["access_token"])
+	require.Equal(t, "Bearer", resp["token_type"])
+	require.Equal(t, "facts:read facts:write", resp["scope"])
+	newRefresh, _ := resp["refresh_token"].(string)
+	require.NotEmpty(t, newRefresh)
+	require.NotEqual(t, oldRefresh, newRefresh, "refresh token must rotate")
+
+	require.Equal(t, []string{"ghr_old_refresh"}, gh.refreshCalls,
+		"GitHub refresh must be called with the stored GitHub refresh token, not our opaque one")
+	require.Len(t, gs.rotateCalls, 1)
+	require.Equal(t, oldRefresh, gs.rotateCalls[0].oldToken)
+	require.Equal(t, "gha_new_access", gs.rotateCalls[0].grant.AccessToken)
+	require.Equal(t, "ghr_new_refresh", gs.rotateCalls[0].grant.RefreshToken)
+
+	// Old JTI must be on the revocation list.
+	revoked, err := srv.revocation.IsTokenRevoked(context.Background(), oldJTI)
+	require.NoError(t, err)
+	require.True(t, revoked, "previous JWT jti must be revoked after rotation")
+
+	// New JWT must verify and carry the rotated jti.
+	tokenString, _ := resp["access_token"].(string)
+	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	require.NoError(t, err)
+	require.Equal(t, "12345678", info.UserID)
+}
+
+func TestTokenHandler_RefreshGrant_UnknownToken(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"never-issued"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_RefreshGrant_ClientIDMismatch(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	gs.seed(store.Grant{ //nolint:gosec // test fixture
+		JTI:                uuid.New().String(),
+		OurRefreshToken:    "rt-mismatch",
+		ClientID:           "client-A",
+		RefreshToken:       "ghr",
+		RefreshTokenExpiry: time.Now().Add(time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"rt-mismatch"},
+		"client_id":     {"client-B"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_client", errResp["error"])
+	require.Empty(t, gs.rotateCalls, "must not rotate on client mismatch")
+}
+
+func TestTokenHandler_RefreshGrant_GitHubRefreshExpired(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	jti := uuid.New().String()
+	gs.seed(store.Grant{ //nolint:gosec // test fixture
+		JTI:                jti,
+		OurRefreshToken:    "rt-expired",
+		ClientID:           "test-client",
+		RefreshToken:       "ghr-expired",
+		RefreshTokenExpiry: time.Now().Add(-time.Hour),
+		JWTExpiry:          time.Now().Add(time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"rt-expired"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+
+	revoked, err := srv.revocation.IsTokenRevoked(context.Background(), jti)
+	require.NoError(t, err)
+	require.True(t, revoked, "expired-grant jti must be revoked")
+	require.Equal(t, []string{jti}, gs.deleteCalls, "expired grant row must be deleted")
+}
+
+func TestTokenHandler_RefreshGrant_MissingParams(t *testing.T) {
+	srv := newRefreshTestServer(t, &testGrantStore{}, nil)
+
+	cases := []url.Values{
+		{"grant_type": {"refresh_token"}, "client_id": {"c"}},
+		{"grant_type": {"refresh_token"}, "refresh_token": {"rt"}},
+		{"grant_type": {"refresh_token"}},
+	}
+	for _, form := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		srv.TokenHandler().ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		var errResp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+		require.Equal(t, "invalid_request", errResp["error"])
+	}
+}
+
+func TestTokenHandler_RefreshGrant_ConcurrentRace(t *testing.T) {
+	gs := &testGrantStore{rotateErr: store.ErrNotFound}
+	gh := &mockGitHubConnector{
+		refreshToken: &oauth2.Token{AccessToken: "a", RefreshToken: "b", Expiry: time.Now().Add(time.Hour)},
+		identity:     &githubIdentity{ID: 1, Email: "u@example.com", Login: "u"},
+	}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	gs.seed(store.Grant{ //nolint:gosec // test fixture
+		JTI:                uuid.New().String(),
+		OurRefreshToken:    "rt-race",
+		ClientID:           "test-client",
+		RefreshToken:       "ghr",
+		RefreshTokenExpiry: time.Now().Add(time.Hour),
+		JWTExpiry:          time.Now().Add(time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"rt-race"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
 // --- GitHub callback ---
 
 func TestGitHubCallbackHandler_WrongMethod(t *testing.T) {
@@ -1087,23 +1394,72 @@ func TestValidateRedirectURIs_RejectsWildcard(t *testing.T) {
 // --- Spies ---
 
 type testGrantStore struct {
-	calls []store.Grant
+	mu          sync.Mutex
+	calls       []store.Grant
+	byRefresh   map[string]store.Grant
+	rotateCalls []rotateCall
+	deleteCalls []string
+	rotateErr   error
+}
+
+type rotateCall struct {
+	oldToken string
+	grant    store.Grant
+}
+
+func (s *testGrantStore) seed(g store.Grant) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.byRefresh == nil {
+		s.byRefresh = make(map[string]store.Grant)
+	}
+	s.byRefresh[g.OurRefreshToken] = g
 }
 
 func (s *testGrantStore) UpsertGrant(_ context.Context, g store.Grant) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls = append(s.calls, g)
+	if g.OurRefreshToken != "" {
+		if s.byRefresh == nil {
+			s.byRefresh = make(map[string]store.Grant)
+		}
+		s.byRefresh[g.OurRefreshToken] = g
+	}
 	return nil
 }
 
-func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, _ string) (*store.Grant, error) {
-	return nil, store.ErrNotFound
+func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, token string) (*store.Grant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.byRefresh[token]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return &g, nil
 }
 
-func (s *testGrantStore) RotateGrant(_ context.Context, _ string, _ store.Grant) (*store.Grant, error) {
-	return nil, store.ErrNotFound
+func (s *testGrantStore) RotateGrant(_ context.Context, oldToken string, g store.Grant) (*store.Grant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rotateCalls = append(s.rotateCalls, rotateCall{oldToken, g})
+	if s.rotateErr != nil {
+		return nil, s.rotateErr
+	}
+	if _, ok := s.byRefresh[oldToken]; !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(s.byRefresh, oldToken)
+	if g.OurRefreshToken != "" {
+		s.byRefresh[g.OurRefreshToken] = g
+	}
+	return &g, nil
 }
 
-func (s *testGrantStore) DeleteGrant(_ context.Context, _ string) error {
+func (s *testGrantStore) DeleteGrant(_ context.Context, jti string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteCalls = append(s.deleteCalls, jti)
 	return nil
 }
 
@@ -1126,6 +1482,11 @@ type mockGitHubConnector struct {
 	identity *githubIdentity
 	token    *oauth2.Token
 	err      error
+
+	refreshToken    *oauth2.Token
+	refreshIdentity *githubIdentity
+	refreshErr      error
+	refreshCalls    []string
 }
 
 func (m *mockGitHubConnector) AuthCodeURL(state string) string {
@@ -1134,6 +1495,22 @@ func (m *mockGitHubConnector) AuthCodeURL(state string) string {
 
 func (m *mockGitHubConnector) ExchangeCode(_ context.Context, _ string) (*oauth2.Token, *githubIdentity, error) {
 	return m.token, m.identity, m.err
+}
+
+func (m *mockGitHubConnector) RefreshToken(_ context.Context, refreshToken string) (*oauth2.Token, *githubIdentity, error) {
+	m.refreshCalls = append(m.refreshCalls, refreshToken)
+	if m.refreshErr != nil {
+		return nil, nil, m.refreshErr
+	}
+	id := m.refreshIdentity
+	if id == nil {
+		id = m.identity
+	}
+	tok := m.refreshToken
+	if tok == nil {
+		tok = m.token
+	}
+	return tok, id, nil
 }
 
 type testClientStore struct {

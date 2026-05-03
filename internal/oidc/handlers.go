@@ -1,6 +1,8 @@
 package oidc
 
 import (
+	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +20,26 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 )
+
+const jwtTTL = 7 * 24 * time.Hour
+
+// generateOpaqueToken returns a base64url-encoded 32-byte random value used as our_refresh_token.
+func generateOpaqueToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+// writeTokenResponse writes an RFC 6749 token endpoint response with no-store caching.
+func writeTokenResponse(ctx context.Context, w http.ResponseWriter, resp map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Default().ErrorContext(ctx, "failed to write token response", slog.Any("error", err))
+	}
+}
 
 // LogoutHandler handles POST /auth/logout. It verifies the bearer token,
 // extracts the jti and exp claims, and revokes the token.
@@ -124,78 +146,219 @@ func (s *Server) TokenHandler() http.Handler {
 			return
 		}
 
-		if r.FormValue("grant_type") != "authorization_code" {
-			writeOAuthError(w, "unsupported_grant_type", "only grant_type=authorization_code is supported", http.StatusBadRequest)
-			return
+		switch r.PostForm.Get("grant_type") {
+		case "authorization_code":
+			s.handleAuthCodeGrant(w, r, r.PostForm)
+		case "refresh_token":
+			s.handleRefreshGrant(w, r, r.PostForm)
+		default:
+			writeOAuthError(w, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token", http.StatusBadRequest)
 		}
+	})
+}
 
-		code := r.FormValue("code")
-		codeVerifier := r.FormValue("code_verifier")
-		if code == "" || codeVerifier == "" {
-			writeOAuthError(w, "invalid_request", "code and code_verifier are required", http.StatusBadRequest)
-			return
-		}
+func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, form url.Values) {
+	code := form.Get("code")
+	codeVerifier := form.Get("code_verifier")
+	if code == "" || codeVerifier == "" {
+		writeOAuthError(w, "invalid_request", "code and code_verifier are required", http.StatusBadRequest)
+		return
+	}
 
-		pc, err := s.authState.ConsumeAuthCode(r.Context(), code)
-		if errors.Is(err, storepkg.ErrNotFound) {
-			writeOAuthError(w, "invalid_grant", "invalid or expired authorization code", http.StatusBadRequest)
-			return
+	pc, err := s.authState.ConsumeAuthCode(r.Context(), code)
+	if errors.Is(err, storepkg.ErrNotFound) {
+		writeOAuthError(w, "invalid_grant", "invalid or expired authorization code", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		slog.Default().ErrorContext(r.Context(), "consume auth code failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// RFC 6749 §4.1.3: redirect_uri must be present and identical.
+	if form.Get("redirect_uri") != pc.RedirectURI {
+		writeOAuthError(w, "invalid_grant", "redirect_uri does not match authorization request", http.StatusBadRequest)
+		return
+	}
+
+	// Verify PKCE: BASE64URL(SHA256(code_verifier)) must equal stored code_challenge.
+	h := sha256.Sum256([]byte(codeVerifier))
+	if base64.RawURLEncoding.EncodeToString(h[:]) != pc.CodeChallenge {
+		writeOAuthError(w, "invalid_grant", "code_verifier does not match code_challenge", http.StatusBadRequest)
+		return
+	}
+
+	jti := uuid.New().String()
+	jwtExpiry := time.Now().Add(jwtTTL)
+
+	tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti)
+	if err != nil {
+		slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
+		return
+	}
+
+	resp := map[string]any{
+		"access_token": tokenString,
+		"token_type":   "Bearer",
+		"expires_in":   int(jwtTTL / time.Second),
+		"scope":        pc.Scope,
+	}
+
+	// Issue an opaque refresh token only when we have a GitHub refresh token to back it.
+	var ourRefreshToken string
+	if s.grants != nil && pc.AccessToken != "" {
+		if pc.RefreshToken != "" {
+			ourRefreshToken, err = generateOpaqueToken()
+			if err != nil {
+				slog.Default().ErrorContext(r.Context(), "generate refresh token failed", slog.Any("error", err))
+				writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
+				return
+			}
 		}
-		if err != nil {
-			slog.Default().ErrorContext(r.Context(), "consume auth code failed", slog.Any("error", err))
+		if err := s.grants.UpsertGrant(r.Context(), storepkg.Grant{
+			JTI:                jti,
+			GitHubID:           pc.GitHubID,
+			OurRefreshToken:    ourRefreshToken,
+			ClientID:           pc.ClientID,
+			Scope:              pc.Scope,
+			AccessToken:        pc.AccessToken,
+			RefreshToken:       pc.RefreshToken,
+			AccessTokenExpiry:  pc.AccessTokenExpiry,
+			RefreshTokenExpiry: pc.RefreshTokenExpiry,
+			JWTExpiry:          jwtExpiry,
+		}); err != nil {
+			// Log but don't fail the token exchange — the client still gets a valid JWT.
+			slog.Default().ErrorContext(r.Context(), "upsert grant failed", slog.Any("error", err))
+			ourRefreshToken = ""
+		}
+	}
+
+	if ourRefreshToken != "" {
+		resp["refresh_token"] = ourRefreshToken
+		resp["refresh_token_expires_in"] = int(time.Until(pc.RefreshTokenExpiry) / time.Second)
+	}
+
+	writeTokenResponse(r.Context(), w, resp)
+}
+
+func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form url.Values) {
+	refreshToken := form.Get("refresh_token")
+	clientID := form.Get("client_id")
+	if refreshToken == "" || clientID == "" {
+		writeOAuthError(w, "invalid_request", "refresh_token and client_id are required", http.StatusBadRequest)
+		return
+	}
+
+	if s.grants == nil {
+		writeOAuthError(w, "invalid_grant", "refresh token grant not supported", http.StatusBadRequest)
+		return
+	}
+
+	grant, err := s.grants.GetGrantByRefreshToken(r.Context(), refreshToken)
+	if errors.Is(err, storepkg.ErrNotFound) {
+		writeOAuthError(w, "invalid_grant", "refresh token not found or already used", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		slog.Default().ErrorContext(r.Context(), "lookup grant by refresh token failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// client_id is validated only when stored on the grant (best-effort per v0.2 constraints).
+	if grant.ClientID != "" && grant.ClientID != clientID {
+		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
+		return
+	}
+
+	if grant.RefreshToken == "" {
+		writeOAuthError(w, "invalid_grant", "grant has no GitHub refresh token", http.StatusBadRequest)
+		return
+	}
+
+	// If GitHub refresh token has already expired, drop the grant and force re-auth.
+	if !grant.RefreshTokenExpiry.IsZero() && time.Now().After(grant.RefreshTokenExpiry) {
+		if err := s.revocation.RevokeToken(r.Context(), grant.JTI, grant.JWTExpiry); err != nil {
+			slog.Default().ErrorContext(r.Context(), "revoke jti for expired grant failed", slog.Any("error", err))
+		}
+		if err := s.grants.DeleteGrant(r.Context(), grant.JTI); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
+			slog.Default().ErrorContext(r.Context(), "delete expired grant failed", slog.Any("error", err))
+		}
+		writeOAuthError(w, "invalid_grant", "GitHub refresh token has expired", http.StatusBadRequest)
+		return
+	}
+
+	newGHToken, identity, err := s.github.RefreshToken(r.Context(), grant.RefreshToken)
+	if err != nil {
+		slog.Default().ErrorContext(r.Context(), "GitHub token refresh failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "GitHub token refresh failed", http.StatusInternalServerError)
+		return
+	}
+
+	sub := strconv.FormatInt(identity.ID, 10)
+	if s.users != nil {
+		user, uErr := s.users.UpsertUser(r.Context(), identity.ID, identity.Email, identity.Login)
+		if uErr != nil {
+			slog.Default().ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
 			writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 			return
 		}
+		sub = user.ID.String()
+	}
 
-		// RFC 6749 §4.1.3: redirect_uri must be present and identical.
-		if r.FormValue("redirect_uri") != pc.RedirectURI {
-			writeOAuthError(w, "invalid_grant", "redirect_uri does not match authorization request", http.StatusBadRequest)
+	newJTI := uuid.New().String()
+	newOurRefreshToken, err := generateOpaqueToken()
+	if err != nil {
+		slog.Default().ErrorContext(r.Context(), "generate refresh token failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
+		return
+	}
+	newJWTExpiry := time.Now().Add(jwtTTL)
+	newGHRefreshExpiry := extractRefreshExpiry(newGHToken)
+
+	newGrant := storepkg.Grant{
+		JTI:                newJTI,
+		GitHubID:           grant.GitHubID,
+		OurRefreshToken:    newOurRefreshToken,
+		ClientID:           grant.ClientID,
+		Scope:              grant.Scope,
+		AccessToken:        newGHToken.AccessToken,
+		RefreshToken:       newGHToken.RefreshToken,
+		AccessTokenExpiry:  newGHToken.Expiry,
+		RefreshTokenExpiry: newGHRefreshExpiry,
+		JWTExpiry:          newJWTExpiry,
+	}
+	if _, err := s.grants.RotateGrant(r.Context(), refreshToken, newGrant); err != nil {
+		if errors.Is(err, storepkg.ErrNotFound) {
+			// Concurrent refresh: another request already consumed this token.
+			writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
 			return
 		}
+		slog.Default().ErrorContext(r.Context(), "rotate grant failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "failed to rotate grant", http.StatusInternalServerError)
+		return
+	}
 
-		// Verify PKCE: BASE64URL(SHA256(code_verifier)) must equal stored code_challenge.
-		h := sha256.Sum256([]byte(codeVerifier))
-		if base64.RawURLEncoding.EncodeToString(h[:]) != pc.CodeChallenge {
-			writeOAuthError(w, "invalid_grant", "code_verifier does not match code_challenge", http.StatusBadRequest)
-			return
-		}
+	if err := s.revocation.RevokeToken(r.Context(), grant.JTI, grant.JWTExpiry); err != nil {
+		slog.Default().ErrorContext(r.Context(), "revoke previous jti failed", slog.Any("error", err))
+	}
 
-		jti := uuid.New().String()
-		jwtExpiry := time.Now().Add(7 * 24 * time.Hour)
+	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI)
+	if err != nil {
+		slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
+		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
+		return
+	}
 
-		tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti)
-		if err != nil {
-			slog.Default().ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
-			writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
-			return
-		}
-
-		if s.grants != nil && pc.AccessToken != "" {
-			if err := s.grants.UpsertGrant(r.Context(), storepkg.Grant{
-				JTI:                jti,
-				GitHubID:           pc.GitHubID,
-				ClientID:           pc.ClientID,
-				AccessToken:        pc.AccessToken,
-				RefreshToken:       pc.RefreshToken,
-				AccessTokenExpiry:  pc.AccessTokenExpiry,
-				RefreshTokenExpiry: pc.RefreshTokenExpiry,
-				JWTExpiry:          jwtExpiry,
-			}); err != nil {
-				// Log but don't fail the token exchange — the client still gets a valid JWT.
-				slog.Default().ErrorContext(r.Context(), "upsert grant failed", slog.Any("error", err))
-			}
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"access_token": tokenString,
-			"token_type":   "Bearer",
-			"expires_in":   int(7 * 24 * time.Hour / time.Second),
-			"scope":        pc.Scope,
-		}); err != nil {
-			slog.Default().ErrorContext(r.Context(), "failed to write token response", slog.Any("error", err))
-		}
+	writeTokenResponse(r.Context(), w, map[string]any{
+		"access_token":             tokenString,
+		"token_type":               "Bearer",
+		"expires_in":               int(jwtTTL / time.Second),
+		"scope":                    grant.Scope,
+		"refresh_token":            newOurRefreshToken,
+		"refresh_token_expires_in": int(time.Until(newGHRefreshExpiry) / time.Second),
 	})
 }
 

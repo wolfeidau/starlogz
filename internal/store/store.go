@@ -126,6 +126,7 @@ type Grant struct {
 	GitHubID           int64
 	OurRefreshToken    string
 	ClientID           string
+	Scope              string
 	AccessToken        string
 	RefreshToken       string
 	AccessTokenExpiry  time.Time
