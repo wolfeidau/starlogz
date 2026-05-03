@@ -15,7 +15,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
+	"go.opentelemetry.io/otel/trace"
 )
+
+const tracerName = "github.com/wolfeidau/starlogz"
 
 // InitTelemetry initializes OpenTelemetry with OTLP exporters for metrics and traces.
 // Configuration is read from environment variables:
@@ -114,4 +117,8 @@ func initMeterProvider(ctx context.Context, res *resource.Resource) (func(contex
 
 	otel.SetMeterProvider(mp)
 	return mp.Shutdown, nil
+}
+
+func Start(ctx context.Context, name string) (context.Context, trace.Span) {
+	return otel.GetTracerProvider().Tracer(tracerName).Start(ctx, name)
 }

@@ -76,34 +76,26 @@ func (s *Server) LogoutHandler() http.Handler {
 		const prefix = "Bearer "
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, prefix) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"unauthorized","error_description":"missing bearer token"}`))
+			writeOAuthError(w, "invalid_request", "missing bearer token", http.StatusUnauthorized)
 			return
 		}
 		tokenString := authHeader[len(prefix):]
 
 		tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), s.pubkey))
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"token verification failed"}`))
+			writeOAuthError(w, "invalid_token", "token verification failed", http.StatusUnauthorized)
 			return
 		}
 
 		var jti string
 		if err := tok.Get("jti", &jti); err != nil || jti == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"missing jti claim"}`))
+			writeOAuthError(w, "invalid_token", "missing jti claim", http.StatusUnauthorized)
 			return
 		}
 
 		exp, ok := tok.Expiration()
 		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"missing expiration claim"}`))
+			writeOAuthError(w, "invalid_token", "missing expiration claim", http.StatusUnauthorized)
 			return
 		}
 
@@ -122,9 +114,9 @@ func (s *Server) JWKSHandler() http.Handler {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if _, err := w.Write(s.jwksJSON); err != nil {
 			slog.Default().Error("failed to write JWKS response", slog.Any("error", err))
 		}
@@ -134,10 +126,6 @@ func (s *Server) JWKSHandler() http.Handler {
 // DiscoveryHandler serves the OAuth2 authorization server metadata document.
 func (s *Server) DiscoveryHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

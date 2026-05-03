@@ -61,7 +61,7 @@ func (c *oauthGitHubConnector) ExchangeCode(ctx context.Context, code string) (*
 	}
 	identity, err := fetchGitHubIdentity(ctx, c.cfg.Client(ctx, token))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("fetch GitHub identity: %w", err)
 	}
 	return token, identity, nil
 }
@@ -76,7 +76,7 @@ func (c *oauthGitHubConnector) RefreshToken(ctx context.Context, refreshToken st
 	}
 	identity, err := fetchGitHubIdentity(ctx, c.cfg.Client(ctx, token))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("fetch GitHub identity: %w", err)
 	}
 	return token, identity, nil
 }
@@ -117,12 +117,12 @@ func fetchGitHubIdentity(ctx context.Context, client *http.Client) (*githubIdent
 func githubGet(ctx context.Context, client *http.Client, url string, dst any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("do request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
