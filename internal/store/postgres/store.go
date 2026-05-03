@@ -76,27 +76,15 @@ func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login str
 	}
 
 	if created {
-		// Choose a slug for the personal org; fall back to login-githubID if the slug is taken.
-		slug := login
-		orgName := login
-
+		// Personal org slug is the GitHub login used as a display name only.
+		// Uniqueness is not enforced for personal orgs — they are resolved via
+		// user ID, never by slug lookup.
 		var orgIDStr string
 		err = tx.QueryRow(ctx, `
 			INSERT INTO orgs (slug, name, kind)
 			VALUES ($1, $2, 'personal')
-			ON CONFLICT (slug) DO NOTHING
 			RETURNING id`,
-			slug, orgName).Scan(&orgIDStr)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// slug collision — fall back to login-githubID
-			slug = fmt.Sprintf("%s-%d", login, githubID)
-			err = tx.QueryRow(ctx, `
-				INSERT INTO orgs (slug, name, kind)
-				VALUES ($1, $2, 'personal')
-				ON CONFLICT (slug) DO NOTHING
-				RETURNING id`,
-				slug, orgName).Scan(&orgIDStr)
-		}
+			login, login).Scan(&orgIDStr)
 		if err != nil {
 			return nil, fmt.Errorf("insert personal org: %w", err)
 		}

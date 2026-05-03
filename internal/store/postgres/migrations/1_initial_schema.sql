@@ -17,11 +17,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS orgs (
     id         UUID        PRIMARY KEY DEFAULT uuidv7(),
-    slug       TEXT        NOT NULL UNIQUE,
+    slug       TEXT        NOT NULL,
     name       TEXT        NOT NULL,
     kind       TEXT        NOT NULL CHECK (kind IN ('personal', 'shared')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Only shared org slugs are unique; personal org slugs are display-only and resolved via user ID.
+CREATE UNIQUE INDEX IF NOT EXISTS orgs_shared_slug_unique ON orgs (slug) WHERE kind = 'shared';
 
 CREATE TABLE IF NOT EXISTS org_members (
     org_id    UUID        NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,

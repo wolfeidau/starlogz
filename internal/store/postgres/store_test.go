@@ -553,28 +553,27 @@ func TestGetPersonalOrgByUserID_NotFound(t *testing.T) {
 
 // --- UpsertUser slug collision ---
 
-func TestUpsertUser_SlugCollisionFallsBackToLoginGithubID(t *testing.T) {
+func TestUpsertUser_SameLoginSlugAllowedForMultiplePersonalOrgs(t *testing.T) {
+	// Personal org slugs are display-only; two users with the same GitHub login
+	// (possible after a username transfer) can both hold that slug without conflict.
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	// First user claims the "sharedlogin" slug.
-	_, err := st.UpsertUser(ctx, 920, "first@example.com", "sharedlogin")
+	u1, err := st.UpsertUser(ctx, 920, "first@example.com", "sharedlogin")
 	require.NoError(t, err)
 
-	firstOrg, err := st.GetPersonalOrgByUserID(ctx, func() uuid.UUID {
-		u, _ := st.GetUserByGitHubID(ctx, 920)
-		return u.ID
-	}())
-	require.NoError(t, err)
-	require.Equal(t, "sharedlogin", firstOrg.Slug, "first user must claim the plain slug")
-
-	// Second user with the same login gets the fallback slug.
 	u2, err := st.UpsertUser(ctx, 921, "second@example.com", "sharedlogin")
 	require.NoError(t, err)
 
-	secondOrg, err := st.GetPersonalOrgByUserID(ctx, u2.ID)
+	org1, err := st.GetPersonalOrgByUserID(ctx, u1.ID)
 	require.NoError(t, err)
-	require.Equal(t, "sharedlogin-921", secondOrg.Slug, "second user must fall back to login-githubID slug")
+	require.Equal(t, "sharedlogin", org1.Slug)
+
+	org2, err := st.GetPersonalOrgByUserID(ctx, u2.ID)
+	require.NoError(t, err)
+	require.Equal(t, "sharedlogin", org2.Slug, "second user must also get the login slug without conflict")
+
+	require.NotEqual(t, org1.ID, org2.ID, "each user must have their own personal org")
 }
 
 // --- StorePendingAuth / ConsumePendingAuth ---
