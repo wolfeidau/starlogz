@@ -330,7 +330,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		RefreshTokenExpiry: newGHRefreshExpiry,
 		JWTExpiry:          newJWTExpiry,
 	}
-	if _, err := s.grants.RotateGrant(r.Context(), refreshToken, newGrant); err != nil {
+	if _, err := s.grants.RotateGrant(r.Context(), refreshToken, grant.JTI, grant.JWTExpiry, newGrant); err != nil {
 		if errors.Is(err, storepkg.ErrNotFound) {
 			// Concurrent refresh: another request already consumed this token.
 			writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
@@ -339,10 +339,6 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		slog.Default().ErrorContext(r.Context(), "rotate grant failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to rotate grant", http.StatusInternalServerError)
 		return
-	}
-
-	if err := s.revocation.RevokeToken(r.Context(), grant.JTI, grant.JWTExpiry); err != nil {
-		slog.Default().ErrorContext(r.Context(), "revoke previous jti failed", slog.Any("error", err))
 	}
 
 	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI)

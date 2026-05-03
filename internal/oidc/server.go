@@ -24,10 +24,13 @@ type UserUpserter interface {
 }
 
 // GrantStore persists authorization grants with associated GitHub App tokens.
+// RotateGrant atomically swaps the grant row and records the old jti as revoked,
+// so a failure of either step leaves both tokens valid (current state) rather
+// than the new token live and the old one un-revoked.
 type GrantStore interface {
 	UpsertGrant(ctx context.Context, g store.Grant) error
 	GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error)
-	RotateGrant(ctx context.Context, oldToken string, g store.Grant) (*store.Grant, error)
+	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error)
 	DeleteGrant(ctx context.Context, jti string) error
 }
 

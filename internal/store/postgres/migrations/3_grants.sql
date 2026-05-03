@@ -3,6 +3,7 @@
 CREATE TABLE IF NOT EXISTS grants (
     jti                   TEXT        NOT NULL PRIMARY KEY,
     github_id             BIGINT      NOT NULL REFERENCES users(github_id) ON DELETE CASCADE,
+    scope                 TEXT        NOT NULL DEFAULT '',
     access_token          BYTEA       NOT NULL,
     refresh_token         BYTEA       NOT NULL,
     access_token_expiry   TIMESTAMPTZ NOT NULL,

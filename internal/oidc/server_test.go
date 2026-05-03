@@ -815,11 +815,13 @@ func newRefreshTestServer(t *testing.T, gs *testGrantStore, gh *mockGitHubConnec
 	require.NoError(t, err)
 	raw, err := jwk.Import(privkey)
 	require.NoError(t, err)
+	rev := newInMemRevocation()
+	gs.revocation = rev
 	srv, err := NewServer(Config{
 		BaseURL:    "http://example.com",
 		Grants:     gs,
 		AuthState:  newInMemAuthState(),
-		Revocation: newInMemRevocation(),
+		Revocation: rev,
 	}, raw)
 	require.NoError(t, err)
 	if gh != nil {
@@ -1400,11 +1402,16 @@ type testGrantStore struct {
 	rotateCalls []rotateCall
 	deleteCalls []string
 	rotateErr   error
+	// revocation, when set, receives the old jti atomically with the rotation —
+	// mirrors the postgres tx-based rotate+revoke.
+	revocation RevocationStore
 }
 
 type rotateCall struct {
-	oldToken string
-	grant    store.Grant
+	oldToken     string
+	oldJTI       string
+	oldJWTExpiry time.Time
+	grant        store.Grant
 }
 
 func (s *testGrantStore) seed(g store.Grant) {
@@ -1439,19 +1446,27 @@ func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, token string)
 	return &g, nil
 }
 
-func (s *testGrantStore) RotateGrant(_ context.Context, oldToken string, g store.Grant) (*store.Grant, error) {
+func (s *testGrantStore) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.rotateCalls = append(s.rotateCalls, rotateCall{oldToken, g})
+	s.rotateCalls = append(s.rotateCalls, rotateCall{oldToken, oldJTI, oldJWTExpiry, g})
 	if s.rotateErr != nil {
+		s.mu.Unlock()
 		return nil, s.rotateErr
 	}
 	if _, ok := s.byRefresh[oldToken]; !ok {
+		s.mu.Unlock()
 		return nil, store.ErrNotFound
 	}
 	delete(s.byRefresh, oldToken)
 	if g.OurRefreshToken != "" {
 		s.byRefresh[g.OurRefreshToken] = g
+	}
+	rev := s.revocation
+	s.mu.Unlock()
+	if rev != nil && oldJTI != "" {
+		if err := rev.RevokeToken(ctx, oldJTI, oldJWTExpiry); err != nil {
+			return nil, err
+		}
 	}
 	return &g, nil
 }

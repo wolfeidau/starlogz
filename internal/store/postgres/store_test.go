@@ -489,7 +489,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 		JWTExpiry:          now.Add(14 * 24 * time.Hour),
 	}
 
-	got, err := st.RotateGrant(ctx, "our-refresh-old", rotated)
+	got, err := st.RotateGrant(ctx, "our-refresh-old", original.JTI, original.JWTExpiry, rotated)
 	require.NoError(t, err)
 	require.Equal(t, "rotate-jti-new", got.JTI)
 	require.Equal(t, "our-refresh-new", got.OurRefreshToken)
@@ -497,6 +497,11 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.Equal(t, "gha_new", got.AccessToken)
 	require.Equal(t, "ghr_new", got.RefreshToken)
 	require.WithinDuration(t, rotated.JWTExpiry, got.JWTExpiry, time.Second)
+
+	// Old jti must be revoked atomically with the rotation.
+	revoked, err := st.IsTokenRevoked(ctx, "rotate-jti-old")
+	require.NoError(t, err)
+	require.True(t, revoked, "rotation must revoke the old jti in the same transaction")
 
 	// Old refresh token is gone; new one is queryable.
 	_, err = st.GetGrantByRefreshToken(ctx, "our-refresh-old")
@@ -913,7 +918,7 @@ func TestRotateGrant_Success(t *testing.T) {
 		JWTExpiry:          now.Add(7 * 24 * time.Hour),
 	}
 
-	got, err := st.RotateGrant(ctx, "old-refresh-token", rotated)
+	got, err := st.RotateGrant(ctx, "old-refresh-token", original.JTI, original.JWTExpiry, rotated)
 	require.NoError(t, err)
 	require.Equal(t, rotated.JTI, got.JTI)
 	require.Equal(t, rotated.OurRefreshToken, got.OurRefreshToken)
@@ -950,7 +955,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	}))
 
 	// First rotation succeeds.
-	_, err = st.RotateGrant(ctx, "race-token", store.Grant{
+	_, err = st.RotateGrant(ctx, "race-token", "jti-race", now.Add(7*24*time.Hour), store.Grant{
 		JTI:             "jti-race-rotated",
 		GitHubID:        1300,
 		OurRefreshToken: "race-token-rotated",
@@ -961,7 +966,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second rotation with the same old token simulates a concurrent race — must return ErrNotFound.
-	_, err = st.RotateGrant(ctx, "race-token", store.Grant{
+	_, err = st.RotateGrant(ctx, "race-token", "jti-race", now.Add(7*24*time.Hour), store.Grant{
 		JTI:             "jti-race-rotated-2",
 		GitHubID:        1300,
 		OurRefreshToken: "race-token-rotated-2",

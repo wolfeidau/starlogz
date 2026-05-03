@@ -378,9 +378,10 @@ func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	return &g, nil
 }
 
-// RotateGrant atomically replaces a grant row identified by oldToken with the new values in g.
-// Returns ErrNotFound if oldToken does not match any row (concurrent rotation race).
-func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant) (*store.Grant, error) {
+// RotateGrant atomically replaces a grant row identified by oldToken and records
+// the old jti as revoked in the same transaction. Returns ErrNotFound if oldToken
+// does not match any row (concurrent rotation race).
+func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
 	}
@@ -402,9 +403,15 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant)
 		clientID = &g.ClientID
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var updated store.Grant
 	var encA, encR []byte
-	err = s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE grants
 		SET jti                  = $2,
 		    our_refresh_token    = $3,
@@ -430,6 +437,21 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken string, g store.Grant)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("rotate grant: %w", err)
+	}
+
+	if oldJTI != "" {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO revoked_tokens (jti, expires_at)
+			VALUES ($1, $2)
+			ON CONFLICT (jti) DO NOTHING`,
+			oldJTI, oldJWTExpiry)
+		if err != nil {
+			return nil, fmt.Errorf("revoke old jti: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit rotate grant: %w", err)
 	}
 
 	updated.AccessToken, err = s.enc.Open(encA)
