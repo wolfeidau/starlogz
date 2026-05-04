@@ -211,6 +211,415 @@ func TestFactDelete_CrossOrg_Forbidden(t *testing.T) {
 	require.Contains(t, resultText(t, listRes), "alice's secret")
 }
 
+// --- whoami ---
+
+func TestWhoami_ReturnsIdentityAndScopes(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "whoami", map[string]any{})
+	require.False(t, res.IsError, "whoami failed: %s", resultText(t, res))
+
+	var got struct {
+		UserID string   `json:"user_id"`
+		Scopes []string `json:"scopes"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Equal(t, user.ID.String(), got.UserID)
+	require.ElementsMatch(t, []string{"facts:read", "facts:write"}, got.Scopes)
+}
+
+// --- project_ensure ---
+
+func TestProjectEnsure_CreatesUnderPersonalOrg(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "project_ensure", map[string]any{"slug": "my-project", "name": "My Project"})
+	require.False(t, res.IsError, "project_ensure failed: %s", resultText(t, res))
+
+	var got struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Equal(t, "my-project", got.Slug)
+	require.Equal(t, "My Project", got.Name)
+	require.NotEmpty(t, got.ID)
+
+	listRes := callTool(t, ctx, sess, "project_list", map[string]any{})
+	require.False(t, listRes.IsError)
+	require.Contains(t, resultText(t, listRes), "my-project")
+}
+
+func TestProjectEnsure_IdempotentOnDuplicateSlug(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res1 := callTool(t, ctx, sess, "project_ensure", map[string]any{"slug": "dup", "name": "Dup"})
+	require.False(t, res1.IsError)
+	var got1 struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res1)), &got1))
+
+	res2 := callTool(t, ctx, sess, "project_ensure", map[string]any{"slug": "dup", "name": "Dup"})
+	require.False(t, res2.IsError)
+	var got2 struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res2)), &got2))
+
+	require.Equal(t, got1.ID, got2.ID)
+}
+
+func TestProjectEnsure_DefaultsNameToSlug(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "project_ensure", map[string]any{"slug": "my-slug", "name": ""})
+	require.False(t, res.IsError)
+
+	var got struct {
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Equal(t, got.Slug, got.Name)
+}
+
+// --- fact_write ---
+
+func TestFactWrite_AutoCreatesProject(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "fact_write", map[string]any{
+		"project": "auto-project",
+		"content": "hello",
+		"key":     "",
+		"tags":    []string{},
+	})
+	require.False(t, res.IsError, "fact_write failed: %s", resultText(t, res))
+
+	listRes := callTool(t, ctx, sess, "project_list", map[string]any{})
+	require.False(t, listRes.IsError)
+	require.Contains(t, resultText(t, listRes), "auto-project")
+}
+
+func TestFactWrite_RequiresWriteScope(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
+
+	res := callTool(t, ctx, sess, "fact_write", map[string]any{
+		"project": "demo",
+		"content": "should fail",
+		"key":     "",
+		"tags":    []string{},
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "missing required scope")
+}
+
+func TestFactWrite_UpsertsByKey(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	var result1, result2 struct {
+		ID      string `json:"id"`
+		Updated bool   `json:"updated"`
+	}
+
+	res1 := callTool(t, ctx, sess, "fact_write", map[string]any{
+		"project": "demo",
+		"content": "original",
+		"key":     "stable-key",
+		"tags":    []string{},
+	})
+	require.False(t, res1.IsError, "first write failed: %s", resultText(t, res1))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res1)), &result1))
+	require.False(t, result1.Updated, "first write should not be an update")
+
+	res2 := callTool(t, ctx, sess, "fact_write", map[string]any{
+		"project": "demo",
+		"content": "updated",
+		"key":     "stable-key",
+		"tags":    []string{},
+	})
+	require.False(t, res2.IsError, "second write failed: %s", resultText(t, res2))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res2)), &result2))
+	require.Equal(t, result1.ID, result2.ID, "upsert must return the same ID")
+	require.True(t, result2.Updated, "second write with same key should be an update")
+}
+
+// --- fact_list / fact_search / fact_list_tags org scoping ---
+
+func TestFactList_ScopedToCallerOrg(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	alice := f.makeUser(t, ctx, "alice")
+	bob := f.makeUser(t, ctx, "bob")
+
+	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
+	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
+
+	wr := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+		"project": "alice-proj",
+		"content": "alice data",
+		"key":     "",
+		"tags":    []string{},
+	})
+	require.False(t, wr.IsError)
+
+	res := callTool(t, ctx, bobSess, "fact_list", map[string]any{
+		"project": "alice-proj",
+		"tag":     "",
+		"limit":   0,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactSearch_ScopedToCallerOrg(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	alice := f.makeUser(t, ctx, "alice")
+	bob := f.makeUser(t, ctx, "bob")
+
+	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
+	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
+
+	wr := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+		"project": "alice-proj",
+		"content": "alice data",
+		"key":     "",
+		"tags":    []string{},
+	})
+	require.False(t, wr.IsError)
+
+	res := callTool(t, ctx, bobSess, "fact_search", map[string]any{
+		"project": "alice-proj",
+		"query":   "alice",
+		"tags":    []string{},
+		"limit":   0,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	alice := f.makeUser(t, ctx, "alice")
+	bob := f.makeUser(t, ctx, "bob")
+
+	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
+	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
+
+	wr := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+		"project": "alice-proj",
+		"content": "alice data",
+		"key":     "",
+		"tags":    []string{"go"},
+	})
+	require.False(t, wr.IsError)
+
+	res := callTool(t, ctx, bobSess, "fact_list_tags", map[string]any{
+		"project": "alice-proj",
+		"limit":   0,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactList_RespectsTagFilter(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	for _, w := range []struct {
+		content string
+		tags    []string
+	}{
+		{"go fact", []string{"go"}},
+		{"python fact", []string{"python"}},
+		{"both fact", []string{"go", "python"}},
+	} {
+		wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+			"project": "tagged",
+			"content": w.content,
+			"key":     "",
+			"tags":    w.tags,
+		})
+		require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	}
+
+	res := callTool(t, ctx, sess, "fact_list", map[string]any{
+		"project": "tagged",
+		"tag":     "go",
+		"limit":   0,
+	})
+	require.False(t, res.IsError)
+	text := resultText(t, res)
+	require.Contains(t, text, "go fact")
+	require.Contains(t, text, "both fact")
+	require.NotContains(t, text, "python fact")
+}
+
+// --- fact_delete / fact_update: scope enforcement and error surfaces ---
+
+func TestFactDelete_RequiresWriteScope(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
+
+	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": uuid.New().String()})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "missing required scope")
+}
+
+func TestFactUpdate_RequiresWriteScope(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
+
+	res := callTool(t, ctx, sess, "fact_update", map[string]any{
+		"id":      uuid.New().String(),
+		"content": "x",
+		"tags":    []string{},
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "missing required scope")
+}
+
+func TestFactDelete_UnknownID_NotFound(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": uuid.New().String()})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactUpdate_UnknownID_NotFound(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "fact_update", map[string]any{
+		"id":      uuid.New().String(),
+		"content": "x",
+		"tags":    []string{},
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactDelete_InvalidUUID_StructuredError(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": "not-a-uuid"})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "invalid fact ID")
+}
+
+// --- project_list ---
+
+func TestProjectList_EmptyForFreshUser(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
+
+	res := callTool(t, ctx, sess, "project_list", map[string]any{})
+	require.False(t, res.IsError)
+
+	var got struct {
+		Projects []any `json:"projects"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Empty(t, got.Projects)
+}
+
+func TestProjectList_ReturnsOnlyOwnOrg(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	alice := f.makeUser(t, ctx, "alice")
+	bob := f.makeUser(t, ctx, "bob")
+
+	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
+	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
+
+	wr := callTool(t, ctx, aliceSess, "project_ensure", map[string]any{"slug": "alice-proj", "name": "Alice"})
+	require.False(t, wr.IsError)
+
+	res := callTool(t, ctx, bobSess, "project_list", map[string]any{})
+	require.False(t, res.IsError)
+
+	var got struct {
+		Projects []any `json:"projects"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Empty(t, got.Projects)
+}
+
+// --- resolveUserAndOrg ---
+
+func TestResolveUser_UnknownSub_CleanError(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	// JWT sub is a valid UUID but has no corresponding user row in the database.
+	token := f.tokenFor(t, uuid.New(), "facts:read facts:write")
+	sess := f.connect(t, ctx, token)
+
+	res := callTool(t, ctx, sess, "project_list", map[string]any{})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "user not found")
+}
+
 // TestFactUpdate_CrossOrg_Forbidden is the analogous regression for fact_update.
 func TestFactUpdate_CrossOrg_Forbidden(t *testing.T) {
 	ctx := context.Background()
