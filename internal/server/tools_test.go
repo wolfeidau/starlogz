@@ -203,7 +203,7 @@ func TestFactDelete_CrossOrg_Forbidden(t *testing.T) {
 
 	delRes := callTool(t, ctx, bobSess, "fact_delete", map[string]any{"id": written.ID})
 	require.True(t, delRes.IsError, "fact_delete must reject cross-org delete; got %s", resultText(t, delRes))
-	require.Contains(t, resultText(t, delRes), "not found")
+	require.Contains(t, resultText(t, delRes), "not found or already deleted")
 
 	// Sanity: alice can still see her fact, proving the delete attempt did not succeed.
 	listRes := callTool(t, ctx, aliceSess, "fact_list", map[string]any{"project": "demo", "tag": "", "limit": 0})
@@ -400,6 +400,7 @@ func TestFactList_ScopedToCallerOrg(t *testing.T) {
 		"limit":   0,
 	})
 	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "project")
 	require.Contains(t, resultText(t, res), "not found")
 }
 
@@ -428,7 +429,37 @@ func TestFactSearch_ScopedToCallerOrg(t *testing.T) {
 		"limit":   0,
 	})
 	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "project")
 	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactSearch_ReturnsMatchingFacts(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	for _, content := range []string{"golang concurrency patterns", "python asyncio basics"} {
+		wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+			"project": "search-test",
+			"content": content,
+			"key":     "",
+			"tags":    []string{},
+		})
+		require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	}
+
+	res := callTool(t, ctx, sess, "fact_search", map[string]any{
+		"project": "search-test",
+		"query":   "concurrency",
+		"tags":    []string{},
+		"limit":   0,
+	})
+	require.False(t, res.IsError, "fact_search failed: %s", resultText(t, res))
+	text := resultText(t, res)
+	require.Contains(t, text, "golang concurrency patterns")
+	require.NotContains(t, text, "python asyncio basics")
 }
 
 func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
@@ -454,7 +485,44 @@ func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
 		"limit":   0,
 	})
 	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "project")
 	require.Contains(t, resultText(t, res), "not found")
+}
+
+func TestFactListTags_ReturnsByFrequency(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	// "go" appears 3 times, "concurrency" once — go must sort first.
+	for _, tags := range [][]string{{"go", "concurrency"}, {"go"}, {"go"}} {
+		wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+			"project": "tags-test",
+			"content": "content",
+			"key":     "",
+			"tags":    tags,
+		})
+		require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	}
+
+	res := callTool(t, ctx, sess, "fact_list_tags", map[string]any{
+		"project": "tags-test",
+		"limit":   0,
+	})
+	require.False(t, res.IsError, "fact_list_tags failed: %s", resultText(t, res))
+
+	var got struct {
+		Tags []struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		} `json:"tags"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.NotEmpty(t, got.Tags)
+	require.Equal(t, "go", got.Tags[0].Name)
+	require.Equal(t, 3, got.Tags[0].Count)
 }
 
 func TestFactList_RespectsTagFilter(t *testing.T) {
@@ -532,7 +600,7 @@ func TestFactDelete_UnknownID_NotFound(t *testing.T) {
 
 	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": uuid.New().String()})
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "not found")
+	require.Contains(t, resultText(t, res), "not found or already deleted")
 }
 
 func TestFactUpdate_UnknownID_NotFound(t *testing.T) {
@@ -548,7 +616,7 @@ func TestFactUpdate_UnknownID_NotFound(t *testing.T) {
 		"tags":    []string{},
 	})
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "not found")
+	require.Contains(t, resultText(t, res), "not found or already deleted")
 }
 
 func TestFactDelete_InvalidUUID_StructuredError(t *testing.T) {
@@ -561,6 +629,37 @@ func TestFactDelete_InvalidUUID_StructuredError(t *testing.T) {
 	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": "not-a-uuid"})
 	require.True(t, res.IsError)
 	require.Contains(t, resultText(t, res), "invalid fact ID")
+}
+
+func TestFactDelete_RemovesFact(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+		"project": "delete-test",
+		"content": "to be deleted",
+		"key":     "",
+		"tags":    []string{},
+	})
+	require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	var written struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, wr)), &written))
+
+	listBefore := callTool(t, ctx, sess, "fact_list", map[string]any{"project": "delete-test", "tag": "", "limit": 0})
+	require.False(t, listBefore.IsError)
+	require.Contains(t, resultText(t, listBefore), "to be deleted")
+
+	delRes := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": written.ID})
+	require.False(t, delRes.IsError, "fact_delete failed: %s", resultText(t, delRes))
+
+	listAfter := callTool(t, ctx, sess, "fact_list", map[string]any{"project": "delete-test", "tag": "", "limit": 0})
+	require.False(t, listAfter.IsError)
+	require.NotContains(t, resultText(t, listAfter), "to be deleted")
 }
 
 // --- project_list ---
@@ -651,11 +750,55 @@ func TestFactUpdate_CrossOrg_Forbidden(t *testing.T) {
 		"tags":    []string{},
 	})
 	require.True(t, updRes.IsError, "fact_update must reject cross-org update; got %s", resultText(t, updRes))
-	require.Contains(t, resultText(t, updRes), "not found")
+	require.Contains(t, resultText(t, updRes), "not found or already deleted")
 
 	// Sanity: alice's original content is intact.
 	listRes := callTool(t, ctx, aliceSess, "fact_list", map[string]any{"project": "demo", "tag": "", "limit": 0})
 	require.False(t, listRes.IsError, "fact_list failed: %s", resultText(t, listRes))
 	require.Contains(t, resultText(t, listRes), "alice's original")
 	require.NotContains(t, resultText(t, listRes), "tampered")
+}
+
+func TestFactUpdate_ChangesContentAndTags(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+		"project": "update-test",
+		"content": "original content",
+		"key":     "",
+		"tags":    []string{"old-tag"},
+	})
+	require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	var written struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, wr)), &written))
+
+	upd := callTool(t, ctx, sess, "fact_update", map[string]any{
+		"id":      written.ID,
+		"content": "updated content",
+		"tags":    []string{"new-tag"},
+	})
+	require.False(t, upd.IsError, "fact_update failed: %s", resultText(t, upd))
+
+	var updResult struct {
+		ID      string   `json:"id"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, upd)), &updResult))
+	require.Equal(t, written.ID, updResult.ID)
+	require.Equal(t, "updated content", updResult.Content)
+	require.Equal(t, []string{"new-tag"}, updResult.Tags)
+
+	// Verify the change is persisted, not just returned from the mutation.
+	listRes := callTool(t, ctx, sess, "fact_list", map[string]any{"project": "update-test", "tag": "", "limit": 0})
+	require.False(t, listRes.IsError)
+	text := resultText(t, listRes)
+	require.Contains(t, text, "updated content")
+	require.NotContains(t, text, "original content")
 }
