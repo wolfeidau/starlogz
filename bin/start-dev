@@ -14,4 +14,4 @@ LOG_FILE="logs/server.log"
 echo "starting starlogz-server, logging to $LOG_FILE"
 echo "---" >> "$LOG_FILE"
 
-go run ./cmd/starlogz-server http --jwk-path key.jwk 2>&1 | tee -a "$LOG_FILE"
+go run ./cmd/starlogz-server http --development --jwk-path key.jwk 2>&1 | tee -a "$LOG_FILE"

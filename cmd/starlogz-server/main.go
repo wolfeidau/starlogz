@@ -19,9 +19,10 @@ import (
 var (
 	version = "devel"
 	cli     struct {
-		HTTP    commands.HTTPCmd   `cmd:"" help:"http mcp server using streamable HTTP transport."`
-		Keygen  commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
-		Version kong.VersionFlag
+		HTTP        commands.HTTPCmd   `cmd:"" help:"http mcp server using streamable HTTP transport."`
+		Keygen      commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
+		Development bool
+		Version     kong.VersionFlag
 	}
 )
 
@@ -38,26 +39,25 @@ func main() {
 		kong.BindTo(ctx, (*context.Context)(nil)),
 	)
 
-	cmd.FatalIfErrorf(run(ctx, cmd))
+	cmd.FatalIfErrorf(run(ctx, cmd, cli.Development))
 }
 
-func newLogger() *slog.Logger {
-	fi, err := os.Stderr.Stat()
-	if err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+func newLogger(development bool) *slog.Logger {
+	if development {
 		return slog.New(telemetry.NewOTelHandler(tint.NewHandler(os.Stderr, &tint.Options{
 			Level:      slog.LevelDebug,
 			TimeFormat: time.Kitchen,
 		})))
 	}
 	return slog.New(telemetry.NewOTelHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: slog.LevelDebug,
 	})))
 }
 
-func run(ctx context.Context, cmd *kong.Context) error {
+func run(ctx context.Context, cmd *kong.Context, development bool) error {
 	buildInfo, _ := debug.ReadBuildInfo()
 
-	logger := newLogger()
+	logger := newLogger(development)
 	slog.SetDefault(logger)
 
 	child := logger.With(

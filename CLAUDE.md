@@ -47,6 +47,9 @@ go run ./cmd/starlogz-server keygen --output key.jwk
 
 # Start the server
 go run ./cmd/starlogz-server http --jwk-path key.jwk
+
+# Query the local Postgres instance (runs psql inside the docker compose container)
+bin/psql
 ```
 
 Key env vars:

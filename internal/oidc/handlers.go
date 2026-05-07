@@ -21,7 +21,7 @@ import (
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 )
 
-const jwtTTL = 7 * 24 * time.Hour
+const jwtTTL = 15 * time.Minute
 
 // generateOpaqueToken returns a base64url-encoded 32-byte random value used as our_refresh_token.
 func generateOpaqueToken() (string, error) {
