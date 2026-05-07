@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -519,7 +520,8 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			slog.String("sub", sub),
 		)
 
-		http.Redirect(w, r, redirectTo.String(), http.StatusFound)
+		// redirect_uri was validated against the registered client in AuthorizeHandler before being stored.
+		http.Redirect(w, r, redirectTo.String(), http.StatusFound) //nolint:gosec
 	})
 }
 
@@ -537,10 +539,32 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
+		clientID := q.Get("client_id")
 		redirectURI := q.Get("redirect_uri")
 		if redirectURI == "" {
 			writeOAuthError(w, "invalid_request", "redirect_uri is required", http.StatusBadRequest)
 			return
+		}
+
+		if s.clients != nil {
+			if clientID == "" {
+				writeOAuthError(w, "invalid_request", "client_id is required", http.StatusBadRequest)
+				return
+			}
+			client, err := s.clients.GetClient(r.Context(), clientID)
+			if errors.Is(err, storepkg.ErrNotFound) {
+				writeOAuthError(w, "invalid_client", "unknown client_id", http.StatusBadRequest)
+				return
+			}
+			if err != nil {
+				slog.Default().ErrorContext(r.Context(), "get client failed", slog.Any("error", err))
+				writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+				return
+			}
+			if !slices.Contains(client.RedirectURIs, redirectURI) {
+				writeOAuthError(w, "invalid_request", "redirect_uri not registered for this client", http.StatusBadRequest)
+				return
+			}
 		}
 
 		codeChallenge := q.Get("code_challenge")
@@ -567,7 +591,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 
 		githubState := uuid.New().String()
 		if err := s.authState.StorePendingAuth(r.Context(), githubState, storepkg.PendingAuth{
-			ClientID:      q.Get("client_id"),
+			ClientID:      clientID,
 			RedirectURI:   redirectURI,
 			Scope:         scope,
 			CodeChallenge: codeChallenge,
