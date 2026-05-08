@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -74,6 +75,7 @@ type Server struct {
 	grants     GrantStore
 	authState  AuthStateStore
 	revocation RevocationStore
+	logger     *slog.Logger
 }
 
 // NewServer constructs an OIDC Server from config and a loaded private key.
@@ -138,6 +140,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		grants:     cfg.Grants,
 		authState:  cfg.AuthState,
 		revocation: cfg.Revocation,
+		logger:     slog.Default().With(slog.String("component", "oidc")),
 	}, nil
 }
 
