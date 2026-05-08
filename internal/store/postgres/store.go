@@ -924,6 +924,25 @@ func scanFacts(rows pgx.Rows) ([]*store.Fact, error) {
 }
 
 // SaveClient persists a new OAuth2 client registration.
+func (s *Store) GetClient(ctx context.Context, clientID string) (*store.OAuthClient, error) {
+	var c store.OAuthClient
+	err := s.pool.QueryRow(ctx, `
+		SELECT client_id, client_name, redirect_uris, grant_types, response_types,
+		       token_endpoint_auth_method, scope, issued_at, expires_at
+		FROM oauth_clients
+		WHERE client_id = $1 AND expires_at > now()`,
+		clientID).Scan(
+		&c.ClientID, &c.ClientName, &c.RedirectURIs, &c.GrantTypes, &c.ResponseTypes,
+		&c.TokenEndpointAuthMethod, &c.Scope, &c.IssuedAt, &c.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get oauth client: %w", err)
+	}
+	return &c, nil
+}
+
 func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 	slog.InfoContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("grant_types", strings.Join(c.GrantTypes, ", ")), slog.String("response_types", strings.Join(c.ResponseTypes, ", ")), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.String("scope", c.Scope), slog.Time("issued_at", c.IssuedAt), slog.Time("expires_at", c.ExpiresAt))
 

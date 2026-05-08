@@ -14,6 +14,7 @@ import (
 // store.Store satisfies this interface directly.
 type ClientStore interface {
 	SaveClient(ctx context.Context, c store.OAuthClient) error
+	GetClient(ctx context.Context, clientID string) (*store.OAuthClient, error)
 }
 
 // clientRegistrationTTL is how long a registered client remains valid.

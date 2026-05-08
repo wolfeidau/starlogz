@@ -3,6 +3,6 @@ experimental = true
 lockfile = true
 
 [tools]
-go = "1.26.2"
-golangci-lint = "2.11.4"
-goreleaser = "2.15.4"
+go = "latest"
+golangci-lint = "latest"
+goreleaser = "v2.15.4"

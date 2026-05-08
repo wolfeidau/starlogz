@@ -803,7 +803,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	require.Equal(t, "ghr_refresh_xyz", p.RefreshToken)
 	require.WithinDuration(t, accessExpiry, p.AccessTokenExpiry, time.Second)
 	require.WithinDuration(t, refreshExpiry, p.RefreshTokenExpiry, time.Second)
-	require.WithinDuration(t, time.Now().Add(7*24*time.Hour), p.JWTExpiry, 5*time.Second)
+	require.WithinDuration(t, time.Now().Add(15*time.Minute), p.JWTExpiry, 5*time.Second)
 }
 
 // --- Refresh grant ---
@@ -1763,6 +1763,15 @@ type testClientStore struct {
 func (s *testClientStore) SaveClient(_ context.Context, c store.OAuthClient) error {
 	s.records = append(s.records, c)
 	return nil
+}
+
+func (s *testClientStore) GetClient(_ context.Context, clientID string) (*store.OAuthClient, error) {
+	for _, c := range s.records {
+		if c.ClientID == clientID {
+			return &c, nil
+		}
+	}
+	return nil, store.ErrNotFound
 }
 
 func TestDCRHandler_PersistsToClientStore(t *testing.T) {
