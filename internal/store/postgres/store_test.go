@@ -213,6 +213,12 @@ func TestSearchFacts(t *testing.T) {
 	tagged, err := st.SearchFacts(ctx, p.ID, "database", []string{"cache"}, 10)
 	require.NoError(t, err)
 	require.Empty(t, tagged, "cache tag should exclude PostgreSQL result")
+
+	// Tag names should be searchable even when absent from content.
+	byTagName, err := st.SearchFacts(ctx, p.ID, "cache", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, byTagName, 1, "searching by tag name should find facts tagged with that word")
+	require.Contains(t, byTagName[0].Content, "Redis")
 }
 
 func TestListFacts(t *testing.T) {
