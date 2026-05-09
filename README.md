@@ -187,7 +187,7 @@ Traces and metrics are exported via OTLP gRPC when `OTEL_EXPORTER_OTLP_ENDPOINT`
 
 ## Built with AI
 
-This project was built with [Claude](https://claude.ai) by Anthropic, using Claude Code as the primary development tool.
+This project is built with AI-assisted development workflows, using tools such as [Claude Code](https://claude.ai/code) and [Cursor](https://cursor.com).
 
 ## License
 
