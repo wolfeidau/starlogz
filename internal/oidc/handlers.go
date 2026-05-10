@@ -19,7 +19,9 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"github.com/wolfeidau/starlogz/internal/middleware"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
+	"golang.org/x/oauth2"
 )
 
 const jwtTTL = 15 * time.Minute
@@ -49,7 +51,7 @@ func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Default().ErrorContext(ctx, "failed to write token response", slog.Any("error", err))
+		middleware.LoggerFrom(ctx).ErrorContext(ctx, "failed to write token response", slog.Any("error", err))
 	}
 }
 
@@ -57,11 +59,12 @@ func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, 
 // known-bad (GitHub refresh expired, GitHub returned no refresh token) and the
 // client must re-authenticate. Failures are logged but never block the response.
 func (s *Server) tearDownGrant(ctx context.Context, jti string, jwtExpiry time.Time) {
+	log := middleware.LoggerFrom(ctx)
 	if err := s.revocation.RevokeToken(ctx, jti, jwtExpiry); err != nil {
-		s.logger.ErrorContext(ctx, "revoke jti for broken grant failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "revoke jti for broken grant failed", slog.Any("error", err))
 	}
 	if err := s.grants.DeleteGrant(ctx, jti); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
-		s.logger.ErrorContext(ctx, "delete broken grant failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "delete broken grant failed", slog.Any("error", err))
 	}
 }
 
@@ -102,7 +105,7 @@ func (s *Server) LogoutHandler() http.Handler {
 
 		if err := s.revocation.RevokeToken(r.Context(), jti, exp); err != nil {
 			// Log but still 204 — the token will expire naturally.
-			s.logger.ErrorContext(r.Context(), "revoke token failed", slog.Any("error", err))
+			middleware.LoggerFrom(r.Context()).ErrorContext(r.Context(), "revoke token failed", slog.Any("error", err))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -177,13 +180,15 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		return
 	}
 
+	log := middleware.LoggerFrom(r.Context())
+
 	pc, err := s.authState.ConsumeAuthCode(r.Context(), code)
 	if errors.Is(err, storepkg.ErrNotFound) {
 		writeOAuthError(w, "invalid_grant", "invalid or expired authorization code", http.StatusBadRequest)
 		return
 	}
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "consume auth code failed", slog.Any("error", err))
+		log.ErrorContext(r.Context(), "consume auth code failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -203,10 +208,15 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 
 	jti := uuid.New().String()
 	jwtExpiry := time.Now().Add(jwtTTL)
+	log = log.With(
+		slog.String("client_id", pc.ClientID),
+		slog.Int64("github_id", pc.GitHubID),
+		slog.String("jti", jti),
+	)
 
 	tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti, jwtExpiry)
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
+		log.ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
 		return
 	}
@@ -217,7 +227,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		if pc.RefreshToken != "" {
 			ourRefreshToken, err = generateOpaqueToken()
 			if err != nil {
-				s.logger.ErrorContext(r.Context(), "generate refresh token failed", slog.Any("error", err))
+				log.ErrorContext(r.Context(), "generate refresh token failed", slog.Any("error", err))
 				writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
 				return
 			}
@@ -235,15 +245,14 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 			JWTExpiry:          jwtExpiry,
 		}); err != nil {
 			// Log but don't fail the token exchange — the client still gets a valid JWT.
-			s.logger.ErrorContext(r.Context(), "upsert grant failed", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "upsert grant failed", slog.Any("error", err))
 			ourRefreshToken = ""
 		}
 	}
 
-	s.logger.InfoContext(r.Context(), "token exchange: issued JWT",
+	log.InfoContext(r.Context(), "token exchange: issued JWT",
 		slog.String("sub", pc.Sub),
 		slog.String("scope", pc.Scope),
-		slog.String("jti", jti),
 		slog.Bool("refresh_token", ourRefreshToken != ""),
 	)
 
@@ -263,16 +272,25 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		return
 	}
 
+	// Enrich the logger with client_id as soon as it's known.
+	log := middleware.LoggerFrom(r.Context()).With(slog.String("client_id", clientID))
+
 	grant, err := s.grants.GetGrantByRefreshToken(r.Context(), refreshToken)
 	if errors.Is(err, storepkg.ErrNotFound) {
 		writeOAuthError(w, "invalid_grant", "refresh token not found or already used", http.StatusBadRequest)
 		return
 	}
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "lookup grant by refresh token failed", slog.Any("error", err))
+		log.ErrorContext(r.Context(), "lookup grant by refresh token failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Enrich further with jti and github_id now that we have the grant.
+	log = log.With(
+		slog.String("jti", grant.JTI),
+		slog.Int64("github_id", grant.GitHubID),
+	)
 
 	// client_id is validated only when stored on the grant (best-effort per v0.2 constraints).
 	if grant.ClientID != "" && grant.ClientID != clientID {
@@ -296,11 +314,23 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	// refresh token on the first valid call, so a client disconnection mid-flight would
 	// leave the new token unrecorded and the old one permanently invalidated. We use a
 	// non-cancelable child so the refresh + storage always completes.
-	storeCtx := context.WithoutCancel(r.Context())
+	storeCtx := middleware.WithLogger(context.WithoutCancel(r.Context()), log)
 
 	newGHToken, identity, err := s.github.RefreshToken(storeCtx, grant.RefreshToken)
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "GitHub token refresh failed", slog.Any("error", err))
+		var retrieveErr *oauth2.RetrieveError
+		if errors.As(err, &retrieveErr) && retrieveErr.ErrorCode == "bad_refresh_token" {
+			// GitHub has invalidated the stored refresh token. Tear down the grant so
+			// future requests fail fast at DB lookup rather than hitting GitHub again.
+			log.ErrorContext(r.Context(), "GitHub refresh token rejected; dropping grant",
+				slog.String("github_error", retrieveErr.ErrorCode),
+				slog.String("github_error_description", retrieveErr.ErrorDescription),
+			)
+			s.tearDownGrant(storeCtx, grant.JTI, grant.JWTExpiry)
+			writeOAuthError(w, "invalid_grant", "GitHub refresh token is invalid; re-authentication required", http.StatusBadRequest)
+			return
+		}
+		log.ErrorContext(r.Context(), "GitHub token refresh failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "GitHub token refresh failed", http.StatusInternalServerError)
 		return
 	}
@@ -309,8 +339,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	// can't continue. GitHub has already invalidated our stored refresh token in
 	// rotation; tear the grant down and force re-auth.
 	if newGHToken.RefreshToken == "" {
-		s.logger.ErrorContext(r.Context(), "GitHub refresh response missing refresh_token; dropping grant",
-			slog.String("jti", grant.JTI))
+		log.ErrorContext(r.Context(), "GitHub refresh response missing refresh_token; dropping grant")
 		s.tearDownGrant(storeCtx, grant.JTI, grant.JWTExpiry)
 		writeOAuthError(w, "invalid_grant", "GitHub did not return a new refresh token; re-authentication required", http.StatusBadRequest)
 		return
@@ -320,7 +349,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	if s.users != nil {
 		user, uErr := s.users.UpsertUser(storeCtx, identity.ID, identity.Email, identity.Login)
 		if uErr != nil {
-			s.logger.ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
+			log.ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
 			writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -330,7 +359,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	newJTI := uuid.New().String()
 	newOurRefreshToken, err := generateOpaqueToken()
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "generate refresh token failed", slog.Any("error", err))
+		log.ErrorContext(r.Context(), "generate refresh token failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
 		return
 	}
@@ -355,20 +384,19 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
 			return
 		}
-		s.logger.ErrorContext(r.Context(), "rotate grant failed", slog.Any("error", err))
+		log.ErrorContext(r.Context(), "rotate grant failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to rotate grant", http.StatusInternalServerError)
 		return
 	}
 
-	s.logger.InfoContext(r.Context(), "token rotation: grant rotated",
-		slog.Int64("github_id", grant.GitHubID),
+	log.InfoContext(r.Context(), "token rotation: grant rotated",
 		slog.String("old_jti", grant.JTI),
 		slog.String("new_jti", newJTI),
 	)
 
 	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI, newJWTExpiry)
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
+		log.ErrorContext(r.Context(), "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
 		return
 	}
@@ -388,13 +416,15 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 			return
 		}
 
+		log := middleware.LoggerFrom(r.Context())
+
 		var req oauthex.ClientRegistrationMetadata
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeOAuthError(w, "invalid_client_metadata", "failed to parse request body", http.StatusBadRequest)
 			return
 		}
 
-		s.logger.InfoContext(r.Context(), "DCR request",
+		log.InfoContext(r.Context(), "DCR request",
 			slog.Any("grant_types", req.GrantTypes),
 			slog.Any("response_types", req.ResponseTypes),
 			slog.Any("redirect_uris", req.RedirectURIs),
@@ -441,7 +471,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 				ExpiresAt:               now.Add(clientRegistrationTTL),
 			}
 			if err := store.SaveClient(r.Context(), rec); err != nil {
-				s.logger.ErrorContext(r.Context(), "failed to persist DCR client", slog.Any("error", err))
+				log.ErrorContext(r.Context(), "failed to persist DCR client", slog.Any("error", err))
 				writeOAuthError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
 				return
 			}
@@ -456,7 +486,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		if err := json.NewEncoder(w).Encode(resp); err != nil { //nolint:gosec // intentional: DCR response includes client_secret by spec
-			s.logger.Error("failed to write DCR response", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "failed to write DCR response", slog.Any("error", err))
 		}
 	})
 }
@@ -470,7 +500,8 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 
 		q := r.URL.Query()
 
-		s.logger.InfoContext(r.Context(), "github callback: received")
+		log := middleware.LoggerFrom(r.Context())
+		log.InfoContext(r.Context(), "github callback: received")
 
 		pending, err := s.authState.ConsumePendingAuth(r.Context(), q.Get("state"))
 		if errors.Is(err, storepkg.ErrNotFound) {
@@ -478,24 +509,31 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			return
 		}
 		if err != nil {
-			s.logger.ErrorContext(r.Context(), "consume pending auth failed", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "consume pending auth failed", slog.Any("error", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
 		githubToken, identity, err := s.github.ExchangeCode(r.Context(), q.Get("code"))
 		if err != nil {
-			s.logger.ErrorContext(r.Context(), "GitHub exchange failed", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "GitHub exchange failed", slog.Any("error", err))
 			http.Error(w, "failed to authenticate with GitHub", http.StatusBadGateway)
 			return
 		}
+
+		// Enrich the logger with identity fields now that we have them.
+		log = log.With(
+			slog.String("client_id", pending.ClientID),
+			slog.Int64("github_id", identity.ID),
+			slog.String("login", identity.Login),
+		)
 
 		// sub is the internal user UUID; fall back to GitHub numeric ID only when no user store is wired (tests).
 		sub := strconv.FormatInt(identity.ID, 10)
 		if s.users != nil {
 			user, uErr := s.users.UpsertUser(r.Context(), identity.ID, identity.Email, identity.Login)
 			if uErr != nil {
-				s.logger.ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
+				log.ErrorContext(r.Context(), "upsert user failed", slog.Any("error", uErr))
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
@@ -516,14 +554,14 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			AccessTokenExpiry:  githubToken.Expiry,
 			RefreshTokenExpiry: extractRefreshExpiry(githubToken),
 		}); err != nil {
-			s.logger.ErrorContext(r.Context(), "store auth code failed", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "store auth code failed", slog.Any("error", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
 		redirectTo, err := url.Parse(pending.RedirectURI)
 		if err != nil {
-			s.logger.ErrorContext(r.Context(), "invalid redirect URI in pending auth", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "invalid redirect URI in pending auth", slog.Any("error", err))
 			http.Error(w, "invalid redirect_uri", http.StatusInternalServerError)
 			return
 		}
@@ -535,8 +573,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		}
 		redirectTo.RawQuery = rq.Encode()
 
-		s.logger.InfoContext(r.Context(), "GitHub auth complete",
-			slog.String("login", identity.Login),
+		log.InfoContext(r.Context(), "GitHub auth complete",
 			slog.String("email", identity.Email),
 			slog.String("sub", sub),
 		)
@@ -553,6 +590,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
+		log := middleware.LoggerFrom(r.Context())
 		q := r.URL.Query()
 
 		if q.Get("response_type") != "code" {
@@ -578,7 +616,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 				return
 			}
 			if err != nil {
-				s.logger.ErrorContext(r.Context(), "get client failed", slog.Any("error", err))
+				log.ErrorContext(r.Context(), "get client failed", slog.Any("error", err))
 				writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 				return
 			}
@@ -618,12 +656,12 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			CodeChallenge: codeChallenge,
 			ClientState:   q.Get("state"),
 		}); err != nil {
-			s.logger.ErrorContext(r.Context(), "store pending auth failed", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "store pending auth failed", slog.Any("error", err))
 			writeOAuthError(w, "server_error", "failed to store authorization state", http.StatusInternalServerError)
 			return
 		}
 
-		s.logger.InfoContext(r.Context(), "authorize: redirecting to GitHub",
+		log.InfoContext(r.Context(), "authorize: redirecting to GitHub",
 			slog.String("client_id", clientID),
 			slog.String("scope", scope),
 		)

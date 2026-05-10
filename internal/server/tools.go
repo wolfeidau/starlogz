@@ -23,8 +23,13 @@ type mcpServer struct {
 func newMCPServer(logger *slog.Logger, st store.Store) *mcpServer {
 	ms := &mcpServer{
 		logger: logger,
-		server: mcp.NewServer(&mcp.Implementation{Name: name}, nil),
-		store:  st,
+		server: mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{
+			Logger: logger,
+			InitializedHandler: func(ctx context.Context, req *mcp.InitializedRequest) {
+				logger.DebugContext(ctx, "mcp server initialized", slog.String("session_id", req.Session.ID()), slog.Any("extra", req.Extra))
+			},
+		}),
+		store: st,
 	}
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",

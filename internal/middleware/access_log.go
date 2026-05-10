@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type responseWriter struct {
@@ -29,10 +31,15 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 }
 
 // AccessLog returns middleware that logs each request's method, path, status,
-// duration, and response size. Place inside otelhttp so trace context is available.
+// duration, and response size. It seeds a request_id into the context logger
+// so all log lines within a request share a correlation field.
+// Place inside otelhttp so trace context is available.
 func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqLogger := logger.With(slog.String("request_id", uuid.New().String()))
+			r = r.WithContext(WithLogger(r.Context(), reqLogger))
+
 			start := time.Now()
 			rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 
@@ -43,7 +50,7 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				path += "?" + r.URL.RawQuery
 			}
 
-			logger.InfoContext(r.Context(), "access",
+			reqLogger.InfoContext(r.Context(), "access",
 				slog.String("method", r.Method),
 				slog.String("path", path),
 				slog.Int("status", rw.status),
