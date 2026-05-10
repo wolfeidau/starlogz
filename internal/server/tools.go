@@ -11,25 +11,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
 type mcpServer struct {
-	logger *slog.Logger
 	server *mcp.Server
 	store  store.Store
 }
 
-func newMCPServer(logger *slog.Logger, st store.Store) *mcpServer {
+func newMCPServer(st store.Store) *mcpServer {
 	ms := &mcpServer{
-		logger: logger,
-		server: mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{
-			Logger: logger,
-			InitializedHandler: func(ctx context.Context, req *mcp.InitializedRequest) {
-				logger.DebugContext(ctx, "mcp server initialized", slog.String("session_id", req.Session.ID()), slog.Any("extra", req.Extra))
-			},
-		}),
-		store: st,
+		server: mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{}),
+		store:  st,
 	}
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",
@@ -70,9 +64,13 @@ func newMCPServer(logger *slog.Logger, st store.Store) *mcpServer {
 	return ms
 }
 
+func (s *mcpServer) logger(ctx context.Context) *slog.Logger {
+	return ctxlog.LoggerFrom(ctx).With(slog.String("component", "mcp"))
+}
+
 func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "whoami call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	userInfo := req.Extra.TokenInfo
-	ms.logger.InfoContext(ctx, "whoami call", slog.String("user_id", userInfo.UserID))
 	type whoamiresp struct {
 		UserID string   `json:"user_id"`
 		Scopes []string `json:"scopes"`
@@ -140,6 +138,7 @@ type factResponse struct {
 }
 
 func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest, in projectEnsureInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "project_ensure call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -163,6 +162,7 @@ func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest
 }
 
 func (ms *mcpServer) factWrite(ctx context.Context, req *mcp.CallToolRequest, in factWriteInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "fact_write call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if err := requireScope(req, "facts:write"); err != nil {
 		return nil, nil, err
 	}
@@ -199,6 +199,7 @@ func (ms *mcpServer) factWrite(ctx context.Context, req *mcp.CallToolRequest, in
 }
 
 func (ms *mcpServer) factSearch(ctx context.Context, req *mcp.CallToolRequest, in factSearchInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "fact_search call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -251,6 +252,7 @@ func (ms *mcpServer) factList(ctx context.Context, req *mcp.CallToolRequest, in 
 }
 
 func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, in factDeleteInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "fact_delete call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if err := requireScope(req, "facts:write"); err != nil {
 		return nil, nil, err
 	}
@@ -276,6 +278,7 @@ func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, i
 }
 
 func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, _ projectListInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "project_list call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -306,6 +309,7 @@ func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, 
 }
 
 func (ms *mcpServer) factListTags(ctx context.Context, req *mcp.CallToolRequest, in factListTagsInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "fact_list_tags call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -336,6 +340,7 @@ func (ms *mcpServer) factListTags(ctx context.Context, req *mcp.CallToolRequest,
 }
 
 func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, in factUpdateInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "fact_update call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if err := requireScope(req, "facts:write"); err != nil {
 		return nil, nil, err
 	}
@@ -380,6 +385,7 @@ func requireScope(req *mcp.CallToolRequest, scope string) error {
 
 // resolveUserAndOrg looks up the user by UUID (from JWT sub) and their personal org.
 func (ms *mcpServer) resolveUserAndOrg(ctx context.Context, userIDStr string) (*store.User, *store.Org, error) {
+	ms.logger(ctx).InfoContext(ctx, "resolveUserAndOrg call", slog.String("user_id", userIDStr))
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid user ID in token: %w", err)

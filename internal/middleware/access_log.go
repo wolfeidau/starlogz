@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wolfeidau/starlogz/internal/ctxlog"
 )
 
 type responseWriter struct {
@@ -38,7 +39,7 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reqLogger := logger.With(slog.String("request_id", uuid.New().String()))
-			r = r.WithContext(WithLogger(r.Context(), reqLogger))
+			r = r.WithContext(ctxlog.WithLogger(r.Context(), reqLogger))
 
 			start := time.Now()
 			rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
