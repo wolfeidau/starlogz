@@ -15,6 +15,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
@@ -191,6 +192,8 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	if err := verifiedToken.Get("jti", &jti); err != nil || jti == "" {
 		return nil, fmt.Errorf("%w: missing jti claim", auth.ErrInvalidToken)
 	}
+
+	ctx = ctxlog.WithLogger(ctx, ctxlog.LoggerFrom(ctx).With(slog.String("jti", jti)))
 
 	revoked, err := s.revocation.IsTokenRevoked(ctx, jti)
 	if err != nil {

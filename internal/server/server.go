@@ -73,7 +73,7 @@ func New(cfg Config) (*Server, error) {
 
 	srv := &Server{logger: cfg.Logger, store: cfg.Store, shutdownTimeout: shutdownTimeout}
 
-	mcpSrv := newMCPServer(cfg.Logger, cfg.Store)
+	mcpSrv := newMCPServer(cfg.Store)
 
 	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
 		Scopes:              []string{"facts:read"},

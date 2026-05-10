@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
@@ -18,23 +19,15 @@ var _ store.Store = (*Store)(nil)
 
 // Store wraps a pgxpool and exposes domain-level query methods.
 type Store struct {
-	pool   *pgxpool.Pool
-	enc    *store.Encryptor
-	logger *slog.Logger
+	pool *pgxpool.Pool
+	enc  *store.Encryptor
 }
 
 // New connects to PostgreSQL and returns a Store. Call Migrate before first use.
 func New(ctx context.Context, dsn string, enc *store.Encryptor) (*Store, error) {
-	logger := slog.Default().With(slog.String("component", "store"))
-
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
-	}
-
-	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		logger.DebugContext(ctx, "connected to database")
-		return nil
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -42,7 +35,7 @@ func New(ctx context.Context, dsn string, enc *store.Encryptor) (*Store, error) 
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 
-	return &Store{pool: pool, enc: enc, logger: logger}, nil
+	return &Store{pool: pool, enc: enc}, nil
 }
 
 // Close releases all pooled connections.
@@ -127,7 +120,7 @@ func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login str
 // GetUserByGitHubID looks up a user by GitHub numeric ID.
 // Returns ErrNotFound if no matching row exists.
 func (s *Store) GetUserByGitHubID(ctx context.Context, githubID int64) (*store.User, error) {
-	s.logger.InfoContext(ctx, "getting user by github id", slog.Int64("github_id", githubID))
+	s.logger(ctx).DebugContext(ctx, "getting user by github id", slog.Int64("github_id", githubID))
 
 	var idStr string
 	u := &store.User{}
@@ -151,7 +144,7 @@ func (s *Store) GetUserByGitHubID(ctx context.Context, githubID int64) (*store.U
 // GetUserByID looks up a user by internal UUID.
 // Returns ErrNotFound if no matching row exists.
 func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*store.User, error) {
-	s.logger.InfoContext(ctx, "getting user by id", slog.String("id", id.String()))
+	s.logger(ctx).DebugContext(ctx, "getting user by id", slog.String("id", id.String()))
 
 	u := &store.User{}
 	var idStr string
@@ -175,7 +168,7 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*store.User, err
 // GetPersonalOrgByUserID returns the personal org for the given user.
 // Returns ErrNotFound if the user has no personal org.
 func (s *Store) GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*store.Org, error) {
-	s.logger.InfoContext(ctx, "getting personal org by user id", slog.String("user_id", userID.String()))
+	s.logger(ctx).DebugContext(ctx, "getting personal org by user id", slog.String("user_id", userID.String()))
 
 	o := &store.Org{}
 	var idStr string
@@ -201,7 +194,7 @@ func (s *Store) GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*
 // EnsureProject creates the project if it does not exist and returns it.
 // If it already exists the name is updated to match the provided value.
 func (s *Store) EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*store.Project, error) {
-	s.logger.InfoContext(ctx, "ensuring project", slog.String("org_id", orgID.String()), slog.String("created_by", createdBy.String()), slog.String("slug", slug), slog.String("name", name))
+	s.logger(ctx).DebugContext(ctx, "ensuring project", slog.String("org_id", orgID.String()), slog.String("created_by", createdBy.String()), slog.String("slug", slug), slog.String("name", name))
 
 	p := &store.Project{}
 	var idStr, orgIDStr, createdByStr string
@@ -230,7 +223,7 @@ func (s *Store) EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, s
 
 // ListProjects returns all projects in the org, ordered by name.
 func (s *Store) ListProjects(ctx context.Context, orgID uuid.UUID) ([]*store.Project, error) {
-	s.logger.InfoContext(ctx, "listing projects", slog.String("org_id", orgID.String()))
+	s.logger(ctx).DebugContext(ctx, "listing projects", slog.String("org_id", orgID.String()))
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, org_id, created_by, slug, name, created_at
@@ -266,7 +259,7 @@ func (s *Store) ListProjects(ctx context.Context, orgID uuid.UUID) ([]*store.Pro
 // GetProjectBySlug fetches a project by org and slug.
 // Returns ErrNotFound if no matching row exists.
 func (s *Store) GetProjectBySlug(ctx context.Context, orgID uuid.UUID, slug string) (*store.Project, error) {
-	s.logger.InfoContext(ctx, "getting project by slug", slog.String("org_id", orgID.String()), slog.String("slug", slug))
+	s.logger(ctx).DebugContext(ctx, "getting project by slug", slog.String("org_id", orgID.String()), slog.String("slug", slug))
 
 	p := &store.Project{}
 	var idStr, orgIDStr, createdByStr string
@@ -296,7 +289,7 @@ func (s *Store) GetProjectBySlug(ctx context.Context, orgID uuid.UUID, slug stri
 // UpsertGrant inserts or replaces a grant row and lazily prunes expired grants
 // for the same GitHub user within the same transaction.
 func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
-	s.logger.InfoContext(ctx, "upserting grant", slog.String("jti", g.JTI), slog.Int64("github_id", g.GitHubID))
+	s.logger(ctx).DebugContext(ctx, "upserting grant")
 
 	if s.enc == nil {
 		return fmt.Errorf("encryption key not configured")
@@ -360,7 +353,7 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 
 // GetGrant fetches and decrypts a grant by JWT ID.
 func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) {
-	s.logger.InfoContext(ctx, "getting grant by jti", slog.String("jti", jti))
+	s.logger(ctx).DebugContext(ctx, "getting grant by jti", slog.String("jti", jti))
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -374,7 +367,7 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 
 // GetGrantByRefreshToken fetches and decrypts a grant by our_refresh_token.
 func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error) {
-	s.logger.InfoContext(ctx, "getting grant by refresh token", slog.String("token", token))
+	s.logger(ctx).DebugContext(ctx, "getting grant by refresh token", slog.String("token", token))
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -415,7 +408,7 @@ func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 // the old jti as revoked in the same transaction. Returns ErrNotFound if oldToken
 // does not match any row (concurrent rotation race).
 func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
-	s.logger.InfoContext(ctx, "rotating grant", slog.String("old_token", oldToken), slog.String("old_jti", oldJTI), slog.Time("old_jwt_expiry", oldJWTExpiry))
+	s.logger(ctx).DebugContext(ctx, "rotating grant", slog.String("old_token", oldToken), slog.String("old_jti", oldJTI), slog.Time("old_jwt_expiry", oldJWTExpiry))
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -502,7 +495,7 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 
 // DeleteGrant removes a grant row by jti.
 func (s *Store) DeleteGrant(ctx context.Context, jti string) error {
-	s.logger.InfoContext(ctx, "deleting grant by jti", slog.String("jti", jti))
+	s.logger(ctx).DebugContext(ctx, "deleting grant by jti", slog.String("jti", jti))
 
 	ct, err := s.pool.Exec(ctx, `DELETE FROM grants WHERE jti = $1`, jti)
 	if err != nil {
@@ -517,7 +510,7 @@ func (s *Store) DeleteGrant(ctx context.Context, jti string) error {
 // StorePendingAuth persists an authorization state with a 10-minute TTL.
 // Lazily prunes all expired rows in the same transaction.
 func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error {
-	s.logger.InfoContext(ctx, "storing pending auth", slog.String("state", state))
+	s.logger(ctx).DebugContext(ctx, "storing pending auth", slog.String("state", state))
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -544,7 +537,7 @@ func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.Pend
 // ConsumePendingAuth atomically deletes and returns the pending auth for the given state.
 // Returns ErrNotFound for unknown or expired states.
 func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.PendingAuth, error) {
-	s.logger.InfoContext(ctx, "consuming pending auth", slog.String("state", state))
+	s.logger(ctx).DebugContext(ctx, "consuming pending auth", slog.String("state", state))
 
 	p := &store.PendingAuth{}
 	err := s.pool.QueryRow(ctx, `
@@ -564,7 +557,7 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 // StoreAuthCode persists an authorization code with a 5-minute TTL.
 // Lazily prunes all expired rows in the same transaction.
 func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode) error {
-	s.logger.InfoContext(ctx, "storing auth code", slog.String("code", code))
+	s.logger(ctx).DebugContext(ctx, "storing auth code", slog.String("code", code))
 
 	if s.enc == nil {
 		return fmt.Errorf("encryption key not configured")
@@ -623,7 +616,7 @@ func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode
 // ConsumeAuthCode atomically deletes and returns the auth code record.
 // Returns ErrNotFound for unknown or expired codes.
 func (s *Store) ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCode, error) {
-	s.logger.InfoContext(ctx, "consuming auth code", slog.String("code", code))
+	s.logger(ctx).DebugContext(ctx, "consuming auth code", slog.String("code", code))
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -676,7 +669,7 @@ func (s *Store) ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCo
 // RevokeToken inserts a jti into the revoked_tokens table.
 // Idempotent on duplicate jti. Lazily prunes expired rows.
 func (s *Store) RevokeToken(ctx context.Context, jti string, expiresAt time.Time) error {
-	s.logger.InfoContext(ctx, "revoking token", slog.String("jti", jti), slog.Time("expires_at", expiresAt))
+	s.logger(ctx).DebugContext(ctx, "revoking token", slog.Time("expires_at", expiresAt))
 
 	_, err := s.pool.Exec(ctx, `
 		WITH ins AS (
@@ -694,7 +687,7 @@ func (s *Store) RevokeToken(ctx context.Context, jti string, expiresAt time.Time
 
 // IsTokenRevoked returns true if the jti is present and not yet expired.
 func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
-	s.logger.InfoContext(ctx, "checking if token is revoked", slog.String("jti", jti))
+	s.logger(ctx).DebugContext(ctx, "checking if token is revoked")
 
 	var exists bool
 	err := s.pool.QueryRow(ctx,
@@ -709,7 +702,7 @@ func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 // WriteFact creates or updates a fact. If Key is set and a live fact with that key exists in the
 // project it is updated in place; otherwise a new row is inserted.
 func (s *Store) WriteFact(ctx context.Context, p store.WriteFactParams) (*store.Fact, error) {
-	s.logger.InfoContext(ctx, "writing fact", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("content", p.Content), slog.String("source_type", p.SourceType), slog.String("created_by", p.CreatedBy.String()))
+	s.logger(ctx).DebugContext(ctx, "writing fact", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("content", p.Content), slog.String("source_type", p.SourceType), slog.String("created_by", p.CreatedBy.String()))
 
 	if p.Key != "" {
 		f, err := s.updateFactByKey(ctx, p)
@@ -748,7 +741,7 @@ func (s *Store) insertFact(ctx context.Context, p store.WriteFactParams) (*store
 
 // SearchFacts runs a full-text search over live facts in a project.
 func (s *Store) SearchFacts(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*store.Fact, error) {
-	s.logger.InfoContext(ctx, "searching facts", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("tags", strings.Join(tags, ", ")), slog.Int("limit", limit))
+	s.logger(ctx).DebugContext(ctx, "searching facts", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("tags", strings.Join(tags, ", ")), slog.Int("limit", limit))
 
 	var rows pgx.Rows
 	var err error
@@ -783,7 +776,7 @@ func (s *Store) SearchFacts(ctx context.Context, projectID uuid.UUID, query stri
 
 // ListFacts returns live facts for a project ordered by most recently updated.
 func (s *Store) ListFacts(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*store.Fact, error) {
-	s.logger.InfoContext(ctx, "listing facts", slog.String("project_id", projectID.String()), slog.String("tag", tag), slog.Int("limit", limit))
+	s.logger(ctx).DebugContext(ctx, "listing facts", slog.String("project_id", projectID.String()), slog.String("tag", tag), slog.Int("limit", limit))
 
 	var rows pgx.Rows
 	var err error
@@ -813,7 +806,7 @@ func (s *Store) ListFacts(ctx context.Context, projectID uuid.UUID, tag string, 
 
 // ListTags returns tags for a project ordered by usage frequency.
 func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]store.TagCount, error) {
-	s.logger.InfoContext(ctx, "listing tags", slog.String("project_id", projectID.String()), slog.Int("limit", limit))
+	s.logger(ctx).DebugContext(ctx, "listing tags", slog.String("project_id", projectID.String()), slog.Int("limit", limit))
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT unnest(tags) AS tag, count(*) AS cnt
@@ -840,7 +833,7 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 
 // UpdateFact patches content and/or tags on an existing live fact, scoped to orgID.
 func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*store.Fact, error) {
-	s.logger.InfoContext(ctx, "updating fact", slog.String("fact_id", p.FactID.String()), slog.String("content", p.Content), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
+	s.logger(ctx).DebugContext(ctx, "updating fact", slog.String("fact_id", p.FactID.String()), slog.String("content", p.Content), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
 
 	tags := p.Tags
 	if tags == nil {
@@ -864,7 +857,7 @@ func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*stor
 
 // DeleteFact soft-deletes a fact, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.
 func (s *Store) DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error {
-	s.logger.InfoContext(ctx, "deleting fact", slog.String("fact_id", factID.String()), slog.String("org_id", orgID.String()))
+	s.logger(ctx).DebugContext(ctx, "deleting fact", slog.String("fact_id", factID.String()), slog.String("org_id", orgID.String()))
 
 	ct, err := s.pool.Exec(ctx, `
 		UPDATE facts SET deleted_at = now()
@@ -947,7 +940,7 @@ func (s *Store) GetClient(ctx context.Context, clientID string) (*store.OAuthCli
 }
 
 func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
-	s.logger.InfoContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("grant_types", strings.Join(c.GrantTypes, ", ")), slog.String("response_types", strings.Join(c.ResponseTypes, ", ")), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.String("scope", c.Scope), slog.Time("issued_at", c.IssuedAt), slog.Time("expires_at", c.ExpiresAt))
+	s.logger(ctx).DebugContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("grant_types", strings.Join(c.GrantTypes, ", ")), slog.String("response_types", strings.Join(c.ResponseTypes, ", ")), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.String("scope", c.Scope), slog.Time("issued_at", c.IssuedAt), slog.Time("expires_at", c.ExpiresAt))
 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients
@@ -960,4 +953,8 @@ func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 		return fmt.Errorf("save oauth client: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) logger(ctx context.Context) *slog.Logger {
+	return ctxlog.LoggerFrom(ctx).With(slog.String("component", "store"))
 }
