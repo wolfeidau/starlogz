@@ -955,6 +955,57 @@ func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 	return nil
 }
 
+// ListAuditLog returns audit_log entries newest-first, with optional filtering by table,
+// operation, and a minimum timestamp.
+func (s *Store) ListAuditLog(ctx context.Context, filter store.AuditLogFilter) ([]*store.AuditLogEntry, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	q := strings.Builder{}
+	q.WriteString(`SELECT id, table_name, operation, old_data, new_data, changed_at FROM audit_log WHERE TRUE`)
+	args := []any{}
+	n := 1
+
+	if filter.TableName != "" {
+		fmt.Fprintf(&q, ` AND table_name = $%d`, n)
+		args = append(args, filter.TableName)
+		n++
+	}
+	if filter.Operation != "" {
+		fmt.Fprintf(&q, ` AND operation = $%d`, n)
+		args = append(args, filter.Operation)
+		n++
+	}
+	if !filter.Since.IsZero() {
+		fmt.Fprintf(&q, ` AND changed_at > $%d`, n)
+		args = append(args, filter.Since)
+		n++
+	}
+	fmt.Fprintf(&q, ` ORDER BY changed_at DESC LIMIT $%d`, n)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list audit log: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*store.AuditLogEntry
+	for rows.Next() {
+		e := &store.AuditLogEntry{}
+		if err := rows.Scan(&e.ID, &e.TableName, &e.Operation, &e.OldData, &e.NewData, &e.ChangedAt); err != nil {
+			return nil, fmt.Errorf("scan audit log: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
 func (s *Store) logger(ctx context.Context) *slog.Logger {
 	return ctxlog.LoggerFrom(ctx).With(slog.String("component", "store"))
 }
