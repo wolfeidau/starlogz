@@ -51,6 +51,8 @@ type Store interface {
 
 	SaveClient(ctx context.Context, c OAuthClient) error
 	GetClient(ctx context.Context, clientID string) (*OAuthClient, error)
+
+	ListAuditLog(ctx context.Context, filter AuditLogFilter) ([]*AuditLogEntry, error)
 }
 
 // User is a GitHub-authenticated user stored in the database.
@@ -156,6 +158,25 @@ type PendingAuth struct {
 	Scope         string
 	CodeChallenge string
 	ClientState   string
+}
+
+// AuditLogEntry is a single row from the audit_log table.
+type AuditLogEntry struct {
+	ID        int64
+	TableName string
+	Operation string // INSERT, UPDATE, DELETE
+	OldData   []byte // raw JSONB; nil for INSERT
+	NewData   []byte // raw JSONB; nil for DELETE
+	ChangedAt time.Time
+}
+
+// AuditLogFilter controls which audit_log rows are returned by ListAuditLog.
+// Zero values for string fields and a zero Since mean "no filter on that field".
+type AuditLogFilter struct {
+	TableName string    // optional
+	Operation string    // optional: INSERT, UPDATE, DELETE
+	Since     time.Time // optional: only entries after this time
+	Limit     int       // 0 → default 100; capped at 500
 }
 
 // AuthCode holds identity and GitHub tokens between the GitHub callback and token exchange.
