@@ -38,7 +38,10 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			reqLogger := logger.With(slog.String("request_id", uuid.New().String()))
+			reqLogger := logger.With(
+				slog.String("request_id", uuid.New().String()),
+				slog.String("user_agent", r.Header.Get("User-Agent")),
+			)
 			r = r.WithContext(ctxlog.WithLogger(r.Context(), reqLogger))
 
 			start := time.Now()
