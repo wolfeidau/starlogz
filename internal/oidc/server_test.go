@@ -797,7 +797,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	require.Len(t, gs.calls, 1, "UpsertGrant must be called exactly once")
 
 	p := gs.calls[0]
-	require.Equal(t, int64(99887766), p.GitHubID)
+	require.Equal(t, uuid.Nil, p.UserID, "no users store: UserID falls back to uuid.Nil")
 	require.NotEmpty(t, p.JTI)
 	require.Equal(t, "gha_access_abc", p.AccessToken)
 	require.Equal(t, "ghr_refresh_xyz", p.RefreshToken)
@@ -926,7 +926,6 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 	oldJTI := uuid.New().String()
 	gs.seed(store.Grant{
 		JTI:                oldJTI,
-		GitHubID:           12345678,
 		OurRefreshToken:    oldRefresh,
 		ClientID:           "test-client",
 		Scope:              "facts:read facts:write",

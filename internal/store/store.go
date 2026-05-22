@@ -126,7 +126,7 @@ type TagCount struct {
 // Tokens are stored encrypted at rest; this struct carries plaintext values.
 type Grant struct {
 	JTI                string
-	GitHubID           int64
+	UserID             uuid.UUID
 	OurRefreshToken    string
 	ClientID           string
 	Scope              string
