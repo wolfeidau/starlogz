@@ -214,7 +214,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	jwtExpiry := time.Now().Add(jwtTTL)
 	log = log.With(
 		slog.String("client_id", pc.ClientID),
-		slog.Int64("github_id", pc.GitHubID),
+		slog.String("sub", pc.Sub),
 		slog.String("jti", jti),
 	)
 	ctx := ctxlog.WithLogger(r.Context(), log)
