@@ -145,19 +145,20 @@ func testUserAndProject(t *testing.T, st *postgres.Store, githubID int64) (*stor
 	return u, p
 }
 
-func TestWriteFact_InsertAndUpsertByKey(t *testing.T) {
+func TestWriteInsight_InsertAndUpsertByKey(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	u, p := testUserAndProject(t, st, 10)
 
-	// Insert a keyed fact.
-	f, err := st.WriteFact(ctx, store.WriteFactParams{
-		ProjectID:  p.ID,
-		Key:        "api-version",
-		Content:    "v1",
-		Tags:       []string{"meta"},
-		SourceType: "human",
-		CreatedBy:  u.ID,
+	// Insert a keyed insight.
+	f, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "api-version",
+		Content:   "v1",
+		Tags:      []string{"meta"},
+		Category:  "decision",
+		Source:    "user",
+		CreatedBy: u.ID,
 	})
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil, f.ID)
@@ -165,107 +166,108 @@ func TestWriteFact_InsertAndUpsertByKey(t *testing.T) {
 	require.Equal(t, "v1", f.Content)
 
 	// Upsert the same key — should update content, same ID.
-	f2, err := st.WriteFact(ctx, store.WriteFactParams{
-		ProjectID:  p.ID,
-		Key:        "api-version",
-		Content:    "v2",
-		Tags:       []string{"meta"},
-		SourceType: "human",
-		CreatedBy:  u.ID,
+	f2, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "api-version",
+		Content:   "v2",
+		Tags:      []string{"meta"},
+		Category:  "decision",
+		Source:    "user",
+		CreatedBy: u.ID,
 	})
 	require.NoError(t, err)
 	require.Equal(t, f.ID, f2.ID, "upsert must return same ID")
 	require.Equal(t, "v2", f2.Content)
 }
 
-func TestWriteFact_InsertWithoutKey(t *testing.T) {
+func TestWriteInsight_InsertWithoutKey(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	u, p := testUserAndProject(t, st, 20)
 
-	f1, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "first", Tags: []string{}, SourceType: "agent", CreatedBy: u.ID})
+	f1, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "first", Tags: []string{}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	f2, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "second", Tags: []string{}, SourceType: "agent", CreatedBy: u.ID})
+	f2, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "second", Tags: []string{}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	require.NotEqual(t, f1.ID, f2.ID, "keyless facts get distinct IDs")
+	require.NotEqual(t, f1.ID, f2.ID, "keyless insights get distinct IDs")
 	require.Empty(t, f1.Key)
 	require.Empty(t, f2.Key)
 }
 
-func TestSearchFacts(t *testing.T) {
+func TestSearchInsights(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	u, p := testUserAndProject(t, st, 30)
 
-	_, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "PostgreSQL is a relational database", Tags: []string{"db"}, SourceType: "agent", CreatedBy: u.ID})
+	_, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "PostgreSQL is a relational database", Tags: []string{"db"}, CreatedBy: u.ID})
 	require.NoError(t, err)
-	_, err = st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "Redis is an in-memory store", Tags: []string{"cache"}, SourceType: "agent", CreatedBy: u.ID})
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "Redis is an in-memory store", Tags: []string{"cache"}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	results, err := st.SearchFacts(ctx, p.ID, "relational database", nil, 10)
+	results, err := st.SearchInsights(ctx, p.ID, "relational database", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Contains(t, results[0].Content, "PostgreSQL")
 
 	// Tag filter should narrow results.
-	tagged, err := st.SearchFacts(ctx, p.ID, "database", []string{"cache"}, 10)
+	tagged, err := st.SearchInsights(ctx, p.ID, "database", []string{"cache"}, 10)
 	require.NoError(t, err)
 	require.Empty(t, tagged, "cache tag should exclude PostgreSQL result")
 
 	// Tag names should be searchable even when absent from content.
-	byTagName, err := st.SearchFacts(ctx, p.ID, "cache", nil, 10)
+	byTagName, err := st.SearchInsights(ctx, p.ID, "cache", nil, 10)
 	require.NoError(t, err)
-	require.Len(t, byTagName, 1, "searching by tag name should find facts tagged with that word")
+	require.Len(t, byTagName, 1, "searching by tag name should find insights tagged with that word")
 	require.Contains(t, byTagName[0].Content, "Redis")
 }
 
-func TestListFacts(t *testing.T) {
+func TestListInsights(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	u, p := testUserAndProject(t, st, 40)
 
-	for _, content := range []string{"fact one", "fact two", "fact three"} {
-		_, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: content, Tags: []string{"x"}, SourceType: "agent", CreatedBy: u.ID})
+	for _, content := range []string{"insight one", "insight two", "insight three"} {
+		_, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: content, Tags: []string{"x"}, CreatedBy: u.ID})
 		require.NoError(t, err)
 	}
 
-	all, err := st.ListFacts(ctx, p.ID, "", 10)
+	all, err := st.ListInsights(ctx, p.ID, "", 10)
 	require.NoError(t, err)
 	require.Len(t, all, 3)
 
-	byTag, err := st.ListFacts(ctx, p.ID, "x", 10)
+	byTag, err := st.ListInsights(ctx, p.ID, "x", 10)
 	require.NoError(t, err)
 	require.Len(t, byTag, 3)
 
-	noMatch, err := st.ListFacts(ctx, p.ID, "y", 10)
+	noMatch, err := st.ListInsights(ctx, p.ID, "y", 10)
 	require.NoError(t, err)
 	require.Empty(t, noMatch)
 }
 
-func TestDeleteFact(t *testing.T) {
+func TestDeleteInsight(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	u, p := testUserAndProject(t, st, 50)
 
-	f, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "to delete", Tags: []string{}, SourceType: "agent", CreatedBy: u.ID})
+	f, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "to delete", Tags: []string{}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	require.NoError(t, st.DeleteFact(ctx, p.OrgID, f.ID))
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, f.ID))
 
-	// Deleted fact must not appear in list.
-	facts, err := st.ListFacts(ctx, p.ID, "", 10)
+	// Deleted insight must not appear in list.
+	insights, err := st.ListInsights(ctx, p.ID, "", 10)
 	require.NoError(t, err)
-	require.Empty(t, facts)
+	require.Empty(t, insights)
 
 	// Double-delete returns ErrNotFound.
-	require.ErrorIs(t, st.DeleteFact(ctx, p.OrgID, f.ID), store.ErrNotFound)
+	require.ErrorIs(t, st.DeleteInsight(ctx, p.OrgID, f.ID), store.ErrNotFound)
 }
 
-func TestDeleteFact_NotFound(t *testing.T) {
+func TestDeleteInsight_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	err := st.DeleteFact(context.Background(), uuid.New(), uuid.New())
+	err := st.DeleteInsight(context.Background(), uuid.New(), uuid.New())
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
@@ -304,7 +306,7 @@ func TestListTags(t *testing.T) {
 	u, p := testUserAndProject(t, st, 70)
 
 	write := func(tags []string) {
-		_, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "x", Tags: tags, SourceType: "agent", CreatedBy: u.ID})
+		_, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "x", Tags: tags, CreatedBy: u.ID})
 		require.NoError(t, err)
 	}
 	write([]string{"auth", "api"})
@@ -318,58 +320,57 @@ func TestListTags(t *testing.T) {
 	require.Equal(t, "auth", tags[0].Name)
 	require.Equal(t, 3, tags[0].Count)
 
-	// Deleted facts must not contribute to counts.
-	f, err := st.WriteFact(ctx, store.WriteFactParams{ProjectID: p.ID, Content: "gone", Tags: []string{"orphan"}, SourceType: "agent", CreatedBy: u.ID})
+	// Deleted insights must not contribute to counts.
+	f, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "gone", Tags: []string{"orphan"}, CreatedBy: u.ID})
 	require.NoError(t, err)
-	require.NoError(t, st.DeleteFact(ctx, p.OrgID, f.ID))
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, f.ID))
 
 	tags, err = st.ListTags(ctx, p.ID, 10)
 	require.NoError(t, err)
 	for _, tc := range tags {
-		require.NotEqual(t, "orphan", tc.Name, "deleted fact tags must not appear")
+		require.NotEqual(t, "orphan", tc.Name, "deleted insight tags must not appear")
 	}
 }
 
-func TestUpdateFact(t *testing.T) {
+func TestUpdateInsight(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	u, p := testUserAndProject(t, st, 80)
 
-	f, err := st.WriteFact(ctx, store.WriteFactParams{
-		ProjectID:  p.ID,
-		Content:    "original content",
-		Tags:       []string{"v1"},
-		SourceType: "human",
-		CreatedBy:  u.ID,
+	f, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Content:   "original content",
+		Tags:      []string{"v1"},
+		CreatedBy: u.ID,
 	})
 	require.NoError(t, err)
 
 	// Update content only — tags should be unchanged.
-	updated, err := st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Content: "updated content"})
+	updated, err := st.UpdateInsight(ctx, store.UpdateInsightParams{OrgID: p.OrgID, InsightID: f.ID, Content: "updated content"})
 	require.NoError(t, err)
 	require.Equal(t, "updated content", updated.Content)
 	require.Equal(t, []string{"v1"}, updated.Tags)
 
 	// Update tags only — content should be unchanged.
-	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Tags: []string{"v2", "patched"}})
+	updated, err = st.UpdateInsight(ctx, store.UpdateInsightParams{OrgID: p.OrgID, InsightID: f.ID, Tags: []string{"v2", "patched"}})
 	require.NoError(t, err)
 	require.Equal(t, "updated content", updated.Content)
 	require.Equal(t, []string{"v2", "patched"}, updated.Tags)
 
 	// Clear tags by passing an empty (non-nil) slice.
-	updated, err = st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Tags: []string{}})
+	updated, err = st.UpdateInsight(ctx, store.UpdateInsightParams{OrgID: p.OrgID, InsightID: f.ID, Tags: []string{}})
 	require.NoError(t, err)
 	require.Empty(t, updated.Tags)
 
-	// ErrNotFound on a missing fact.
+	// ErrNotFound on a missing insight.
 	require.ErrorIs(t, func() error {
-		_, err := st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: uuid.New(), Content: "x"})
+		_, err := st.UpdateInsight(ctx, store.UpdateInsightParams{OrgID: p.OrgID, InsightID: uuid.New(), Content: "x"})
 		return err
 	}(), store.ErrNotFound)
 
 	// ErrNotFound after soft-delete.
-	require.NoError(t, st.DeleteFact(ctx, p.OrgID, f.ID))
-	_, err = st.UpdateFact(ctx, store.UpdateFactParams{OrgID: p.OrgID, FactID: f.ID, Content: "too late"})
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, f.ID))
+	_, err = st.UpdateInsight(ctx, store.UpdateInsightParams{OrgID: p.OrgID, InsightID: f.ID, Content: "too late"})
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 

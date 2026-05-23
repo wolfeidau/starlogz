@@ -174,10 +174,10 @@ func callTool(t *testing.T, ctx context.Context, sess *mcp.ClientSession, name s
 
 // --- Cross-org isolation regression (review #1) ---
 
-// TestFactDelete_CrossOrg_Forbidden proves that a fact written by user A's
+// TestInsightDelete_CrossOrg_Forbidden proves that an insight written by user A's
 // session cannot be deleted by user B's session, even with a valid JWT and the
 // facts:write scope. Regression for the v0.1 leak called out in tools_review.md.
-func TestFactDelete_CrossOrg_Forbidden(t *testing.T) {
+func TestInsightDelete_CrossOrg_Forbidden(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -187,13 +187,13 @@ func TestFactDelete_CrossOrg_Forbidden(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read facts:write"))
 
-	writeRes := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+	writeRes := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
 		"project": "demo",
 		"content": "alice's secret",
 		"key":     "",
 		"tags":    []string{},
 	})
-	require.False(t, writeRes.IsError, "fact_write failed: %s", resultText(t, writeRes))
+	require.False(t, writeRes.IsError, "insight_write failed: %s", resultText(t, writeRes))
 
 	var written struct {
 		ID string `json:"id"`
@@ -201,13 +201,13 @@ func TestFactDelete_CrossOrg_Forbidden(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, writeRes)), &written))
 	require.NotEmpty(t, written.ID)
 
-	delRes := callTool(t, ctx, bobSess, "fact_delete", map[string]any{"id": written.ID})
-	require.True(t, delRes.IsError, "fact_delete must reject cross-org delete; got %s", resultText(t, delRes))
+	delRes := callTool(t, ctx, bobSess, "insight_delete", map[string]any{"id": written.ID})
+	require.True(t, delRes.IsError, "insight_delete must reject cross-org delete; got %s", resultText(t, delRes))
 	require.Contains(t, resultText(t, delRes), "not found or already deleted")
 
 	// Sanity: alice can still see her fact, proving the delete attempt did not succeed.
-	listRes := callTool(t, ctx, aliceSess, "fact_list", map[string]any{"project": "demo", "tag": "", "limit": 0})
-	require.False(t, listRes.IsError, "fact_list failed: %s", resultText(t, listRes))
+	listRes := callTool(t, ctx, aliceSess, "insight_list", map[string]any{"project": "demo", "tag": "", "limit": 0})
+	require.False(t, listRes.IsError, "insight_list failed: %s", resultText(t, listRes))
 	require.Contains(t, resultText(t, listRes), "alice's secret")
 }
 
@@ -301,36 +301,36 @@ func TestProjectEnsure_DefaultsNameToSlug(t *testing.T) {
 	require.Equal(t, got.Slug, got.Name)
 }
 
-// --- fact_write ---
+// --- insight_write ---
 
-func TestFactWrite_AutoCreatesProject(t *testing.T) {
+func TestInsightWrite_AutoCreatesProject(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	res := callTool(t, ctx, sess, "fact_write", map[string]any{
+	res := callTool(t, ctx, sess, "insight_write", map[string]any{
 		"project": "auto-project",
 		"content": "hello",
 		"key":     "",
 		"tags":    []string{},
 	})
-	require.False(t, res.IsError, "fact_write failed: %s", resultText(t, res))
+	require.False(t, res.IsError, "insight_write failed: %s", resultText(t, res))
 
 	listRes := callTool(t, ctx, sess, "project_list", map[string]any{})
 	require.False(t, listRes.IsError)
 	require.Contains(t, resultText(t, listRes), "auto-project")
 }
 
-func TestFactWrite_RequiresWriteScope(t *testing.T) {
+func TestInsightWrite_RequiresWriteScope(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
 
-	res := callTool(t, ctx, sess, "fact_write", map[string]any{
+	res := callTool(t, ctx, sess, "insight_write", map[string]any{
 		"project": "demo",
 		"content": "should fail",
 		"key":     "",
@@ -340,7 +340,7 @@ func TestFactWrite_RequiresWriteScope(t *testing.T) {
 	require.Contains(t, resultText(t, res), "missing required scope")
 }
 
-func TestFactWrite_UpsertsByKey(t *testing.T) {
+func TestInsightWrite_UpsertsByKey(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -352,7 +352,7 @@ func TestFactWrite_UpsertsByKey(t *testing.T) {
 		Updated bool   `json:"updated"`
 	}
 
-	res1 := callTool(t, ctx, sess, "fact_write", map[string]any{
+	res1 := callTool(t, ctx, sess, "insight_write", map[string]any{
 		"project": "demo",
 		"content": "original",
 		"key":     "stable-key",
@@ -362,7 +362,7 @@ func TestFactWrite_UpsertsByKey(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, res1)), &result1))
 	require.False(t, result1.Updated, "first write should not be an update")
 
-	res2 := callTool(t, ctx, sess, "fact_write", map[string]any{
+	res2 := callTool(t, ctx, sess, "insight_write", map[string]any{
 		"project": "demo",
 		"content": "updated",
 		"key":     "stable-key",
@@ -374,9 +374,9 @@ func TestFactWrite_UpsertsByKey(t *testing.T) {
 	require.True(t, result2.Updated, "second write with same key should be an update")
 }
 
-// --- fact_list / fact_search / fact_list_tags org scoping ---
+// --- insight_list / insight_search / insight_list_tags org scoping ---
 
-func TestFactList_ScopedToCallerOrg(t *testing.T) {
+func TestInsightList_ScopedToCallerOrg(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -386,7 +386,7 @@ func TestFactList_ScopedToCallerOrg(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
 
-	wr := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+	wr := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
 		"project": "alice-proj",
 		"content": "alice data",
 		"key":     "",
@@ -394,7 +394,7 @@ func TestFactList_ScopedToCallerOrg(t *testing.T) {
 	})
 	require.False(t, wr.IsError)
 
-	res := callTool(t, ctx, bobSess, "fact_list", map[string]any{
+	res := callTool(t, ctx, bobSess, "insight_list", map[string]any{
 		"project": "alice-proj",
 		"tag":     "",
 		"limit":   0,
@@ -404,7 +404,7 @@ func TestFactList_ScopedToCallerOrg(t *testing.T) {
 	require.Contains(t, resultText(t, res), "not found")
 }
 
-func TestFactSearch_ScopedToCallerOrg(t *testing.T) {
+func TestInsightSearch_ScopedToCallerOrg(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -414,7 +414,7 @@ func TestFactSearch_ScopedToCallerOrg(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
 
-	wr := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+	wr := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
 		"project": "alice-proj",
 		"content": "alice data",
 		"key":     "",
@@ -422,7 +422,7 @@ func TestFactSearch_ScopedToCallerOrg(t *testing.T) {
 	})
 	require.False(t, wr.IsError)
 
-	res := callTool(t, ctx, bobSess, "fact_search", map[string]any{
+	res := callTool(t, ctx, bobSess, "insight_search", map[string]any{
 		"project": "alice-proj",
 		"query":   "alice",
 		"tags":    []string{},
@@ -433,7 +433,7 @@ func TestFactSearch_ScopedToCallerOrg(t *testing.T) {
 	require.Contains(t, resultText(t, res), "not found")
 }
 
-func TestFactSearch_ReturnsMatchingFacts(t *testing.T) {
+func TestInsightSearch_ReturnsMatchingInsights(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -441,28 +441,28 @@ func TestFactSearch_ReturnsMatchingFacts(t *testing.T) {
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
 	for _, content := range []string{"golang concurrency patterns", "python asyncio basics"} {
-		wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+		wr := callTool(t, ctx, sess, "insight_write", map[string]any{
 			"project": "search-test",
 			"content": content,
 			"key":     "",
 			"tags":    []string{},
 		})
-		require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	}
 
-	res := callTool(t, ctx, sess, "fact_search", map[string]any{
+	res := callTool(t, ctx, sess, "insight_search", map[string]any{
 		"project": "search-test",
 		"query":   "concurrency",
 		"tags":    []string{},
 		"limit":   0,
 	})
-	require.False(t, res.IsError, "fact_search failed: %s", resultText(t, res))
+	require.False(t, res.IsError, "insight_search failed: %s", resultText(t, res))
 	text := resultText(t, res)
 	require.Contains(t, text, "golang concurrency patterns")
 	require.NotContains(t, text, "python asyncio basics")
 }
 
-func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
+func TestInsightListTags_ScopedToCallerOrg(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -472,7 +472,7 @@ func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
 
-	wr := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+	wr := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
 		"project": "alice-proj",
 		"content": "alice data",
 		"key":     "",
@@ -480,7 +480,7 @@ func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
 	})
 	require.False(t, wr.IsError)
 
-	res := callTool(t, ctx, bobSess, "fact_list_tags", map[string]any{
+	res := callTool(t, ctx, bobSess, "insight_list_tags", map[string]any{
 		"project": "alice-proj",
 		"limit":   0,
 	})
@@ -489,7 +489,7 @@ func TestFactListTags_ScopedToCallerOrg(t *testing.T) {
 	require.Contains(t, resultText(t, res), "not found")
 }
 
-func TestFactListTags_ReturnsByFrequency(t *testing.T) {
+func TestInsightListTags_ReturnsByFrequency(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -498,20 +498,20 @@ func TestFactListTags_ReturnsByFrequency(t *testing.T) {
 
 	// "go" appears 3 times, "concurrency" once — go must sort first.
 	for _, tags := range [][]string{{"go", "concurrency"}, {"go"}, {"go"}} {
-		wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+		wr := callTool(t, ctx, sess, "insight_write", map[string]any{
 			"project": "tags-test",
 			"content": "content",
 			"key":     "",
 			"tags":    tags,
 		})
-		require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	}
 
-	res := callTool(t, ctx, sess, "fact_list_tags", map[string]any{
+	res := callTool(t, ctx, sess, "insight_list_tags", map[string]any{
 		"project": "tags-test",
 		"limit":   0,
 	})
-	require.False(t, res.IsError, "fact_list_tags failed: %s", resultText(t, res))
+	require.False(t, res.IsError, "insight_list_tags failed: %s", resultText(t, res))
 
 	var got struct {
 		Tags []struct {
@@ -525,7 +525,7 @@ func TestFactListTags_ReturnsByFrequency(t *testing.T) {
 	require.Equal(t, 3, got.Tags[0].Count)
 }
 
-func TestFactList_RespectsTagFilter(t *testing.T) {
+func TestInsightList_RespectsTagFilter(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -540,16 +540,16 @@ func TestFactList_RespectsTagFilter(t *testing.T) {
 		{"python fact", []string{"python"}},
 		{"both fact", []string{"go", "python"}},
 	} {
-		wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+		wr := callTool(t, ctx, sess, "insight_write", map[string]any{
 			"project": "tagged",
 			"content": w.content,
 			"key":     "",
 			"tags":    w.tags,
 		})
-		require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	}
 
-	res := callTool(t, ctx, sess, "fact_list", map[string]any{
+	res := callTool(t, ctx, sess, "insight_list", map[string]any{
 		"project": "tagged",
 		"tag":     "go",
 		"limit":   0,
@@ -561,28 +561,28 @@ func TestFactList_RespectsTagFilter(t *testing.T) {
 	require.NotContains(t, text, "python fact")
 }
 
-// --- fact_delete / fact_update: scope enforcement and error surfaces ---
+// --- insight_delete / insight_update: scope enforcement and error surfaces ---
 
-func TestFactDelete_RequiresWriteScope(t *testing.T) {
+func TestInsightDelete_RequiresWriteScope(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
 
-	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": uuid.New().String()})
+	res := callTool(t, ctx, sess, "insight_delete", map[string]any{"id": uuid.New().String()})
 	require.True(t, res.IsError)
 	require.Contains(t, resultText(t, res), "missing required scope")
 }
 
-func TestFactUpdate_RequiresWriteScope(t *testing.T) {
+func TestInsightUpdate_RequiresWriteScope(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
 
-	res := callTool(t, ctx, sess, "fact_update", map[string]any{
+	res := callTool(t, ctx, sess, "insight_update", map[string]any{
 		"id":      uuid.New().String(),
 		"content": "x",
 		"tags":    []string{},
@@ -591,26 +591,26 @@ func TestFactUpdate_RequiresWriteScope(t *testing.T) {
 	require.Contains(t, resultText(t, res), "missing required scope")
 }
 
-func TestFactDelete_UnknownID_NotFound(t *testing.T) {
+func TestInsightDelete_UnknownID_NotFound(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": uuid.New().String()})
+	res := callTool(t, ctx, sess, "insight_delete", map[string]any{"id": uuid.New().String()})
 	require.True(t, res.IsError)
 	require.Contains(t, resultText(t, res), "not found or already deleted")
 }
 
-func TestFactUpdate_UnknownID_NotFound(t *testing.T) {
+func TestInsightUpdate_UnknownID_NotFound(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	res := callTool(t, ctx, sess, "fact_update", map[string]any{
+	res := callTool(t, ctx, sess, "insight_update", map[string]any{
 		"id":      uuid.New().String(),
 		"content": "x",
 		"tags":    []string{},
@@ -619,45 +619,45 @@ func TestFactUpdate_UnknownID_NotFound(t *testing.T) {
 	require.Contains(t, resultText(t, res), "not found or already deleted")
 }
 
-func TestFactDelete_InvalidUUID_StructuredError(t *testing.T) {
+func TestInsightDelete_InvalidUUID_StructuredError(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	res := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": "not-a-uuid"})
+	res := callTool(t, ctx, sess, "insight_delete", map[string]any{"id": "not-a-uuid"})
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "invalid fact ID")
+	require.Contains(t, resultText(t, res), "invalid insight ID")
 }
 
-func TestFactDelete_RemovesFact(t *testing.T) {
+func TestInsightDelete_RemovesInsight(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+	wr := callTool(t, ctx, sess, "insight_write", map[string]any{
 		"project": "delete-test",
 		"content": "to be deleted",
 		"key":     "",
 		"tags":    []string{},
 	})
-	require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	var written struct {
 		ID string `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, wr)), &written))
 
-	listBefore := callTool(t, ctx, sess, "fact_list", map[string]any{"project": "delete-test", "tag": "", "limit": 0})
+	listBefore := callTool(t, ctx, sess, "insight_list", map[string]any{"project": "delete-test", "tag": "", "limit": 0})
 	require.False(t, listBefore.IsError)
 	require.Contains(t, resultText(t, listBefore), "to be deleted")
 
-	delRes := callTool(t, ctx, sess, "fact_delete", map[string]any{"id": written.ID})
-	require.False(t, delRes.IsError, "fact_delete failed: %s", resultText(t, delRes))
+	delRes := callTool(t, ctx, sess, "insight_delete", map[string]any{"id": written.ID})
+	require.False(t, delRes.IsError, "insight_delete failed: %s", resultText(t, delRes))
 
-	listAfter := callTool(t, ctx, sess, "fact_list", map[string]any{"project": "delete-test", "tag": "", "limit": 0})
+	listAfter := callTool(t, ctx, sess, "insight_list", map[string]any{"project": "delete-test", "tag": "", "limit": 0})
 	require.False(t, listAfter.IsError)
 	require.NotContains(t, resultText(t, listAfter), "to be deleted")
 }
@@ -719,8 +719,8 @@ func TestResolveUser_UnknownSub_CleanError(t *testing.T) {
 	require.Contains(t, resultText(t, res), "user not found")
 }
 
-// TestFactUpdate_CrossOrg_Forbidden is the analogous regression for fact_update.
-func TestFactUpdate_CrossOrg_Forbidden(t *testing.T) {
+// TestFactUpdate_CrossOrg_Forbidden is the analogous regression for insight_update.
+func TestInsightUpdate_CrossOrg_Forbidden(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
@@ -730,13 +730,13 @@ func TestFactUpdate_CrossOrg_Forbidden(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read facts:write"))
 
-	writeRes := callTool(t, ctx, aliceSess, "fact_write", map[string]any{
+	writeRes := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
 		"project": "demo",
 		"content": "alice's original",
 		"key":     "",
 		"tags":    []string{},
 	})
-	require.False(t, writeRes.IsError, "fact_write failed: %s", resultText(t, writeRes))
+	require.False(t, writeRes.IsError, "insight_write failed: %s", resultText(t, writeRes))
 
 	var written struct {
 		ID string `json:"id"`
@@ -744,46 +744,46 @@ func TestFactUpdate_CrossOrg_Forbidden(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, writeRes)), &written))
 	require.NotEmpty(t, written.ID)
 
-	updRes := callTool(t, ctx, bobSess, "fact_update", map[string]any{
+	updRes := callTool(t, ctx, bobSess, "insight_update", map[string]any{
 		"id":      written.ID,
 		"content": "tampered by bob",
 		"tags":    []string{},
 	})
-	require.True(t, updRes.IsError, "fact_update must reject cross-org update; got %s", resultText(t, updRes))
+	require.True(t, updRes.IsError, "insight_update must reject cross-org update; got %s", resultText(t, updRes))
 	require.Contains(t, resultText(t, updRes), "not found or already deleted")
 
 	// Sanity: alice's original content is intact.
-	listRes := callTool(t, ctx, aliceSess, "fact_list", map[string]any{"project": "demo", "tag": "", "limit": 0})
-	require.False(t, listRes.IsError, "fact_list failed: %s", resultText(t, listRes))
+	listRes := callTool(t, ctx, aliceSess, "insight_list", map[string]any{"project": "demo", "tag": "", "limit": 0})
+	require.False(t, listRes.IsError, "insight_list failed: %s", resultText(t, listRes))
 	require.Contains(t, resultText(t, listRes), "alice's original")
 	require.NotContains(t, resultText(t, listRes), "tampered")
 }
 
-func TestFactUpdate_ChangesContentAndTags(t *testing.T) {
+func TestInsightUpdate_ChangesContentAndTags(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	wr := callTool(t, ctx, sess, "fact_write", map[string]any{
+	wr := callTool(t, ctx, sess, "insight_write", map[string]any{
 		"project": "update-test",
 		"content": "original content",
 		"key":     "",
 		"tags":    []string{"old-tag"},
 	})
-	require.False(t, wr.IsError, "fact_write failed: %s", resultText(t, wr))
+	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	var written struct {
 		ID string `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, wr)), &written))
 
-	upd := callTool(t, ctx, sess, "fact_update", map[string]any{
+	upd := callTool(t, ctx, sess, "insight_update", map[string]any{
 		"id":      written.ID,
 		"content": "updated content",
 		"tags":    []string{"new-tag"},
 	})
-	require.False(t, upd.IsError, "fact_update failed: %s", resultText(t, upd))
+	require.False(t, upd.IsError, "insight_update failed: %s", resultText(t, upd))
 
 	var updResult struct {
 		ID      string   `json:"id"`
@@ -796,7 +796,7 @@ func TestFactUpdate_ChangesContentAndTags(t *testing.T) {
 	require.Equal(t, []string{"new-tag"}, updResult.Tags)
 
 	// Verify the change is persisted, not just returned from the mutation.
-	listRes := callTool(t, ctx, sess, "fact_list", map[string]any{"project": "update-test", "tag": "", "limit": 0})
+	listRes := callTool(t, ctx, sess, "insight_list", map[string]any{"project": "update-test", "tag": "", "limit": 0})
 	require.False(t, listRes.IsError)
 	text := resultText(t, listRes)
 	require.Contains(t, text, "updated content")

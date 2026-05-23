@@ -1,6 +1,6 @@
 # starlogz
 
-An MCP server that gives developers and AI agents a persistent, searchable facts store scoped to their projects. Agents can write what they discover ("the prod database lives on postgres-01.internal"), search before making decisions, and delete stale information, all over a standard MCP connection secured by OAuth2.
+An MCP server that gives developers and AI agents a persistent, searchable insights store scoped to their projects. Agents can write what they discover ("the prod database lives on postgres-01.internal"), search before making decisions, and delete stale information, all over a standard MCP connection secured by OAuth2.
 
 ## The problem
 
@@ -13,7 +13,7 @@ Human developers benefit too: notes written once stay available to every agent a
 1. An MCP client (Claude Code, Cursor, any compliant host) connects to `https://your-server/mcp`.
 2. The client authenticates via OAuth2 — the full browser-based flow is handled automatically using Dynamic Client Registration (RFC 7591).
 3. The issued JWT carries scopes (`facts:read`, `facts:write`) that gate every tool call.
-4. Facts are stored in PostgreSQL with full-text search, soft-delete, and optional stable keys for upsert semantics.
+4. Insights are stored in PostgreSQL with full-text search, soft-delete, and optional stable keys for upsert semantics.
 
 ## MCP tools
 
@@ -23,12 +23,12 @@ All tools require `facts:read`. Write tools require `facts:write`.
 |------|-------|-------------|
 | `whoami` | `facts:read` | Returns your user ID and token scopes. Useful for verifying authentication. |
 | `project_ensure` | `facts:read` | Creates a project if it does not exist; returns it either way. Use when you want a custom display name. |
-| `fact_write` | `facts:write` | Writes a fact to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. |
-| `fact_search` | `facts:read` | Full-text search over live facts using PostgreSQL `tsvector`. Returns results ordered by relevance. |
-| `fact_list` | `facts:read` | Lists all live facts in a project, newest first. Optional tag filter. |
-| `fact_delete` | `facts:write` | Soft-deletes a fact by ID. Does not appear in search or list after deletion. |
-
-See [`spec/facts.md`](spec/facts.md) for full input/output schemas.
+| `insight_write` | `facts:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Optionally supply `category` and `source`. |
+| `insight_search` | `facts:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns results ordered by relevance. |
+| `insight_list` | `facts:read` | Lists all live insights in a project, newest first. Optional tag filter. |
+| `insight_update` | `facts:write` | Updates content and/or tags of an existing insight. |
+| `insight_delete` | `facts:write` | Soft-deletes an insight by ID. Does not appear in search or list after deletion. |
+| `insight_list_tags` | `facts:read` | Returns tags for a project ordered by usage frequency. |
 
 ## Quickstart
 
@@ -139,25 +139,27 @@ PostgreSQL is the only backing store. The schema is applied automatically at sta
 
 `users`: created or upserted on each successful GitHub login.
 
-`projects`: owned by one user, addressed by `(owner_id, slug)`. Auto-created on first `fact_write`.
+`projects`: owned by one user, addressed by `(owner_id, slug)`. Auto-created on first `insight_write`.
 
-`facts`: the core table. Key fields:
+`insights`: the core table. Key fields:
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `key` | `text \| NULL` | Optional stable identifier; unique per project among live facts |
-| `content` | `text` | The fact body |
+| `key` | `text \| NULL` | Optional stable identifier; unique per project among live insights |
+| `content` | `text` | The insight body |
+| `category` | `text` | `fact`, `decision`, `insight`, `preference`, `context`, or `general` (default) |
+| `source` | `text` | `user` (default), `repo`, `agent`, or `command` |
 | `tags` | `text[]` | GIN-indexed for tag filtering |
 | `search_vector` | `tsvector` | Generated column; GIN-indexed for full-text search |
 | `deleted_at` | `timestamptz \| NULL` | `NULL` = live; set on soft-delete |
 
-Facts are never physically deleted. `deleted_at` gates all list and search queries.
+Insights are never physically deleted. `deleted_at` gates all list and search queries.
 
 ### psql wrapper
 
 ```bash
 ./bin/psql                 # connects to the Docker Compose Postgres instance
-./bin/psql -c "SELECT count(*) FROM facts WHERE deleted_at IS NULL;"
+./bin/psql -c "SELECT count(*) FROM insights WHERE deleted_at IS NULL;"
 ```
 
 ## Tests
@@ -170,7 +172,7 @@ Store tests spin up a real PostgreSQL container via `testcontainers-go`. Docker 
 
 - `internal/oidc/` — full OAuth2 flow: DCR, PKCE authorization, token exchange, revocation
 - `internal/server/` — health endpoint, JWT middleware, MCP tool dispatch
-- `internal/store/` — user/project/fact CRUD, full-text search, soft-delete
+- `internal/store/` — user/project/insight CRUD, full-text search, soft-delete
 
 ## Observability
 
@@ -179,11 +181,10 @@ Traces and metrics are exported via OTLP gRPC when `OTEL_EXPORTER_OTLP_ENDPOINT`
 ## Current limitations
 
 - Personal projects only, no org or team ownership
-- No fact versioning, keyed-fact updates overwrite content and tags in place
+- No insight versioning, keyed-insight updates overwrite content and tags in place
 - No cross-user access control, any authenticated user can read or write any project by slug
 - English full-text only, `to_tsvector('english', ...)` is hardcoded
 - No pagination, cursor `limit` is the only bound on list and search results
-- `source_type` is always `human` API keys (which would set `agent`) are not yet implemented
 
 ## Built with AI
 

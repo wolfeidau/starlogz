@@ -715,13 +715,13 @@ func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 	return exists, nil
 }
 
-// WriteFact creates or updates a fact. If Key is set and a live fact with that key exists in the
+// WriteInsight creates or updates an insight. If Key is set and a live insight with that key exists in the
 // project it is updated in place; otherwise a new row is inserted.
-func (s *Store) WriteFact(ctx context.Context, p store.WriteFactParams) (*store.Fact, error) {
-	s.logger(ctx).DebugContext(ctx, "writing fact", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("content", p.Content), slog.String("source_type", p.SourceType), slog.String("created_by", p.CreatedBy.String()))
+func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
+	s.logger(ctx).DebugContext(ctx, "writing insight", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("content", p.Content), slog.String("category", p.Category), slog.String("source", p.Source), slog.String("created_by", p.CreatedBy.String()))
 
 	if p.Key != "" {
-		f, err := s.updateFactByKey(ctx, p)
+		f, err := s.updateInsightByKey(ctx, p)
 		if err == nil {
 			return f, nil
 		}
@@ -729,42 +729,58 @@ func (s *Store) WriteFact(ctx context.Context, p store.WriteFactParams) (*store.
 			return nil, err
 		}
 	}
-	return s.insertFact(ctx, p)
+	return s.insertInsight(ctx, p)
 }
 
-func (s *Store) updateFactByKey(ctx context.Context, p store.WriteFactParams) (*store.Fact, error) {
+func (s *Store) updateInsightByKey(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
+	category := p.Category
+	if category == "" {
+		category = "general"
+	}
+	source := p.Source
+	if source == "" {
+		source = "user"
+	}
 	row := s.pool.QueryRow(ctx, `
-		UPDATE facts
-		SET content = $3, tags = $4, updated_at = now()
+		UPDATE insights
+		SET content = $3, tags = $4, category = $5, source = $6, updated_at = now()
 		WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, p.Tags)
-	return scanFact(row)
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
+		p.ProjectID, p.Key, p.Content, p.Tags, category, source)
+	return scanInsight(row)
 }
 
-func (s *Store) insertFact(ctx context.Context, p store.WriteFactParams) (*store.Fact, error) {
+func (s *Store) insertInsight(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
 	}
+	category := p.Category
+	if category == "" {
+		category = "general"
+	}
+	source := p.Source
+	if source == "" {
+		source = "user"
+	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO facts (project_id, key, content, tags, source_type, created_by)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6)
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, tags, p.SourceType, p.CreatedBy)
-	return scanFact(row)
+		INSERT INTO insights (project_id, key, content, tags, category, source, created_by)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7)
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
+		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy)
+	return scanInsight(row)
 }
 
-// SearchFacts runs a full-text search over live facts in a project.
-func (s *Store) SearchFacts(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*store.Fact, error) {
-	s.logger(ctx).DebugContext(ctx, "searching facts", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("tags", strings.Join(tags, ", ")), slog.Int("limit", limit))
+// SearchInsights runs a full-text search over live insights in a project.
+func (s *Store) SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*store.Insight, error) {
+	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("tags", strings.Join(tags, ", ")), slog.Int("limit", limit))
 
 	var rows pgx.Rows
 	var err error
 	if len(tags) > 0 {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at
-			FROM facts
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			FROM insights
 			WHERE project_id = $1
 			  AND deleted_at IS NULL
 			  AND search_vector @@ plainto_tsquery('english', $2)
@@ -774,8 +790,8 @@ func (s *Store) SearchFacts(ctx context.Context, projectID uuid.UUID, query stri
 			projectID, query, limit, tags)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at
-			FROM facts
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			FROM insights
 			WHERE project_id = $1
 			  AND deleted_at IS NULL
 			  AND search_vector @@ plainto_tsquery('english', $2)
@@ -784,40 +800,40 @@ func (s *Store) SearchFacts(ctx context.Context, projectID uuid.UUID, query stri
 			projectID, query, limit)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("search facts: %w", err)
+		return nil, fmt.Errorf("search insights: %w", err)
 	}
 	defer rows.Close()
-	return scanFacts(rows)
+	return scanInsights(rows)
 }
 
-// ListFacts returns live facts for a project ordered by most recently updated.
-func (s *Store) ListFacts(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*store.Fact, error) {
-	s.logger(ctx).DebugContext(ctx, "listing facts", slog.String("project_id", projectID.String()), slog.String("tag", tag), slog.Int("limit", limit))
+// ListInsights returns live insights for a project ordered by most recently updated.
+func (s *Store) ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*store.Insight, error) {
+	s.logger(ctx).DebugContext(ctx, "listing insights", slog.String("project_id", projectID.String()), slog.String("tag", tag), slog.Int("limit", limit))
 
 	var rows pgx.Rows
 	var err error
 	if tag != "" {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at
-			FROM facts
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			FROM insights
 			WHERE project_id = $1 AND deleted_at IS NULL AND tags @> ARRAY[$3::text]
 			ORDER BY updated_at DESC
 			LIMIT $2`,
 			projectID, limit, tag)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at
-			FROM facts
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			FROM insights
 			WHERE project_id = $1 AND deleted_at IS NULL
 			ORDER BY updated_at DESC
 			LIMIT $2`,
 			projectID, limit)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list facts: %w", err)
+		return nil, fmt.Errorf("list insights: %w", err)
 	}
 	defer rows.Close()
-	return scanFacts(rows)
+	return scanInsights(rows)
 }
 
 // ListTags returns tags for a project ordered by usage frequency.
@@ -826,7 +842,7 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT unnest(tags) AS tag, count(*) AS cnt
-		FROM facts
+		FROM insights
 		WHERE project_id = $1 AND deleted_at IS NULL
 		GROUP BY tag
 		ORDER BY cnt DESC
@@ -847,41 +863,41 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 	return tags, rows.Err()
 }
 
-// UpdateFact patches content and/or tags on an existing live fact, scoped to orgID.
-func (s *Store) UpdateFact(ctx context.Context, p store.UpdateFactParams) (*store.Fact, error) {
-	s.logger(ctx).DebugContext(ctx, "updating fact", slog.String("fact_id", p.FactID.String()), slog.String("content", p.Content), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
+// UpdateInsight patches content and/or tags on an existing live insight, scoped to orgID.
+func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) (*store.Insight, error) {
+	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.String("content", p.Content), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
 
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
 	}
 	row := s.pool.QueryRow(ctx, `
-		UPDATE facts SET
+		UPDATE insights SET
 		  content    = CASE WHEN $2 <> '' THEN $2 ELSE content END,
 		  tags       = CASE WHEN $3 THEN $4 ELSE tags END,
 		  updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		  AND project_id IN (SELECT id FROM projects WHERE org_id = $5)
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, source_type, created_by, created_at, updated_at`,
-		p.FactID, p.Content, p.Tags != nil, tags, p.OrgID)
-	f, err := scanFact(row)
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
+		p.InsightID, p.Content, p.Tags != nil, tags, p.OrgID)
+	f, err := scanInsight(row)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, store.ErrNotFound
 	}
 	return f, err
 }
 
-// DeleteFact soft-deletes a fact, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.
-func (s *Store) DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error {
-	s.logger(ctx).DebugContext(ctx, "deleting fact", slog.String("fact_id", factID.String()), slog.String("org_id", orgID.String()))
+// DeleteInsight soft-deletes an insight, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.
+func (s *Store) DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error {
+	s.logger(ctx).DebugContext(ctx, "deleting insight", slog.String("insight_id", insightID.String()), slog.String("org_id", orgID.String()))
 
 	ct, err := s.pool.Exec(ctx, `
-		UPDATE facts SET deleted_at = now()
+		UPDATE insights SET deleted_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		  AND project_id IN (SELECT id FROM projects WHERE org_id = $2)`,
-		factID, orgID)
+		insightID, orgID)
 	if err != nil {
-		return fmt.Errorf("delete fact: %w", err)
+		return fmt.Errorf("delete insight: %w", err)
 	}
 	if ct.RowsAffected() == 0 {
 		return store.ErrNotFound
@@ -889,19 +905,19 @@ func (s *Store) DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error {
 	return nil
 }
 
-func scanFact(row pgx.Row) (*store.Fact, error) {
+func scanInsight(row pgx.Row) (*store.Insight, error) {
 	var idStr, projectIDStr, createdByStr string
-	f := &store.Fact{}
-	err := row.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.SourceType, &createdByStr, &f.CreatedAt, &f.UpdatedAt)
+	f := &store.Insight{}
+	err := row.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("scan fact: %w", err)
+		return nil, fmt.Errorf("scan insight: %w", err)
 	}
 	var parseErr error
 	if f.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
-		return nil, fmt.Errorf("parse fact id: %w", parseErr)
+		return nil, fmt.Errorf("parse insight id: %w", parseErr)
 	}
 	if f.ProjectID, parseErr = uuid.Parse(projectIDStr); parseErr != nil {
 		return nil, fmt.Errorf("parse project id: %w", parseErr)
@@ -912,17 +928,17 @@ func scanFact(row pgx.Row) (*store.Fact, error) {
 	return f, nil
 }
 
-func scanFacts(rows pgx.Rows) ([]*store.Fact, error) {
-	var facts []*store.Fact
+func scanInsights(rows pgx.Rows) ([]*store.Insight, error) {
+	var insights []*store.Insight
 	for rows.Next() {
 		var idStr, projectIDStr, createdByStr string
-		f := &store.Fact{}
-		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.SourceType, &createdByStr, &f.CreatedAt, &f.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan fact: %w", err)
+		f := &store.Insight{}
+		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan insight: %w", err)
 		}
 		var parseErr error
 		if f.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
-			return nil, fmt.Errorf("parse fact id: %w", parseErr)
+			return nil, fmt.Errorf("parse insight id: %w", parseErr)
 		}
 		if f.ProjectID, parseErr = uuid.Parse(projectIDStr); parseErr != nil {
 			return nil, fmt.Errorf("parse project id: %w", parseErr)
@@ -930,9 +946,9 @@ func scanFacts(rows pgx.Rows) ([]*store.Fact, error) {
 		if f.CreatedBy, parseErr = uuid.Parse(createdByStr); parseErr != nil {
 			return nil, fmt.Errorf("parse created_by: %w", parseErr)
 		}
-		facts = append(facts, f)
+		insights = append(insights, f)
 	}
-	return facts, rows.Err()
+	return insights, rows.Err()
 }
 
 // SaveClient persists a new OAuth2 client registration.

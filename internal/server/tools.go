@@ -31,36 +31,36 @@ func newMCPServer(st store.Store) *mcpServer {
 	}, ms.whoami)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_ensure",
-		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; fact_write auto-creates projects.",
+		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; insight_write auto-creates projects.",
 	}, ms.projectEnsure)
 	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "fact_write",
-		Description: "Writes a fact to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier.",
-	}, ms.factWrite)
+		Name:        "insight_write",
+		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier.",
+	}, ms.insightWrite)
 	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "fact_search",
-		Description: "Full-text search over live facts in a project. Returns results ordered by relevance.",
-	}, ms.factSearch)
+		Name:        "insight_search",
+		Description: "Full-text search over live insights in a project. Returns results ordered by relevance.",
+	}, ms.insightSearch)
 	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "fact_list",
-		Description: "Lists all live facts in a project, newest first. Optionally filter by a single tag.",
-	}, ms.factList)
+		Name:        "insight_list",
+		Description: "Lists all live insights in a project, newest first. Optionally filter by a single tag.",
+	}, ms.insightList)
 	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "fact_delete",
-		Description: "Soft-deletes a fact by ID. The fact no longer appears in list or search results.",
-	}, ms.factDelete)
+		Name:        "insight_delete",
+		Description: "Soft-deletes an insight by ID. The insight no longer appears in list or search results.",
+	}, ms.insightDelete)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_list",
 		Description: "Lists all projects in the caller's personal org.",
 	}, ms.projectList)
 	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "fact_list_tags",
+		Name:        "insight_list_tags",
 		Description: "Returns tags for a project ordered by usage frequency. Call before writing tags to avoid fragmentation.",
-	}, ms.factListTags)
+	}, ms.insightListTags)
 	mcp.AddTool(ms.server, &mcp.Tool{
-		Name:        "fact_update",
-		Description: "Updates the content and/or tags of an existing fact. Supply only the fields you want to change.",
-	}, ms.factUpdate)
+		Name:        "insight_update",
+		Description: "Updates the content and/or tags of an existing insight. Supply only the fields you want to change.",
+	}, ms.insightUpdate)
 	return ms
 }
 
@@ -87,38 +87,40 @@ type projectEnsureInput struct {
 	Name string `json:"name"`
 }
 
-type factWriteInput struct {
-	Project string   `json:"project"`
-	Content string   `json:"content"`
-	Key     string   `json:"key"`
-	Tags    []string `json:"tags"`
+type insightWriteInput struct {
+	Project  string   `json:"project"`
+	Content  string   `json:"content"`
+	Key      string   `json:"key"`
+	Tags     []string `json:"tags"`
+	Category string   `json:"category"`
+	Source   string   `json:"source"`
 }
 
-type factSearchInput struct {
+type insightSearchInput struct {
 	Project string   `json:"project"`
 	Query   string   `json:"query"`
 	Tags    []string `json:"tags"`
 	Limit   int      `json:"limit"`
 }
 
-type factListInput struct {
+type insightListInput struct {
 	Project string `json:"project"`
 	Tag     string `json:"tag"`
 	Limit   int    `json:"limit"`
 }
 
-type factDeleteInput struct {
+type insightDeleteInput struct {
 	ID string `json:"id"`
 }
 
 type projectListInput struct{}
 
-type factListTagsInput struct {
+type insightListTagsInput struct {
 	Project string `json:"project"`
 	Limit   int    `json:"limit"`
 }
 
-type factUpdateInput struct {
+type insightUpdateInput struct {
 	ID      string   `json:"id"`
 	Content string   `json:"content"`
 	Tags    []string `json:"tags"`
@@ -129,11 +131,13 @@ type tagCountResponse struct {
 	Count int    `json:"count"`
 }
 
-type factResponse struct {
+type insightResponse struct {
 	ID        string   `json:"id"`
 	Key       string   `json:"key,omitempty"`
 	Content   string   `json:"content"`
 	Tags      []string `json:"tags"`
+	Category  string   `json:"category"`
+	Source    string   `json:"source"`
 	UpdatedAt string   `json:"updated_at"`
 }
 
@@ -161,8 +165,8 @@ func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest
 	})
 }
 
-func (ms *mcpServer) factWrite(ctx context.Context, req *mcp.CallToolRequest, in factWriteInput) (*mcp.CallToolResult, any, error) {
-	ms.logger(ctx).InfoContext(ctx, "fact_write call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest, in insightWriteInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_write call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if err := requireScope(req, "facts:write"); err != nil {
 		return nil, nil, err
 	}
@@ -181,25 +185,26 @@ func (ms *mcpServer) factWrite(ctx context.Context, req *mcp.CallToolRequest, in
 	if tags == nil {
 		tags = []string{}
 	}
-	fact, err := ms.store.WriteFact(ctx, store.WriteFactParams{
-		ProjectID:  project.ID,
-		Key:        in.Key,
-		Content:    in.Content,
-		Tags:       tags,
-		SourceType: "human",
-		CreatedBy:  user.ID,
+	insight, err := ms.store.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: project.ID,
+		Key:       in.Key,
+		Content:   in.Content,
+		Tags:      tags,
+		Category:  in.Category,
+		Source:    in.Source,
+		CreatedBy: user.ID,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("write fact: %w", err)
+		return nil, nil, fmt.Errorf("write insight: %w", err)
 	}
 	return jsonResult(map[string]any{
-		"id":      fact.ID.String(),
-		"updated": !fact.CreatedAt.Equal(fact.UpdatedAt),
+		"id":      insight.ID.String(),
+		"updated": !insight.CreatedAt.Equal(insight.UpdatedAt),
 	})
 }
 
-func (ms *mcpServer) factSearch(ctx context.Context, req *mcp.CallToolRequest, in factSearchInput) (*mcp.CallToolResult, any, error) {
-	ms.logger(ctx).InfoContext(ctx, "fact_search call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest, in insightSearchInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_search call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -218,14 +223,14 @@ func (ms *mcpServer) factSearch(ctx context.Context, req *mcp.CallToolRequest, i
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	facts, err := ms.store.SearchFacts(ctx, project.ID, in.Query, in.Tags, limit)
+	insights, err := ms.store.SearchInsights(ctx, project.ID, in.Query, in.Tags, limit)
 	if err != nil {
-		return nil, nil, fmt.Errorf("search facts: %w", err)
+		return nil, nil, fmt.Errorf("search insights: %w", err)
 	}
-	return jsonResult(map[string]any{"facts": toFactResponses(facts)})
+	return jsonResult(map[string]any{"insights": toInsightResponses(insights)})
 }
 
-func (ms *mcpServer) factList(ctx context.Context, req *mcp.CallToolRequest, in factListInput) (*mcp.CallToolResult, any, error) {
+func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, in insightListInput) (*mcp.CallToolResult, any, error) {
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -244,15 +249,15 @@ func (ms *mcpServer) factList(ctx context.Context, req *mcp.CallToolRequest, in 
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	facts, err := ms.store.ListFacts(ctx, project.ID, in.Tag, limit)
+	insights, err := ms.store.ListInsights(ctx, project.ID, in.Tag, limit)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list facts: %w", err)
+		return nil, nil, fmt.Errorf("list insights: %w", err)
 	}
-	return jsonResult(map[string]any{"facts": toFactResponses(facts)})
+	return jsonResult(map[string]any{"insights": toInsightResponses(insights)})
 }
 
-func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, in factDeleteInput) (*mcp.CallToolResult, any, error) {
-	ms.logger(ctx).InfoContext(ctx, "fact_delete call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest, in insightDeleteInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_delete call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if err := requireScope(req, "facts:write"); err != nil {
 		return nil, nil, err
 	}
@@ -263,16 +268,16 @@ func (ms *mcpServer) factDelete(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, nil, err
 	}
-	factID, err := uuid.Parse(in.ID)
+	insightID, err := uuid.Parse(in.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
+		return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
 	}
-	err = ms.store.DeleteFact(ctx, org.ID, factID)
+	err = ms.store.DeleteInsight(ctx, org.ID, insightID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, fmt.Errorf("fact %q not found or already deleted", in.ID)
+		return nil, nil, fmt.Errorf("insight %q not found or already deleted", in.ID)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("delete fact: %w", err)
+		return nil, nil, fmt.Errorf("delete insight: %w", err)
 	}
 	return jsonResult(map[string]any{})
 }
@@ -308,8 +313,8 @@ func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, 
 	return jsonResult(map[string]any{"projects": out})
 }
 
-func (ms *mcpServer) factListTags(ctx context.Context, req *mcp.CallToolRequest, in factListTagsInput) (*mcp.CallToolResult, any, error) {
-	ms.logger(ctx).InfoContext(ctx, "fact_list_tags call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+func (ms *mcpServer) insightListTags(ctx context.Context, req *mcp.CallToolRequest, in insightListTagsInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_list_tags call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
@@ -339,8 +344,8 @@ func (ms *mcpServer) factListTags(ctx context.Context, req *mcp.CallToolRequest,
 	return jsonResult(map[string]any{"tags": out})
 }
 
-func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, in factUpdateInput) (*mcp.CallToolResult, any, error) {
-	ms.logger(ctx).InfoContext(ctx, "fact_update call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest, in insightUpdateInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_update call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if err := requireScope(req, "facts:write"); err != nil {
 		return nil, nil, err
 	}
@@ -351,28 +356,30 @@ func (ms *mcpServer) factUpdate(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, nil, err
 	}
-	factID, err := uuid.Parse(in.ID)
+	insightID, err := uuid.Parse(in.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid fact ID: %w", err)
+		return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
 	}
-	fact, err := ms.store.UpdateFact(ctx, store.UpdateFactParams{
-		OrgID:   org.ID,
-		FactID:  factID,
-		Content: in.Content,
-		Tags:    in.Tags,
+	insight, err := ms.store.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID:     org.ID,
+		InsightID: insightID,
+		Content:   in.Content,
+		Tags:      in.Tags,
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, fmt.Errorf("fact %q not found or already deleted", in.ID)
+		return nil, nil, fmt.Errorf("insight %q not found or already deleted", in.ID)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("update fact: %w", err)
+		return nil, nil, fmt.Errorf("update insight: %w", err)
 	}
-	return jsonResult(factResponse{
-		ID:        fact.ID.String(),
-		Key:       fact.Key,
-		Content:   fact.Content,
-		Tags:      fact.Tags,
-		UpdatedAt: fact.UpdatedAt.Format(time.RFC3339),
+	return jsonResult(insightResponse{
+		ID:        insight.ID.String(),
+		Key:       insight.Key,
+		Content:   insight.Content,
+		Tags:      insight.Tags,
+		Category:  insight.Category,
+		Source:    insight.Source,
+		UpdatedAt: insight.UpdatedAt.Format(time.RFC3339),
 	})
 }
 
@@ -401,14 +408,16 @@ func (ms *mcpServer) resolveUserAndOrg(ctx context.Context, userIDStr string) (*
 	return user, org, nil
 }
 
-func toFactResponses(facts []*store.Fact) []factResponse {
-	out := make([]factResponse, len(facts))
-	for i, f := range facts {
-		out[i] = factResponse{
+func toInsightResponses(insights []*store.Insight) []insightResponse {
+	out := make([]insightResponse, len(insights))
+	for i, f := range insights {
+		out[i] = insightResponse{
 			ID:        f.ID.String(),
 			Key:       f.Key,
 			Content:   f.Content,
 			Tags:      f.Tags,
+			Category:  f.Category,
+			Source:    f.Source,
 			UpdatedAt: f.UpdatedAt.Format(time.RFC3339),
 		}
 	}

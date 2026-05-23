@@ -1,4 +1,4 @@
-# Project Facts MCP — Service Specification
+# Project Insights MCP — Service Specification
 
 > Version 0.2 · Draft · May 2026 · North-star
 
@@ -17,7 +17,7 @@
 ## Overview
 
 A remote MCP service that lets developers and agents record, retrieve,
-and search persistent facts about their projects. Facts survive across
+and search persistent insights about their projects. Insights survive across
 sessions, are scoped to projects within an org, and carry enough metadata
 to distinguish human decisions from agent-inferred context.
 
@@ -32,7 +32,6 @@ service. For the current state of any given subsystem, see the
 sub-specs in `spec/`:
 
 - `spec/auth.md` — OAuth2 flow as currently implemented
-- `spec/facts.md` — facts data model and MCP tools as currently implemented
 - `spec/persistence.md` — v0.2 statelessness, orgs migration, persistence
 - `spec/refresh_tokens.md` — v0.2 refresh token grant
 
@@ -40,8 +39,8 @@ sub-specs in `spec/`:
 
 - **Persistent agent memory.** Agents record decisions, conventions, and
   context once and retrieve them across sessions and across agents.
-- **Org-shared knowledge.** Facts written within a shared org are visible
-  to every member; org-level facts act as a read-only knowledge base of
+- **Org-shared knowledge.** Insights written within a shared org are visible
+  to every member; org-level insights act as a read-only knowledge base of
   conventions and architecture decisions.
 - **Stateless from day one.** Any server process can serve any request;
   rolling restarts and multi-instance deployments are first-class. State
@@ -56,8 +55,8 @@ sub-specs in `spec/`:
 
 - Vector / semantic search (planned for v0.3+)
 - Google or other OAuth2 providers (planned for v0.3+)
-- Real-time fact subscriptions or webhooks
-- Fine-grained per-fact access control beyond the org boundary
+- Real-time insight subscriptions or webhooks
+- Fine-grained per-insight access control beyond the org boundary
 - API keys distinct from OAuth2 JWTs (see [Future](#future))
 - A web dashboard (planned for v0.3+)
 
@@ -80,7 +79,7 @@ the v0.2 transition.
     `owner`, `admin`, `member`.
 - **Org members** is a many-to-many between users and orgs with a role.
 - **Projects** belong to one org. Slugs are unique within an org.
-- **Facts** belong to one project (and transitively to one org).
+- **Insights** belong to one project (and transitively to one org).
 
 ### Schema (steady state)
 
@@ -120,13 +119,16 @@ CREATE TABLE projects (
     UNIQUE (org_id, slug)
 );
 
-CREATE TABLE facts (
+CREATE TABLE insights (
     id            UUID        PRIMARY KEY DEFAULT uuidv7(),
     project_id    UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     key           TEXT,                    -- optional stable identifier for upsert
     content       TEXT        NOT NULL,
     tags          TEXT[]      NOT NULL DEFAULT '{}',
-    source_type   TEXT        NOT NULL CHECK (source_type IN ('human', 'agent')),
+    category      TEXT        NOT NULL DEFAULT 'general'
+                              CHECK (category IN ('fact', 'decision', 'insight', 'preference', 'context', 'general')),
+    source        TEXT        NOT NULL DEFAULT 'user'
+                              CHECK (source IN ('user', 'repo', 'agent', 'command')),
     created_by    UUID        NOT NULL REFERENCES users(id),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -135,20 +137,21 @@ CREATE TABLE facts (
                               (to_tsvector('english', content)) STORED
 );
 
-CREATE UNIQUE INDEX facts_project_key_live
-    ON facts (project_id, key)
+CREATE UNIQUE INDEX insights_project_key_live
+    ON insights (project_id, key)
     WHERE key IS NOT NULL AND deleted_at IS NULL;
-CREATE INDEX facts_project_active ON facts (project_id) WHERE deleted_at IS NULL;
-CREATE INDEX facts_search         ON facts USING GIN (search_vector);
-CREATE INDEX facts_tags           ON facts USING GIN (tags);
+CREATE INDEX insights_project_active ON insights (project_id) WHERE deleted_at IS NULL;
+CREATE INDEX insights_search         ON insights USING GIN (search_vector);
+CREATE INDEX insights_tags           ON insights USING GIN (tags);
 ```
 
-### Field reference — facts table
+### Field reference — insights table
 
 | Field         | Type        | Notes                                                      |
 |---------------|-------------|------------------------------------------------------------|
-| `key`         | text        | Optional stable identifier; unique per project among live facts. Provide on `fact_write` to upsert in place. |
-| `source_type` | enum        | `human` or `agent`. Set by the server from the credential type — callers cannot self-report. |
+| `key`         | text        | Optional stable identifier; unique per project among live insights. Provide on `insight_write` to upsert in place. |
+| `category`    | enum        | `fact`, `decision`, `insight`, `preference`, `context`, or `general` (default). Caller-provided. |
+| `source`      | enum        | `user`, `repo`, `agent`, or `command`. Caller-provided; defaults to `user`. |
 | `tags`        | text[]      | Lowercase, hyphen-separated by convention. Server normalises on write. |
 | `deleted_at`  | timestamptz | Soft delete. NULL = active. Hard delete is not exposed via MCP. |
 | `search_vector` | tsvector  | Generated column, GIN-indexed. English-only in v0.2. |
@@ -159,10 +162,10 @@ CREATE INDEX facts_tags           ON facts USING GIN (tags);
 are all part of the auth subsystem. See `spec/auth.md` and
 `spec/persistence.md` for their definitions.
 
-### Fact richness — deferred
+### Insight richness — deferred
 
-The original v0.1 spec proposed `fact_type`, `confidence`, `related_ids`,
-`source_url`, and a `fact_history` audit table. These were intentionally
+The original v0.1 spec proposed `confidence`, `related_ids`,
+`source_url`, and an `insight_history` audit table. These were intentionally
 dropped from v0.1 and v0.2 to focus on getting the auth UX and
 multi-instance deployment story right first. They are good candidates
 for v0.3 once usage data shows which dimensions agents actually rely on.
@@ -203,12 +206,13 @@ Claims:
 
 | Scope         | Gates                                                          |
 |---------------|----------------------------------------------------------------|
-| `facts:read`  | Read facts, search, list projects and tags, whoami             |
-| `facts:write` | Create, update, soft-delete facts                              |
-| `org:admin`   | Create/delete projects, manage org membership, write org-level facts (when implemented) |
+| `facts:read`  | Read insights, search, list projects and tags, whoami          |
+| `facts:write` | Create, update, soft-delete insights                           |
+| `org:admin`   | Create/delete projects, manage org membership, write org-level insights (when implemented) |
 
 All MCP tool calls require at least `facts:read`. The `/mcp` endpoint
-enforces this at the transport layer.
+enforces this at the transport layer. (The scope names `facts:read` / `facts:write`
+remain unchanged — they gate access to insights as well.)
 
 ### Refresh tokens (v0.2)
 
@@ -244,22 +248,21 @@ every instance. Generate once with `starlogz-server keygen --output key.jwk`.
 ## MCP tools
 
 All tools require at minimum `facts:read`. Write tools require
-`facts:write`. The exact JSON shapes for tools currently implemented
-live in `spec/facts.md`. This section describes the steady-state surface.
+`facts:write`. This section describes the steady-state surface.
 
 ### Implemented (v0.1 / v0.2)
 
-| Tool             | Scope         | Purpose |
-|------------------|---------------|---------|
-| `whoami`         | (any)         | Returns user ID and token scopes. |
-| `project_ensure` | `facts:read`  | Creates a project if missing; returns it either way. |
-| `project_list`   | `facts:read`  | Lists projects accessible to the caller. |
-| `fact_write`     | `facts:write` | Writes a fact. Auto-creates the project. With `key`, upserts in place. |
-| `fact_search`    | `facts:read`  | Full-text search across live facts in a project. |
-| `fact_list`      | `facts:read`  | Lists live facts in a project, newest first. |
-| `fact_update`    | `facts:write` | Updates content and/or tags of an existing fact. |
-| `fact_delete`    | `facts:write` | Soft-deletes a fact. |
-| `fact_list_tags` | `facts:read`  | Returns tags for a project ordered by usage frequency. |
+| Tool               | Scope         | Purpose |
+|--------------------|---------------|---------|
+| `whoami`           | (any)         | Returns user ID and token scopes. |
+| `project_ensure`   | `facts:read`  | Creates a project if missing; returns it either way. |
+| `project_list`     | `facts:read`  | Lists projects accessible to the caller. |
+| `insight_write`    | `facts:write` | Writes an insight. Auto-creates the project. With `key`, upserts in place. Accepts optional `category` and `source`. |
+| `insight_search`   | `facts:read`  | Full-text search across live insights in a project. |
+| `insight_list`     | `facts:read`  | Lists live insights in a project, newest first. |
+| `insight_update`   | `facts:write` | Updates content and/or tags of an existing insight. |
+| `insight_delete`   | `facts:write` | Soft-deletes an insight. |
+| `insight_list_tags`| `facts:read`  | Returns tags for a project ordered by usage frequency. |
 
 Each project-scoped tool takes a `project` slug. With orgs in v0.2, tools
 also accept an optional `org` slug; if omitted, the user's personal org
@@ -273,13 +276,13 @@ is assumed. Single-user UX is unchanged.
 | `org_list`      | `facts:read` | Lists orgs the caller belongs to. |
 | `org_invite`    | `org:admin`  | Adds a user to an org by GitHub login. |
 | `org_remove`    | `org:admin`  | Removes a member. |
-| `org_facts_get` | `facts:read` | Reads org-scope conventions/decisions (when org-level facts ship). |
-| `org_facts_write` | `org:admin` | Writes an org-scope fact. |
+| `org_insights_get` | `facts:read` | Reads org-scope conventions/decisions (when org-level insights ship). |
+| `org_insights_write` | `org:admin` | Writes an org-scope insight. |
 
-### Planned with fact richness (v0.3+)
+### Planned with insight richness (v0.3+)
 
-If `fact_type` / `confidence` / `related_ids` ship, `fact_write` and
-`fact_search` gain matching optional inputs. No new tools.
+If `confidence` / `related_ids` ship, `insight_write` and
+`insight_search` gain matching optional inputs. No new tools.
 
 ---
 
@@ -288,37 +291,37 @@ If `fact_type` / `confidence` / `related_ids` ship, `fact_write` and
 ### Session start
 
 ```
-1. whoami           → verify identity and scopes
-2. project_list     → discover what projects the caller can see
-3. fact_list_tags   → load existing tags for the target project
-4. fact_list        → load recent project context
+1. whoami               → verify identity and scopes
+2. project_list         → discover what projects the caller can see
+3. insight_list_tags    → load existing tags for the target project
+4. insight_list         → load recent project context
 ```
 
 ### Recording a decision mid-task
 
 ```
-1. fact_search "connection pooling"  → check if already decided
-2. fact_write key="connection-pooling"
-                                     → write or upsert in place
+1. insight_search "connection pooling"  → check if already decided
+2. insight_write key="connection-pooling" category="decision"
+                                        → write or upsert in place
 ```
 
-### Disagreeing with an existing fact
+### Disagreeing with an existing insight
 
 ```
-Option A — fact_update + new content    → correct it in place
-Option B — fact_write key=...           → upsert with the same key,
-                                          replacing the old content
+Option A — insight_update + new content  → correct it in place
+Option B — insight_write key=...         → upsert with the same key,
+                                           replacing the old content
 ```
 
 The simpler current model (no `confidence`, no `related_ids`) means
-"contradicting" is "overwriting". When fact richness ships in v0.3, this
+"contradicting" is "overwriting". When insight richness ships in v0.3, this
 section will gain the link-don't-overwrite pattern from the v0.1 design.
 
 ### Human review workflow
 
-When a future tool exposes `source_type=agent` filtering and audit history,
-this section will describe the human review loop. For now, deleted facts
-are gone from search and `fact_search` returns whoever wrote each fact.
+When a future tool exposes `source=agent` filtering and audit history,
+this section will describe the human review loop. For now, deleted insights
+are gone from search and `insight_search` returns whoever wrote each insight.
 
 ---
 
@@ -326,13 +329,13 @@ are gone from search and `fact_search` returns whoever wrote each fact.
 
 ### Server-enforced invariants
 
-- `source_type` is set by the server from the credential type — callers
-  cannot self-report. (v0.1 always writes `human`; once a separate
-  agent-credential path exists, it will write `agent`.)
+- `category` and `source` are caller-provided. Callers self-report context
+  and origin; the server validates against the allowed enum values but does
+  not override the caller's choice.
 - The signing key is the same on every instance. Rotating it requires
   restarting all instances and accepting that outstanding JWTs become
   invalid. Multi-key JWKS rotation is planned for v0.3.
-- Soft delete only via MCP — `deleted_at` is set, the row is never
+- Soft delete only via MCP — `deleted_at` is set, the insight row is never
   removed by tool calls. Hard delete is reserved for an admin path.
 - `revoked_tokens` is consulted on every authenticated request. Logout
   takes effect across all instances immediately.
@@ -352,7 +355,7 @@ See `spec/persistence.md` for full details.
 
 ### Tag hygiene
 
-- Agents should call `fact_list_tags` before writing new tags to avoid
+- Agents should call `insight_list_tags` before writing new tags to avoid
   fragmentation.
 - Tags are lowercase, hyphen-separated. Server normalises on write:
   `Auth` → `auth`.
@@ -362,7 +365,7 @@ See `spec/persistence.md` for full details.
 ### Concurrency
 
 - Multiple agents writing to the same project is supported.
-- Keyed `fact_write` is a per-key upsert: last write wins, no version
+- Keyed `insight_write` is a per-key upsert: last write wins, no version
   history (until v0.3+ adds it).
 
 ---
@@ -371,9 +374,9 @@ See `spec/persistence.md` for full details.
 
 | Version | Scope |
 |---------|-------|
-| v0.1 (shipped) | OAuth2 AS with DCR + PKCE, JWT bearer tokens, GitHub upstream IdP, in-memory auth state, single-server, core fact tools, English full-text search, NaCl-encrypted GitHub token persistence in `grants`. |
+| v0.1 (shipped) | OAuth2 AS with DCR + PKCE, JWT bearer tokens, GitHub upstream IdP, in-memory auth state, single-server, core insight tools, English full-text search, NaCl-encrypted GitHub token persistence in `grants`. |
 | v0.2 (in progress) | Stateless server processes (auth state in Postgres, advisory-lock migrations, graceful shutdown), refresh token grant, org tenancy (personal + shared orgs, membership, project ownership by org). |
-| v0.3 | Multi-key JWKS for hot key rotation, scheduled prune workers, session management endpoints (`DELETE /sessions/:id`), web dashboard, `org_*` MCP tools, second OAuth2 provider (likely Google), fact richness (`fact_type`, `confidence`, `related_ids`, `fact_history`). |
+| v0.3 | Multi-key JWKS for hot key rotation, scheduled prune workers, session management endpoints (`DELETE /sessions/:id`), web dashboard, `org_*` MCP tools, second OAuth2 provider (likely Google), insight richness (`confidence`, `related_ids`, `insight_history`). |
 | v0.4 | Vector / semantic search via pgvector, `suggest_tags`, conflict detection, hosted service tier, usage metering, rate limiting. |
 
 ### Future (no committed version)
@@ -384,4 +387,4 @@ See `spec/persistence.md` for full details.
   near-term plan.
 - **Multi-provider OAuth at scale** — beyond GitHub + Google, e.g.
   Microsoft, Bitbucket, GitLab. Driven by demand.
-- **Per-fact access control** finer than the org boundary.
+- **Per-insight access control** finer than the org boundary.

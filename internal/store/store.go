@@ -42,11 +42,11 @@ type Store interface {
 	RevokeToken(ctx context.Context, jti string, expiresAt time.Time) error
 	IsTokenRevoked(ctx context.Context, jti string) (bool, error)
 
-	WriteFact(ctx context.Context, p WriteFactParams) (*Fact, error)
-	UpdateFact(ctx context.Context, p UpdateFactParams) (*Fact, error)
-	DeleteFact(ctx context.Context, orgID, factID uuid.UUID) error
-	SearchFacts(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Fact, error)
-	ListFacts(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Fact, error)
+	WriteInsight(ctx context.Context, p WriteInsightParams) (*Insight, error)
+	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
+	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
+	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Insight, error)
+	ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Insight, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
 
 	SaveClient(ctx context.Context, c OAuthClient) error
@@ -84,36 +84,38 @@ type Project struct {
 	CreatedAt time.Time
 }
 
-// Fact is a text assertion stored against a project.
-type Fact struct {
-	ID         uuid.UUID
-	ProjectID  uuid.UUID
-	Key        string // empty string when no key
-	Content    string
-	Tags       []string
-	SourceType string
-	CreatedBy  uuid.UUID
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+// Insight is a text assertion stored against a project.
+type Insight struct {
+	ID        uuid.UUID
+	ProjectID uuid.UUID
+	Key       string // empty string when no key
+	Content   string
+	Tags      []string
+	Category  string
+	Source    string
+	CreatedBy uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-// WriteFactParams holds the inputs for Store.WriteFact.
-type WriteFactParams struct {
-	ProjectID  uuid.UUID
-	Key        string // empty = no stable key
-	Content    string
-	Tags       []string
-	SourceType string
-	CreatedBy  uuid.UUID
+// WriteInsightParams holds the inputs for Store.WriteInsight.
+type WriteInsightParams struct {
+	ProjectID uuid.UUID
+	Key       string // empty = no stable key
+	Content   string
+	Tags      []string
+	Category  string
+	Source    string
+	CreatedBy uuid.UUID
 }
 
-// UpdateFactParams holds the inputs for Store.UpdateFact.
+// UpdateInsightParams holds the inputs for Store.UpdateInsight.
 // Empty Content means no change. Nil Tags means no change; non-nil (including empty) replaces tags.
-type UpdateFactParams struct {
-	OrgID   uuid.UUID
-	FactID  uuid.UUID
-	Content string
-	Tags    []string
+type UpdateInsightParams struct {
+	OrgID     uuid.UUID
+	InsightID uuid.UUID
+	Content   string
+	Tags      []string
 }
 
 // TagCount holds a tag name and its usage frequency within a project.
