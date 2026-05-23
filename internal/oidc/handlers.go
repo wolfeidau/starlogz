@@ -20,6 +20,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
+	"github.com/wolfeidau/starlogz/internal/logattr"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 	"golang.org/x/oauth2"
 )
@@ -260,11 +261,14 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		}
 	}
 
-	log.InfoContext(ctx, "token exchange: issued JWT",
+	logFields := []any{
 		slog.String("sub", pc.Sub),
 		slog.String("scope", pc.Scope),
-		slog.Bool("refresh_token", ourRefreshToken != ""),
-	)
+	}
+	if ourRefreshToken != "" {
+		logFields = append(logFields, logattr.ObscureString("refresh_token", ourRefreshToken))
+	}
+	log.InfoContext(ctx, "token exchange: issued JWT", logFields...)
 
 	writeTokenResponse(ctx, w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry)
 }
@@ -284,7 +288,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 
 	// Enrich the logger with client_id as soon as it's known.
 	ctx := r.Context()
-	log := ctxlog.LoggerFrom(ctx).With(slog.String("client_id", clientID))
+	log := ctxlog.LoggerFrom(ctx).With(slog.String("client_id", clientID), logattr.ObscureString("refresh_token", refreshToken))
 	ctx = ctxlog.WithLogger(ctx, log)
 
 	grant, err := s.grants.GetGrantByRefreshToken(ctx, refreshToken)
@@ -420,6 +424,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	log.InfoContext(ctx, "token rotation: grant rotated",
 		slog.String("old_jti", grant.JTI),
 		slog.String("new_jti", newJTI),
+		logattr.ObscureString("new_refresh_token", newOurRefreshToken),
 	)
 
 	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI, newJWTExpiry)
