@@ -413,8 +413,8 @@ func TestInsightWrite_NormalisesTags(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, wr)), &written))
 
-	listRes := callTool(t, ctx, sess, "insight_list", map[string]any{"project": "demo", "limit": 10})
-	require.False(t, listRes.IsError)
+	listRes := callTool(t, ctx, sess, "insight_list", map[string]any{"project": "demo", "tag": "", "limit": 10})
+	require.False(t, listRes.IsError, "insight_list failed: %s", resultText(t, listRes))
 	var listed struct {
 		Insights []struct {
 			Tags []string `json:"tags"`
@@ -432,7 +432,7 @@ func TestInsightSearch_RejectsEmptyQuery(t *testing.T) {
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
 
-	res := callTool(t, ctx, sess, "insight_search", map[string]any{"project": "demo", "query": "", "limit": 10})
+	res := callTool(t, ctx, sess, "insight_search", map[string]any{"project": "demo", "query": "", "tags": []string{}, "limit": 10})
 	require.True(t, res.IsError)
 	require.Contains(t, resultText(t, res), "query is required")
 }
