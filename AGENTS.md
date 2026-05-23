@@ -29,7 +29,7 @@ The core entity is `Insight` (`internal/store/store.go`):
 |------------|----------|-----------------------------------------------------------------|
 | `id`       | UUID     | Primary key (uuidv7)                                            |
 | `project_id` | UUID   | FK → projects                                                   |
-| `key`      | text     | Optional stable identifier; unique per project among live rows  |
+| `key`      | text     | Optional stable identifier; unique per project among live rows. Omit for append-only log entries; supply a key to upsert (each write overwrites the previous value in-place). |
 | `content`  | text     | The insight body                                                |
 | `tags`     | text[]   | GIN-indexed for filtering                                       |
 | `category` | text     | Required on write: `fact`, `decision`, `insight`, `preference`, `context`, `general` |
@@ -50,7 +50,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `whoami`           | any           | Returns user ID and token scopes |
 | `project_ensure`   | `insights:read`  | Creates a project if missing; returns it either way |
 | `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
-| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. With `key`, upserts. Requires `category` and `source`. |
+| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. |
 | `insight_search`   | `insights:read`  | Full-text search over live insights |
 | `insight_list`     | `insights:read`  | Lists live insights, newest first. Optional tag filter. |
 | `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight |
