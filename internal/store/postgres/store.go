@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
+	"github.com/wolfeidau/starlogz/internal/logattr"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
@@ -367,7 +368,7 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 
 // GetGrantByRefreshToken fetches and decrypts a grant by our_refresh_token.
 func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error) {
-	s.logger(ctx).DebugContext(ctx, "getting grant by refresh token", slog.String("token", token))
+	s.logger(ctx).DebugContext(ctx, "getting grant by refresh token", logattr.ObscureString("token", token))
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -412,7 +413,14 @@ func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 // the old jti as revoked in the same transaction. Returns ErrNotFound if oldToken
 // does not match any row (concurrent rotation race).
 func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
-	s.logger(ctx).DebugContext(ctx, "rotating grant", slog.String("old_token", oldToken), slog.String("old_jti", oldJTI), slog.Time("old_jwt_expiry", oldJWTExpiry))
+	s.logger(ctx).DebugContext(ctx, "rotating grant",
+		logattr.ObscureString("old_token", oldToken),
+		logattr.ObscureString("new_token", g.OurRefreshToken),
+		slog.String("old_jti", oldJTI),
+		slog.Time("old_jwt_expiry", oldJWTExpiry),
+		slog.String("new_jti", g.JTI),
+		slog.String("client_id", g.ClientID),
+	)
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
