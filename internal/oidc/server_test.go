@@ -765,12 +765,13 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	}, raw)
 	require.NoError(t, err)
 
+	userID := uuid.New()
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "grant-seam-code"
 	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
 	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
 	require.NoError(t, authState.StoreAuthCode(context.Background(), code, store.AuthCode{
-		Sub:                "99887766",
+		Sub:                userID.String(),
 		GitHubID:           99887766,
 		Email:              "user@example.com",
 		Scope:              "facts:read",
@@ -797,7 +798,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	require.Len(t, gs.calls, 1, "UpsertGrant must be called exactly once")
 
 	p := gs.calls[0]
-	require.Equal(t, int64(99887766), p.GitHubID)
+	require.Equal(t, userID, p.UserID)
 	require.NotEmpty(t, p.JTI)
 	require.Equal(t, "gha_access_abc", p.AccessToken)
 	require.Equal(t, "ghr_refresh_xyz", p.RefreshToken)
@@ -833,10 +834,11 @@ func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
 	gs := &testGrantStore{}
 	srv := newRefreshTestServer(t, gs, nil)
 
+	userID := uuid.New()
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "auth-code-with-refresh"
 	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
-		Sub:                "12345678",
+		Sub:                userID.String(),
 		GitHubID:           12345678,
 		Email:              "user@example.com",
 		Scope:              "facts:read facts:write",
@@ -875,10 +877,11 @@ func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
 	gs := &testGrantStore{}
 	srv := newRefreshTestServer(t, gs, nil)
 
+	userID := uuid.New()
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "auth-code-no-refresh"
 	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
-		Sub:           "12345678",
+		Sub:           userID.String(),
 		GitHubID:      12345678,
 		Email:         "user@example.com",
 		Scope:         "facts:read",
@@ -926,7 +929,6 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 	oldJTI := uuid.New().String()
 	gs.seed(store.Grant{
 		JTI:                oldJTI,
-		GitHubID:           12345678,
 		OurRefreshToken:    oldRefresh,
 		ClientID:           "test-client",
 		Scope:              "facts:read facts:write",

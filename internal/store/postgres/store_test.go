@@ -379,13 +379,13 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser")
+	u, err := st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	g := store.Grant{
 		JTI:                "test-jti-001",
-		GitHubID:           100,
+		UserID:             u.ID,
 		AccessToken:        "gha_accesstoken123",
 		RefreshToken:       "ghr_refreshtoken456",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),
@@ -398,7 +398,7 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	got, err := st.GetGrant(ctx, "test-jti-001")
 	require.NoError(t, err)
 	require.Equal(t, g.JTI, got.JTI)
-	require.Equal(t, g.GitHubID, got.GitHubID)
+	require.Equal(t, g.UserID, got.UserID)
 	require.Equal(t, g.AccessToken, got.AccessToken)
 	require.Equal(t, g.RefreshToken, got.RefreshToken)
 	require.WithinDuration(t, g.AccessTokenExpiry, got.AccessTokenExpiry, time.Second)
@@ -409,13 +409,14 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser")
+	u, err := st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
 	expired := store.Grant{
 		JTI:                "expired-jti",
-		GitHubID:           200,
+		UserID:             u.ID,
+		ClientID:           "client-A",
 		AccessToken:        "old-access",
 		RefreshToken:       "old-refresh",
 		AccessTokenExpiry:  now.Add(-10 * time.Hour),
@@ -424,14 +425,30 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	}
 	require.NoError(t, st.UpsertGrant(ctx, expired))
 
-	// Confirm expired grant was inserted.
+	// Plant an expired grant for a different client — must not be pruned.
+	expiredOtherClient := store.Grant{
+		JTI:                "expired-other-client-jti",
+		UserID:             u.ID,
+		ClientID:           "client-B",
+		AccessToken:        "other-access",
+		RefreshToken:       "other-refresh",
+		AccessTokenExpiry:  now.Add(-10 * time.Hour),
+		RefreshTokenExpiry: now.Add(-1 * time.Hour),
+		JWTExpiry:          now.Add(-1 * time.Second),
+	}
+	require.NoError(t, st.UpsertGrant(ctx, expiredOtherClient))
+
+	// Confirm expired grants were inserted.
 	_, err = st.GetGrant(ctx, "expired-jti")
 	require.NoError(t, err)
+	_, err = st.GetGrant(ctx, "expired-other-client-jti")
+	require.NoError(t, err)
 
-	// Upsert a new grant for the same user — triggers lazy prune of the expired one.
+	// Upsert a new grant for client-A — triggers lazy prune scoped to (user, client-A).
 	fresh := store.Grant{
 		JTI:                "fresh-jti",
-		GitHubID:           200,
+		UserID:             u.ID,
+		ClientID:           "client-A",
 		AccessToken:        "new-access",
 		RefreshToken:       "new-refresh",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),
@@ -441,10 +458,14 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	require.NoError(t, st.UpsertGrant(ctx, fresh))
 
 	_, err = st.GetGrant(ctx, "expired-jti")
-	require.ErrorIs(t, err, store.ErrNotFound, "expired grant must be pruned")
+	require.ErrorIs(t, err, store.ErrNotFound, "expired client-A grant must be pruned")
 
 	_, err = st.GetGrant(ctx, "fresh-jti")
 	require.NoError(t, err, "fresh grant must still exist")
+
+	// client-B's expired grant must be untouched — prune is scoped to (user, client).
+	_, err = st.GetGrant(ctx, "expired-other-client-jti")
+	require.NoError(t, err, "expired grant for a different client must not be pruned")
 }
 
 func TestGetGrant_NotFound(t *testing.T) {
@@ -458,13 +479,13 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 400, "rotate@example.com", "rotateuser")
+	u, err := st.UpsertUser(ctx, 400, "rotate@example.com", "rotateuser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	original := store.Grant{
 		JTI:                "rotate-jti-old",
-		GitHubID:           400,
+		UserID:             u.ID,
 		OurRefreshToken:    "our-refresh-old",
 		ClientID:           "client-A",
 		Scope:              "facts:read facts:write",
@@ -484,7 +505,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 
 	rotated := store.Grant{
 		JTI:                "rotate-jti-new",
-		GitHubID:           400,
+		UserID:             u.ID,
 		OurRefreshToken:    "our-refresh-new",
 		ClientID:           "client-A",
 		Scope:              "facts:read facts:write",
@@ -527,12 +548,12 @@ func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 300, "nokey@example.com", "nokey")
+	u, err := st.UpsertUser(ctx, 300, "nokey@example.com", "nokey")
 	require.NoError(t, err)
 
 	err = st.UpsertGrant(ctx, store.Grant{
-		JTI:      "no-key-jti",
-		GitHubID: 300,
+		JTI:    "no-key-jti",
+		UserID: u.ID,
 	})
 	require.Error(t, err, "UpsertGrant without encryption key must fail")
 }
@@ -858,13 +879,13 @@ func TestGetGrantByRefreshToken_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 1100, "rftoken@example.com", "rfuser")
+	u, err := st.UpsertUser(ctx, 1100, "rftoken@example.com", "rfuser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	g := store.Grant{
 		JTI:                "jti-rftoken-001",
-		GitHubID:           1100,
+		UserID:             u.ID,
 		OurRefreshToken:    "our-refresh-token-abc",
 		ClientID:           "client-001",
 		AccessToken:        "gha_access",
@@ -878,7 +899,7 @@ func TestGetGrantByRefreshToken_Success(t *testing.T) {
 	got, err := st.GetGrantByRefreshToken(ctx, "our-refresh-token-abc")
 	require.NoError(t, err)
 	require.Equal(t, g.JTI, got.JTI)
-	require.Equal(t, g.GitHubID, got.GitHubID)
+	require.Equal(t, g.UserID, got.UserID)
 	require.Equal(t, g.OurRefreshToken, got.OurRefreshToken)
 	require.Equal(t, g.ClientID, got.ClientID)
 	require.Equal(t, g.AccessToken, got.AccessToken)
@@ -895,13 +916,13 @@ func TestRotateGrant_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 1200, "rotate@example.com", "rotateuser")
+	u, err := st.UpsertUser(ctx, 1200, "rotate@example.com", "rotateuser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	original := store.Grant{
 		JTI:                "jti-rotate-old",
-		GitHubID:           1200,
+		UserID:             u.ID,
 		OurRefreshToken:    "old-refresh-token",
 		ClientID:           "client-rotate",
 		AccessToken:        "gha_old_access",
@@ -914,7 +935,7 @@ func TestRotateGrant_Success(t *testing.T) {
 
 	rotated := store.Grant{
 		JTI:                "jti-rotate-new",
-		GitHubID:           1200,
+		UserID:             u.ID,
 		OurRefreshToken:    "new-refresh-token",
 		ClientID:           "client-rotate",
 		AccessToken:        "gha_new_access",
@@ -945,13 +966,13 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 1300, "race@example.com", "raceuser")
+	u, err := st.UpsertUser(ctx, 1300, "race@example.com", "raceuser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
 		JTI:                "jti-race",
-		GitHubID:           1300,
+		UserID:             u.ID,
 		OurRefreshToken:    "race-token",
 		AccessToken:        "gha_access",
 		RefreshToken:       "ghr_refresh",
@@ -963,7 +984,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	// First rotation succeeds.
 	_, err = st.RotateGrant(ctx, "race-token", "jti-race", now.Add(7*24*time.Hour), store.Grant{
 		JTI:             "jti-race-rotated",
-		GitHubID:        1300,
+		UserID:          u.ID,
 		OurRefreshToken: "race-token-rotated",
 		AccessToken:     "gha_new",
 		RefreshToken:    "ghr_new",
@@ -974,7 +995,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	// Second rotation with the same old token simulates a concurrent race — must return ErrNotFound.
 	_, err = st.RotateGrant(ctx, "race-token", "jti-race", now.Add(7*24*time.Hour), store.Grant{
 		JTI:             "jti-race-rotated-2",
-		GitHubID:        1300,
+		UserID:          u.ID,
 		OurRefreshToken: "race-token-rotated-2",
 		AccessToken:     "gha_new2",
 		RefreshToken:    "ghr_new2",
@@ -987,13 +1008,13 @@ func TestDeleteGrant_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
-	_, err := st.UpsertUser(ctx, 1400, "del@example.com", "deluser")
+	u, err := st.UpsertUser(ctx, 1400, "del@example.com", "deluser")
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
 		JTI:                "jti-delete",
-		GitHubID:           1400,
+		UserID:             u.ID,
 		AccessToken:        "gha_access",
 		RefreshToken:       "ghr_refresh",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),

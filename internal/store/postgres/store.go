@@ -319,7 +319,7 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO grants (jti, github_id, our_refresh_token, client_id, scope,
+		INSERT INTO grants (jti, user_id, our_refresh_token, client_id, scope,
 		                    access_token, refresh_token,
 		                    access_token_expiry, refresh_token_expiry, jwt_expiry)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -333,7 +333,7 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 		        refresh_token_expiry  = EXCLUDED.refresh_token_expiry,
 		        jwt_expiry            = EXCLUDED.jwt_expiry,
 		        updated_at            = now()`,
-		g.JTI, g.GitHubID, ourRefreshToken, clientID, g.Scope, encAccess, encRefresh,
+		g.JTI, g.UserID, ourRefreshToken, clientID, g.Scope, encAccess, encRefresh,
 		g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
 	)
 	if err != nil {
@@ -341,8 +341,8 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	}
 
 	_, err = tx.Exec(ctx,
-		`DELETE FROM grants WHERE github_id = $1 AND jwt_expiry < now() AND jti != $2`,
-		g.GitHubID, g.JTI,
+		`DELETE FROM grants WHERE user_id = $1 AND client_id IS NOT DISTINCT FROM $2 AND jwt_expiry < now() AND jti != $3`,
+		g.UserID, clientID, g.JTI,
 	)
 	if err != nil {
 		return fmt.Errorf("prune grants: %w", err)
@@ -359,7 +359,7 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 		return nil, fmt.Errorf("encryption key not configured")
 	}
 	return s.scanGrant(s.pool.QueryRow(ctx, `
-		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
+		SELECT jti, user_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
 		       access_token, refresh_token,
 		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
 		FROM grants WHERE jti = $1`, jti))
@@ -373,7 +373,7 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 		return nil, fmt.Errorf("encryption key not configured")
 	}
 	return s.scanGrant(s.pool.QueryRow(ctx, `
-		SELECT jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
+		SELECT jti, user_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
 		       access_token, refresh_token,
 		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
 		FROM grants WHERE our_refresh_token = $1`, token))
@@ -381,8 +381,9 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 
 func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	var g store.Grant
+	var userIDStr string
 	var encAccess, encRefresh []byte
-	err := row.Scan(&g.JTI, &g.GitHubID, &g.OurRefreshToken, &g.ClientID, &g.Scope,
+	err := row.Scan(&g.JTI, &userIDStr, &g.OurRefreshToken, &g.ClientID, &g.Scope,
 		&encAccess, &encRefresh,
 		&g.AccessTokenExpiry, &g.RefreshTokenExpiry, &g.JWTExpiry, &g.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -390,6 +391,9 @@ func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan grant: %w", err)
+	}
+	if g.UserID, err = uuid.Parse(userIDStr); err != nil {
+		return nil, fmt.Errorf("parse user_id: %w", err)
 	}
 
 	var decErr error
@@ -438,6 +442,7 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var updated store.Grant
+	var updatedUserIDStr string
 	var encA, encR []byte
 	err = tx.QueryRow(ctx, `
 		UPDATE grants
@@ -452,14 +457,17 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 		    jwt_expiry           = $10,
 		    updated_at           = now()
 		WHERE our_refresh_token = $1
-		RETURNING jti, github_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
+		RETURNING jti, user_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
 		          access_token, refresh_token,
 		          access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at`,
 		oldToken, g.JTI, ourRefreshToken, clientID, g.Scope,
 		encAccess, encRefresh, g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
-	).Scan(&updated.JTI, &updated.GitHubID, &updated.OurRefreshToken, &updated.ClientID, &updated.Scope,
+	).Scan(&updated.JTI, &updatedUserIDStr, &updated.OurRefreshToken, &updated.ClientID, &updated.Scope,
 		&encA, &encR,
 		&updated.AccessTokenExpiry, &updated.RefreshTokenExpiry, &updated.JWTExpiry, &updated.UpdatedAt)
+	if err == nil {
+		updated.UserID, err = uuid.Parse(updatedUserIDStr)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

@@ -126,7 +126,7 @@ type TagCount struct {
 // Tokens are stored encrypted at rest; this struct carries plaintext values.
 type Grant struct {
 	JTI                string
-	GitHubID           int64
+	UserID             uuid.UUID
 	OurRefreshToken    string
 	ClientID           string
 	Scope              string
@@ -183,7 +183,7 @@ type AuditLogFilter struct {
 // Tokens are stored encrypted at rest; this struct carries plaintext values.
 type AuthCode struct {
 	Sub                string // internal user UUID (JWT sub)
-	GitHubID           int64  // GitHub numeric ID (for grant creation)
+	GitHubID           int64  // GitHub numeric ID (for logging)
 	Email              string
 	Scope              string
 	CodeChallenge      string

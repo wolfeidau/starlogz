@@ -1,4 +1,4 @@
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
     id          BIGSERIAL   PRIMARY KEY,
     table_name  TEXT        NOT NULL,
     operation   TEXT        NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -7,8 +7,8 @@ CREATE TABLE audit_log (
     changed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_audit_log_table_name ON audit_log (table_name);
-CREATE INDEX idx_audit_log_changed_at ON audit_log (changed_at);
+CREATE INDEX IF NOT EXISTS idx_audit_log_table_name ON audit_log (table_name);
+CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON audit_log (changed_at);
 
 CREATE OR REPLACE FUNCTION audit_trigger_func()
 RETURNS TRIGGER AS $$
@@ -29,30 +29,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER audit_facts
+CREATE OR REPLACE TRIGGER audit_facts
     AFTER INSERT OR UPDATE OR DELETE ON facts
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
 
-CREATE TRIGGER audit_users
+CREATE OR REPLACE TRIGGER audit_users
     AFTER INSERT OR UPDATE OR DELETE ON users
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
 
-CREATE TRIGGER audit_orgs
+CREATE OR REPLACE TRIGGER audit_orgs
     AFTER INSERT OR UPDATE OR DELETE ON orgs
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
 
-CREATE TRIGGER audit_org_members
+CREATE OR REPLACE TRIGGER audit_org_members
     AFTER INSERT OR UPDATE OR DELETE ON org_members
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
 
-CREATE TRIGGER audit_projects
+CREATE OR REPLACE TRIGGER audit_projects
     AFTER INSERT OR UPDATE OR DELETE ON projects
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
 
-CREATE TRIGGER audit_grants
+CREATE OR REPLACE TRIGGER audit_grants
     AFTER INSERT OR UPDATE OR DELETE ON grants
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
 
-CREATE TRIGGER audit_oauth_clients
+CREATE OR REPLACE TRIGGER audit_oauth_clients
     AFTER INSERT OR UPDATE OR DELETE ON oauth_clients
     FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
+
+INSERT INTO schema_migrations (version) VALUES (10) ON CONFLICT DO NOTHING;

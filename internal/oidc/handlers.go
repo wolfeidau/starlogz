@@ -214,7 +214,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	jwtExpiry := time.Now().Add(jwtTTL)
 	log = log.With(
 		slog.String("client_id", pc.ClientID),
-		slog.Int64("github_id", pc.GitHubID),
+		slog.String("sub", pc.Sub),
 		slog.String("jti", jti),
 	)
 	ctx := ctxlog.WithLogger(r.Context(), log)
@@ -237,9 +237,14 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 				return
 			}
 		}
-		if err := s.grants.UpsertGrant(ctx, storepkg.Grant{
+		grantUserID, parseErr := uuid.Parse(pc.Sub)
+		if parseErr != nil {
+			// sub must be a valid UUID; if not, skip grant storage but still issue the JWT.
+			log.ErrorContext(ctx, "upsert grant skipped: sub is not a valid UUID", slog.Any("error", parseErr))
+			ourRefreshToken = ""
+		} else if err := s.grants.UpsertGrant(ctx, storepkg.Grant{
 			JTI:                jti,
-			GitHubID:           pc.GitHubID,
+			UserID:             grantUserID,
 			OurRefreshToken:    ourRefreshToken,
 			ClientID:           pc.ClientID,
 			Scope:              pc.Scope,
@@ -293,15 +298,28 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		return
 	}
 
-	// Enrich further with jti and github_id now that we have the grant.
+	// Enrich further with jti and user_id now that we have the grant.
 	log = log.With(
 		slog.String("jti", grant.JTI),
-		slog.Int64("github_id", grant.GitHubID),
+		slog.String("user_id", grant.UserID.String()),
 	)
 	ctx = ctxlog.WithLogger(ctx, log)
 
 	// client_id is validated only when stored on the grant (best-effort per v0.2 constraints).
 	if grant.ClientID != "" && grant.ClientID != clientID {
+		warnFields := []any{
+			slog.String("request_client_id", clientID),
+			slog.String("grant_client_id", grant.ClientID),
+		}
+		if s.clients != nil {
+			if rc, err := s.clients.GetClient(ctx, clientID); err == nil {
+				warnFields = append(warnFields, slog.String("request_client_name", rc.ClientName))
+			}
+			if gc, err := s.clients.GetClient(ctx, grant.ClientID); err == nil {
+				warnFields = append(warnFields, slog.String("grant_client_name", gc.ClientName))
+			}
+		}
+		log.WarnContext(ctx, "client_id mismatch on token refresh", warnFields...)
 		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
 		return
 	}
@@ -354,6 +372,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	}
 
 	sub := strconv.FormatInt(identity.ID, 10)
+	userID := grant.UserID
 	if s.users != nil {
 		user, uErr := s.users.UpsertUser(storeCtx, identity.ID, identity.Email, identity.Login)
 		if uErr != nil {
@@ -362,6 +381,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			return
 		}
 		sub = user.ID.String()
+		userID = user.ID
 	}
 
 	newJTI := uuid.New().String()
@@ -376,7 +396,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 
 	newGrant := storepkg.Grant{
 		JTI:                newJTI,
-		GitHubID:           grant.GitHubID,
+		UserID:             userID,
 		OurRefreshToken:    newOurRefreshToken,
 		ClientID:           grant.ClientID,
 		Scope:              grant.Scope,
