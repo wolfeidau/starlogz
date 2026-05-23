@@ -206,13 +206,12 @@ Claims:
 
 | Scope         | Gates                                                          |
 |---------------|----------------------------------------------------------------|
-| `facts:read`  | Read insights, search, list projects and tags, whoami          |
-| `facts:write` | Create, update, soft-delete insights                           |
+| `insights:read`  | Read insights, search, list projects and tags, whoami          |
+| `insights:write` | Create, update, soft-delete insights                           |
 | `org:admin`   | Create/delete projects, manage org membership, write org-level insights (when implemented) |
 
-All MCP tool calls require at least `facts:read`. The `/mcp` endpoint
-enforces this at the transport layer. (The scope names `facts:read` / `facts:write`
-remain unchanged — they gate access to insights as well.)
+All MCP tool calls require at least `insights:read`. The `/mcp` endpoint
+enforces this at the transport layer.
 
 ### Refresh tokens (v0.2)
 
@@ -247,22 +246,22 @@ every instance. Generate once with `starlogz-server keygen --output key.jwk`.
 
 ## MCP tools
 
-All tools require at minimum `facts:read`. Write tools require
-`facts:write`. This section describes the steady-state surface.
+All tools require at minimum `insights:read`. Write tools require
+`insights:write`. This section describes the steady-state surface.
 
 ### Implemented (v0.1 / v0.2)
 
 | Tool               | Scope         | Purpose |
 |--------------------|---------------|---------|
 | `whoami`           | (any)         | Returns user ID and token scopes. |
-| `project_ensure`   | `facts:read`  | Creates a project if missing; returns it either way. |
-| `project_list`     | `facts:read`  | Lists projects accessible to the caller. |
-| `insight_write`    | `facts:write` | Writes an insight. Auto-creates the project. With `key`, upserts in place. Requires `category` and `source`. |
-| `insight_search`   | `facts:read`  | Full-text search across live insights in a project. |
-| `insight_list`     | `facts:read`  | Lists live insights in a project, newest first. |
-| `insight_update`   | `facts:write` | Updates content and/or tags of an existing insight. |
-| `insight_delete`   | `facts:write` | Soft-deletes an insight. |
-| `insight_list_tags`| `facts:read`  | Returns tags for a project ordered by usage frequency. |
+| `project_ensure`   | `insights:read`  | Creates a project if missing; returns it either way. |
+| `project_list`     | `insights:read`  | Lists projects accessible to the caller. |
+| `insight_write`    | `insights:write` | Writes an insight. Auto-creates the project. With `key`, upserts in place. Requires `category` and `source`. |
+| `insight_search`   | `insights:read`  | Full-text search across live insights in a project. |
+| `insight_list`     | `insights:read`  | Lists live insights in a project, newest first. |
+| `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. |
+| `insight_delete`   | `insights:write` | Soft-deletes an insight. |
+| `insight_list_tags`| `insights:read`  | Returns tags for a project ordered by usage frequency. |
 
 Each project-scoped tool takes a `project` slug. With orgs in v0.2, tools
 also accept an optional `org` slug; if omitted, the user's personal org
@@ -273,10 +272,10 @@ is assumed. Single-user UX is unchanged.
 | Tool            | Scope        | Purpose |
 |-----------------|--------------|---------|
 | `org_create`    | (auth)       | Creates a shared org with the caller as owner. |
-| `org_list`      | `facts:read` | Lists orgs the caller belongs to. |
+| `org_list`      | `insights:read` | Lists orgs the caller belongs to. |
 | `org_invite`    | `org:admin`  | Adds a user to an org by GitHub login. |
 | `org_remove`    | `org:admin`  | Removes a member. |
-| `org_insights_get` | `facts:read` | Reads org-scope conventions/decisions (when org-level insights ship). |
+| `org_insights_get` | `insights:read` | Reads org-scope conventions/decisions (when org-level insights ship). |
 | `org_insights_write` | `org:admin` | Writes an org-scope insight. |
 
 ### Planned with insight richness (v0.3+)

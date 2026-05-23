@@ -489,7 +489,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 		UserID:             u.ID,
 		OurRefreshToken:    "our-refresh-old",
 		ClientID:           "client-A",
-		Scope:              "facts:read facts:write",
+		Scope:              "insights:read insights:write",
 		AccessToken:        "gha_old",
 		RefreshToken:       "ghr_old",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),
@@ -501,7 +501,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	// Sanity-check the seeded grant round-trips, including scope.
 	seeded, err := st.GetGrantByRefreshToken(ctx, "our-refresh-old")
 	require.NoError(t, err)
-	require.Equal(t, "facts:read facts:write", seeded.Scope)
+	require.Equal(t, "insights:read insights:write", seeded.Scope)
 	require.Equal(t, "client-A", seeded.ClientID)
 
 	rotated := store.Grant{
@@ -509,7 +509,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 		UserID:             u.ID,
 		OurRefreshToken:    "our-refresh-new",
 		ClientID:           "client-A",
-		Scope:              "facts:read facts:write",
+		Scope:              "insights:read insights:write",
 		AccessToken:        "gha_new",
 		RefreshToken:       "ghr_new",
 		AccessTokenExpiry:  now.Add(16 * time.Hour),
@@ -521,7 +521,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "rotate-jti-new", got.JTI)
 	require.Equal(t, "our-refresh-new", got.OurRefreshToken)
-	require.Equal(t, "facts:read facts:write", got.Scope, "scope must round-trip through rotation")
+	require.Equal(t, "insights:read insights:write", got.Scope, "scope must round-trip through rotation")
 	require.Equal(t, "gha_new", got.AccessToken)
 	require.Equal(t, "ghr_new", got.RefreshToken)
 	require.WithinDuration(t, rotated.JWTExpiry, got.JWTExpiry, time.Second)
@@ -538,7 +538,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	fetched, err := st.GetGrantByRefreshToken(ctx, "our-refresh-new")
 	require.NoError(t, err)
 	require.Equal(t, "rotate-jti-new", fetched.JTI)
-	require.Equal(t, "facts:read facts:write", fetched.Scope)
+	require.Equal(t, "insights:read insights:write", fetched.Scope)
 
 	// Old jti row no longer exists (UPDATE replaced the primary key).
 	_, err = st.GetGrant(ctx, "rotate-jti-old")
@@ -573,7 +573,7 @@ func TestSaveClient(t *testing.T) {
 		GrantTypes:              []string{"authorization_code"},
 		ResponseTypes:           []string{"code"},
 		TokenEndpointAuthMethod: "none",
-		Scope:                   "facts:read",
+		Scope:                   "insights:read",
 		IssuedAt:                now,
 		ExpiresAt:               now.Add(90 * 24 * time.Hour),
 	}
@@ -682,7 +682,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	p := store.PendingAuth{
 		ClientID:      "client-abc",
 		RedirectURI:   "https://client.example.com/callback",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: "challenge-xyz",
 		ClientState:   "opaque-state",
 	}
@@ -709,7 +709,7 @@ func TestConsumePendingAuth_SingleUse(t *testing.T) {
 
 	require.NoError(t, st.StorePendingAuth(ctx, "single-use-state", store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: "challenge",
 	}))
 
@@ -727,7 +727,7 @@ func TestStorePendingAuth_EmptyOptionalFields(t *testing.T) {
 	// client_id and client_state are optional — empty string stored as NULL.
 	p := store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: "challenge",
 	}
 	require.NoError(t, st.StorePendingAuth(ctx, "state-noopt", p))
@@ -749,7 +749,7 @@ func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
 		Sub:                "user-uuid-abc",
 		GitHubID:           1001,
 		Email:              "code@example.com",
-		Scope:              "facts:read facts:write",
+		Scope:              "insights:read insights:write",
 		CodeChallenge:      "challenge-abc",
 		RedirectURI:        "https://client.example.com/callback",
 		ClientID:           "client-xyz",
@@ -784,7 +784,7 @@ func TestStoreAuthCode_ConsumeWithoutTokens(t *testing.T) {
 		Sub:           "user-uuid-notokens",
 		GitHubID:      1002,
 		Email:         "notokens@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: "challenge",
 		RedirectURI:   "https://client.example.com/callback",
 	}
@@ -812,7 +812,7 @@ func TestConsumeAuthCode_SingleUse(t *testing.T) {
 		Sub:           "user-uuid",
 		GitHubID:      1003,
 		Email:         "u@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: "challenge",
 		RedirectURI:   "https://client.example.com/callback",
 	}))

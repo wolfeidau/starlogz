@@ -43,19 +43,19 @@ The core entity is `Insight` (`internal/store/store.go`):
 
 ## MCP tools
 
-All tools require `facts:read`. Write tools also require `facts:write`.
+All tools require `insights:read`. Write tools also require `insights:write`.
 
 | Tool               | Scope         | Description |
 |--------------------|---------------|-------------|
 | `whoami`           | any           | Returns user ID and token scopes |
-| `project_ensure`   | `facts:read`  | Creates a project if missing; returns it either way |
-| `project_list`     | `facts:read`  | Lists projects in the caller's personal org |
-| `insight_write`    | `facts:write` | Writes an insight; auto-creates project. With `key`, upserts. Requires `category` and `source`. |
-| `insight_search`   | `facts:read`  | Full-text search over live insights |
-| `insight_list`     | `facts:read`  | Lists live insights, newest first. Optional tag filter. |
-| `insight_update`   | `facts:write` | Updates content and/or tags of an existing insight |
-| `insight_delete`   | `facts:write` | Soft-deletes an insight |
-| `insight_list_tags`| `facts:read`  | Returns tags ordered by usage frequency |
+| `project_ensure`   | `insights:read`  | Creates a project if missing; returns it either way |
+| `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
+| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. With `key`, upserts. Requires `category` and `source`. |
+| `insight_search`   | `insights:read`  | Full-text search over live insights |
+| `insight_list`     | `insights:read`  | Lists live insights, newest first. Optional tag filter. |
+| `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight |
+| `insight_delete`   | `insights:write` | Soft-deletes an insight |
+| `insight_list_tags`| `insights:read`  | Returns tags ordered by usage frequency |
 
 ---
 

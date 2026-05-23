@@ -12,23 +12,23 @@ Human developers benefit too: notes written once stay available to every agent a
 
 1. An MCP client (Claude Code, Cursor, any compliant host) connects to `https://your-server/mcp`.
 2. The client authenticates via OAuth2 — the full browser-based flow is handled automatically using Dynamic Client Registration (RFC 7591).
-3. The issued JWT carries scopes (`facts:read`, `facts:write`) that gate every tool call.
+3. The issued JWT carries scopes (`insights:read`, `insights:write`) that gate every tool call.
 4. Insights are stored in PostgreSQL with full-text search, soft-delete, and optional stable keys for upsert semantics.
 
 ## MCP tools
 
-All tools require `facts:read`. Write tools require `facts:write`.
+All tools require `insights:read`. Write tools require `insights:write`.
 
 | Tool | Scope | Description |
 |------|-------|-------------|
-| `whoami` | `facts:read` | Returns your user ID and token scopes. Useful for verifying authentication. |
-| `project_ensure` | `facts:read` | Creates a project if it does not exist; returns it either way. Use when you want a custom display name. |
-| `insight_write` | `facts:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Requires `category` and `source`. |
-| `insight_search` | `facts:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns results ordered by relevance. |
-| `insight_list` | `facts:read` | Lists all live insights in a project, newest first. Optional tag filter. |
-| `insight_update` | `facts:write` | Updates content and/or tags of an existing insight. |
-| `insight_delete` | `facts:write` | Soft-deletes an insight by ID. Does not appear in search or list after deletion. |
-| `insight_list_tags` | `facts:read` | Returns tags for a project ordered by usage frequency. |
+| `whoami` | `insights:read` | Returns your user ID and token scopes. Useful for verifying authentication. |
+| `project_ensure` | `insights:read` | Creates a project if it does not exist; returns it either way. Use when you want a custom display name. |
+| `insight_write` | `insights:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Requires `category` and `source`. |
+| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns results ordered by relevance. |
+| `insight_list` | `insights:read` | Lists all live insights in a project, newest first. Optional tag filter. |
+| `insight_update` | `insights:write` | Updates content and/or tags of an existing insight. |
+| `insight_delete` | `insights:write` | Soft-deletes an insight by ID. Does not appear in search or list after deletion. |
+| `insight_list_tags` | `insights:read` | Returns tags for a project ordered by usage frequency. |
 
 ## Quickstart
 

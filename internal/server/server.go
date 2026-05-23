@@ -76,7 +76,7 @@ func New(cfg Config) (*Server, error) {
 	mcpSrv := newMCPServer(cfg.Store)
 
 	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
-		Scopes:              []string{"facts:read"},
+		Scopes:              []string{"insights:read"},
 		ResourceMetadataURL: oidcServer.ResourceMetadataURL(),
 	})
 

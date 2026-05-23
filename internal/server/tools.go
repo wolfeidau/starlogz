@@ -191,7 +191,7 @@ func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest
 
 func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest, in insightWriteInput) (*mcp.CallToolResult, any, error) {
 	ms.logger(ctx).InfoContext(ctx, "insight_write call", slog.String("user_id", req.Extra.TokenInfo.UserID))
-	if err := requireScope(req, "facts:write"); err != nil {
+	if err := requireScope(req, "insights:write"); err != nil {
 		return nil, nil, err
 	}
 	if ms.store == nil {
@@ -297,7 +297,7 @@ func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, 
 
 func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest, in insightDeleteInput) (*mcp.CallToolResult, any, error) {
 	ms.logger(ctx).InfoContext(ctx, "insight_delete call", slog.String("user_id", req.Extra.TokenInfo.UserID))
-	if err := requireScope(req, "facts:write"); err != nil {
+	if err := requireScope(req, "insights:write"); err != nil {
 		return nil, nil, err
 	}
 	if ms.store == nil {
@@ -388,7 +388,7 @@ func (ms *mcpServer) insightListTags(ctx context.Context, req *mcp.CallToolReque
 
 func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest, in insightUpdateInput) (*mcp.CallToolResult, any, error) {
 	ms.logger(ctx).InfoContext(ctx, "insight_update call", slog.String("user_id", req.Extra.TokenInfo.UserID))
-	if err := requireScope(req, "facts:write"); err != nil {
+	if err := requireScope(req, "insights:write"); err != nil {
 		return nil, nil, err
 	}
 	if ms.store == nil {

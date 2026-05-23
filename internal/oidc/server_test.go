@@ -230,7 +230,7 @@ func TestDiscoveryHandler_RFC8414_SpecCompliance(t *testing.T) {
 	require.Equal(t, []string{"authorization_code", "refresh_token"}, meta.GrantTypesSupported)
 	require.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
 	require.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
-	require.ElementsMatch(t, []string{"facts:read", "facts:write", "org:admin"}, meta.ScopesSupported)
+	require.ElementsMatch(t, []string{"insights:read", "insights:write", "org:admin"}, meta.ScopesSupported)
 }
 
 // --- Spec compliance: RFC 9728 Protected Resource Metadata ---
@@ -254,7 +254,7 @@ func TestProtectedResourceMetadata_RFC9728_SpecCompliance(t *testing.T) {
 
 	require.True(t, strings.HasPrefix(meta.Resource, issuer), "resource %q must be under issuer %q", meta.Resource, issuer)
 	require.Equal(t, []string{"header"}, meta.BearerMethodsSupported)
-	require.ElementsMatch(t, []string{"facts:read", "facts:write", "org:admin"}, meta.ScopesSupported)
+	require.ElementsMatch(t, []string{"insights:read", "insights:write", "org:admin"}, meta.ScopesSupported)
 }
 
 // --- Spec compliance: RFC 7517 JWKS kid cross-document consistency ---
@@ -278,7 +278,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	jwksKid := keySet.Keys[0].Kid
 	require.NotEmpty(t, jwksKid)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	parts := strings.SplitN(tokenString, ".", 3)
@@ -302,7 +302,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 func TestDCRHandler_Success(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"Test Client","grant_types":["authorization_code","implicit"],"response_types":["code"],"token_endpoint_auth_method":"none","scope":"facts:read facts:write"}`
+	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"Test Client","grant_types":["authorization_code","implicit"],"response_types":["code"],"token_endpoint_auth_method":"none","scope":"insights:read insights:write"}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -388,7 +388,7 @@ func TestAuthorizeHandler_ValidParams_RedirectsToGitHub(t *testing.T) {
 		"response_type":         {"code"},
 		"client_id":             {"test-client"},
 		"redirect_uri":          {"https://client.example.com/callback"},
-		"scope":                 {"facts:read"},
+		"scope":                 {"insights:read"},
 		"state":                 {"random-state-xyz"},
 		"code_challenge":        {pkceChallenge(verifier)},
 		"code_challenge_method": {"S256"},
@@ -466,7 +466,7 @@ func TestAuthorizeHandler_UnknownScope(t *testing.T) {
 		"redirect_uri":          {"https://client.example.com/callback"},
 		"code_challenge":        {"abc123"},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"facts:read unknown:scope"},
+		"scope":                 {"insights:read unknown:scope"},
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
@@ -534,7 +534,7 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
-		Scope:         "facts:read facts:write",
+		Scope:         "insights:read insights:write",
 		CodeChallenge: pkceChallenge(verifier),
 		RedirectURI:   "https://client.example.com/callback",
 	}))
@@ -559,7 +559,7 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.NotEmpty(t, resp["access_token"])
 	require.Equal(t, "Bearer", resp["token_type"])
-	require.Equal(t, "facts:read facts:write", resp["scope"])
+	require.Equal(t, "insights:read insights:write", resp["scope"])
 
 	tokenString, ok := resp["access_token"].(string)
 	require.True(t, ok)
@@ -577,7 +577,7 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge(verifier),
 		RedirectURI:   "https://client.example.com/callback",
 	}))
@@ -636,7 +636,7 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge("correct-verifier-that-is-long-enough-to-be-valid"),
 		RedirectURI:   "https://client.example.com/callback",
 	}))
@@ -668,7 +668,7 @@ func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge(verifier),
 		RedirectURI:   "https://client.example.com/callback",
 	}))
@@ -700,7 +700,7 @@ func TestTokenHandler_MissingRedirectURI(t *testing.T) {
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge(verifier),
 		RedirectURI:   "https://client.example.com/callback",
 	}))
@@ -774,7 +774,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 		Sub:                userID.String(),
 		GitHubID:           99887766,
 		Email:              "user@example.com",
-		Scope:              "facts:read",
+		Scope:              "insights:read",
 		CodeChallenge:      pkceChallenge(verifier),
 		RedirectURI:        "https://client.example.com/callback",
 		AccessToken:        "gha_access_abc",
@@ -841,7 +841,7 @@ func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
 		Sub:                userID.String(),
 		GitHubID:           12345678,
 		Email:              "user@example.com",
-		Scope:              "facts:read facts:write",
+		Scope:              "insights:read insights:write",
 		CodeChallenge:      pkceChallenge(verifier),
 		RedirectURI:        "https://client.example.com/callback",
 		ClientID:           "test-client",
@@ -870,7 +870,7 @@ func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
 	require.Greater(t, resp["refresh_token_expires_in"].(float64), float64(0))
 	require.Len(t, gs.calls, 1)
 	require.NotEmpty(t, gs.calls[0].OurRefreshToken)
-	require.Equal(t, "facts:read facts:write", gs.calls[0].Scope)
+	require.Equal(t, "insights:read insights:write", gs.calls[0].Scope)
 }
 
 func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
@@ -884,7 +884,7 @@ func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
 		Sub:           userID.String(),
 		GitHubID:      12345678,
 		Email:         "user@example.com",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge(verifier),
 		RedirectURI:   "https://client.example.com/callback",
 		ClientID:      "test-client",
@@ -931,7 +931,7 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 		JTI:                oldJTI,
 		OurRefreshToken:    oldRefresh,
 		ClientID:           "test-client",
-		Scope:              "facts:read facts:write",
+		Scope:              "insights:read insights:write",
 		AccessToken:        "gha_old_access",
 		RefreshToken:       "ghr_old_refresh",
 		AccessTokenExpiry:  time.Now().Add(1 * time.Hour),
@@ -956,7 +956,7 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.NotEmpty(t, resp["access_token"])
 	require.Equal(t, "Bearer", resp["token_type"])
-	require.Equal(t, "facts:read facts:write", resp["scope"])
+	require.Equal(t, "insights:read insights:write", resp["scope"])
 	newRefresh, _ := resp["refresh_token"].(string)
 	require.NotEmpty(t, newRefresh)
 	require.NotEqual(t, oldRefresh, newRefresh, "refresh token must rotate")
@@ -1085,7 +1085,7 @@ func TestTokenHandler_RefreshGrant_EmptyGrantClientIDSkipsCheck(t *testing.T) {
 		JTI:                uuid.New().String(),
 		OurRefreshToken:    "rt-no-clientid",
 		ClientID:           "", // grant has no stored client_id — best-effort skip per v0.2 spec
-		Scope:              "facts:read",
+		Scope:              "insights:read",
 		RefreshToken:       "ghr-old",
 		RefreshTokenExpiry: time.Now().Add(time.Hour),
 		JWTExpiry:          time.Now().Add(time.Hour),
@@ -1371,7 +1371,7 @@ func TestGitHubCallbackHandler_ExchangeError(t *testing.T) {
 
 	require.NoError(t, srv.authState.StorePendingAuth(context.Background(), "valid-state", store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge("verifier"),
 	}))
 
@@ -1396,7 +1396,7 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 
 	require.NoError(t, srv.authState.StorePendingAuth(context.Background(), "cb-state", store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
-		Scope:         "facts:read",
+		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge("verifier"),
 	}))
 
@@ -1419,7 +1419,7 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -1465,14 +1465,14 @@ func TestLogoutHandler_WrongMethod(t *testing.T) {
 func TestVerifyJWT_ValidToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read facts:write", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
-	require.Contains(t, info.Scopes, "facts:read")
-	require.Contains(t, info.Scopes, "facts:write")
+	require.Contains(t, info.Scopes, "insights:read")
+	require.Contains(t, info.Scopes, "insights:write")
 	require.False(t, info.Expiration.IsZero())
 }
 
@@ -1486,7 +1486,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	a := newTestOIDCServer(t)
 	b := newTestOIDCServer(t)
 
-	tokenString, err := b.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := b.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = a.VerifyJWT(context.Background(), tokenString, nil)
@@ -1496,7 +1496,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 func TestVerifyJWT_RevokedToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -1512,7 +1512,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
@@ -1533,7 +1533,7 @@ func signCustomToken(t *testing.T, srv *Server, extra func(*jwt.Builder)) string
 		IssuedAt(time.Now()).
 		Expiration(time.Now().Add(time.Hour)).
 		Audience([]string{"http://example.com/mcp"}).
-		Claim("scope", "facts:read").
+		Claim("scope", "insights:read").
 		Claim("jti", uuid.New().String())
 	if extra != nil {
 		extra(b)
@@ -1553,7 +1553,7 @@ func TestVerifyJWT_MissingAud(t *testing.T) {
 		Subject("12345678").
 		IssuedAt(time.Now()).
 		Expiration(time.Now().Add(time.Hour)).
-		Claim("scope", "facts:read").
+		Claim("scope", "insights:read").
 		Claim("jti", uuid.New().String()).
 		Build()
 	require.NoError(t, err)
@@ -1780,7 +1780,7 @@ func TestDCRHandler_PersistsToClientStore(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	cs := &testClientStore{}
 
-	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"My Client","scope":"facts:read"}`
+	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"My Client","scope":"insights:read"}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -1793,7 +1793,7 @@ func TestDCRHandler_PersistsToClientStore(t *testing.T) {
 	require.NotEmpty(t, r.ClientID)
 	require.Equal(t, "My Client", r.ClientName)
 	require.Equal(t, []string{"https://client.example.com/callback"}, r.RedirectURIs)
-	require.Equal(t, "facts:read", r.Scope)
+	require.Equal(t, "insights:read", r.Scope)
 	require.False(t, r.IssuedAt.IsZero())
 	require.True(t, r.ExpiresAt.After(r.IssuedAt), "ExpiresAt must be after IssuedAt")
 	require.InDelta(t, clientRegistrationTTL.Seconds(), r.ExpiresAt.Sub(r.IssuedAt).Seconds(), 2)

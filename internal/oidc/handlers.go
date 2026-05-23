@@ -679,7 +679,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 
 		scope := q.Get("scope")
 		if scope == "" {
-			scope = "facts:read"
+			scope = "insights:read"
 		}
 		for _, sc := range strings.Fields(scope) {
 			if !supportedScopes[sc] {
