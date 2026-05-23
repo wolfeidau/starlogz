@@ -76,7 +76,7 @@ renewals).
   "access_token": "<signed-jwt>",
   "token_type": "Bearer",
   "expires_in": 604800,
-  "scope": "facts:read facts:write",
+  "scope": "insights:read insights:write",
   "refresh_token": "<opaque-32-byte-base64url>",
   "refresh_token_expires_in": 15897600
 }
@@ -144,7 +144,7 @@ grant_type=refresh_token
   "access_token": "<new-signed-jwt>",
   "token_type": "Bearer",
   "expires_in": 604800,
-  "scope": "facts:read facts:write",
+  "scope": "insights:read insights:write",
   "refresh_token": "<new-opaque-token>",
   "refresh_token_expires_in": 14400000
 }

@@ -1,6 +1,6 @@
 # AGENT.md — starlogz
 
-Remote MCP server that lets developers and agents store and retrieve persistent facts about projects. GitHub OAuth2 for humans, scoped API keys for agents. Backing store is PostgreSQL.
+Remote MCP server that lets developers and agents store and retrieve persistent insights about projects. GitHub OAuth2 for humans, scoped API keys for agents. Backing store is PostgreSQL.
 
 If your tool or bookmark still opens [CLAUDE.md](./CLAUDE.md), that file is a compatibility stub that redirects here.
 
@@ -16,10 +16,10 @@ internal/commands/            kong command structs (HTTPCmd, KeyGenCmd)
 internal/middleware/          HTTP middleware (access log, CORS)
 internal/oidc/                OAuth2/OIDC server — JWKS, discovery, DCR, JWT verify, logout
 internal/server/              HTTP mux, MCP tool handlers, health endpoint
-internal/store/               PostgreSQL store — users, projects, facts; migration runner
-internal/store/migrations/    embedded SQL migration files
+internal/store/               PostgreSQL store — users, projects, insights; migration runner
+internal/store/postgres/migrations/  embedded SQL migration files
 internal/telemetry/           OTel init (traces + metrics via OTLP gRPC)
-spec/                         design specs (auth.md, facts.md)
+spec/                         design specs (auth.md, persistence.md, refresh_tokens.md)
 ```
 
 Public API surface lives under `pkg/` (currently empty — add exported types there when needed).

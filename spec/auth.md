@@ -125,7 +125,7 @@ human. Hash stored in `api_keys` table; plaintext shown once on creation.
 Server sets `source_type = agent` on all fact writes.
 
 - Transport: `Authorization: Bearer pfk_live_<random>`
-- Scoped per key: `facts:read`, `facts:write`, `org:admin`
+- Scoped per key: `insights:read`, `insights:write`, `org:admin`
 - Optionally scoped to a specific project
 
 ---
@@ -134,11 +134,11 @@ Server sets `source_type = agent` on all fact writes.
 
 | Scope | Gates |
 |-------|-------|
-| `facts:read` | Read facts, search, list projects and tags |
-| `facts:write` | Create, update, soft-delete facts |
+| `insights:read` | Read facts, search, list projects and tags |
+| `insights:write` | Create, update, soft-delete facts |
 | `org:admin` | Create projects, write org-level facts, manage members |
 
-All MCP tool calls require at minimum `facts:read`. The `/mcp` endpoint
+All MCP tool calls require at minimum `insights:read`. The `/mcp` endpoint
 enforces this at the transport layer before any tool handler runs.
 
 Scopes are stored in JWT as a space-delimited `scope` claim (RFC 9068).
@@ -163,7 +163,7 @@ discovery document MUST refuse to proceed.
      ?client_id=<id>
      &redirect_uri=<uri>
      &response_type=code
-     &scope=facts:read facts:write
+     &scope=insights:read insights:write
      &state=<random>
      &code_challenge=<challenge>
      &code_challenge_method=S256
@@ -202,7 +202,7 @@ Endpoint: `POST /oauth2/register` (RFC 7591)
   "grant_types": ["authorization_code"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
-  "scope": "facts:read facts:write"
+  "scope": "insights:read insights:write"
 }
 ```
 
@@ -301,7 +301,7 @@ Example payload:
   "sub": "12345678",
   "aud": ["https://starlogz.example.com/mcp"],
   "email": "user@example.com",
-  "scope": "facts:read facts:write",
+  "scope": "insights:read insights:write",
   "jti": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "exp": 1745604800,
   "iat": 1745000000
@@ -384,7 +384,7 @@ persistence is skipped and the token exchange still completes successfully.
   "registration_endpoint": "https://starlogz.example.com/oauth2/register",
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code"],
-  "scopes_supported": ["facts:read", "facts:write", "org:admin"],
+  "scopes_supported": ["insights:read", "insights:write", "org:admin"],
   "code_challenge_methods_supported": ["S256"],
   "token_endpoint_auth_methods_supported": ["none"]
 }
@@ -397,7 +397,7 @@ persistence is skipped and the token exchange still completes successfully.
   "resource": "https://starlogz.example.com/mcp",
   "resource_name": "Starlogz MCP Server",
   "authorization_servers": ["https://starlogz.example.com"],
-  "scopes_supported": ["facts:read", "facts:write", "org:admin"],
+  "scopes_supported": ["insights:read", "insights:write", "org:admin"],
   "bearer_methods_supported": ["header"]
 }
 ```

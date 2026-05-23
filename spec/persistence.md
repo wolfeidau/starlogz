@@ -239,7 +239,7 @@ invalidated.
 
 v0.2 introduces an org tenant boundary between users and projects. Every
 project belongs to exactly one org; every user belongs to one or more orgs;
-facts are scoped (transitively, via project) to an org. This is the
+insights are scoped (transitively, via project) to an org. This is the
 permanent model — there is no production data to migrate, so v0.1's
 `projects.owner_id` column is replaced in place rather than coexisting with
 the new `org_id`.
@@ -254,8 +254,8 @@ the new `org_id`.
   invitation. Roles are `owner`, `admin`, `member`.
 - **Project.** Belongs to one org. Slug is unique within the org. Created
   by any member; deletion is owner/admin only.
-- **Fact.** Scoped to a project (and therefore transitively to an org). No
-  separate `org_id` column on facts — joining through `projects` is
+- **Insight.** Scoped to a project (and therefore transitively to an org). No
+  separate `org_id` column on insights — joining through `projects` is
   cheap and avoids denormalisation drift.
 
 ### Tables
@@ -490,13 +490,16 @@ CREATE TABLE IF NOT EXISTS projects (
     CONSTRAINT projects_org_slug_unique UNIQUE (org_id, slug)
 );
 
-CREATE TABLE IF NOT EXISTS facts (
+CREATE TABLE IF NOT EXISTS insights (
     id            UUID        PRIMARY KEY DEFAULT uuidv7(),
     project_id    UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     key           TEXT,
     content       TEXT        NOT NULL,
     tags          TEXT[]      NOT NULL DEFAULT '{}',
-    source_type   TEXT        NOT NULL CHECK (source_type IN ('human', 'agent')),
+    category      TEXT        NOT NULL DEFAULT 'general'
+                              CHECK (category IN ('fact', 'decision', 'insight', 'preference', 'context', 'general')),
+    source        TEXT        NOT NULL DEFAULT 'user'
+                              CHECK (source IN ('user', 'repo', 'agent', 'command')),
     created_by    UUID        NOT NULL REFERENCES users(id),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -504,13 +507,13 @@ CREATE TABLE IF NOT EXISTS facts (
     search_vector TSVECTOR    GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS facts_project_key_live
-    ON facts (project_id, key)
+CREATE UNIQUE INDEX IF NOT EXISTS insights_project_key_live
+    ON insights (project_id, key)
     WHERE key IS NOT NULL AND deleted_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS facts_project_active ON facts (project_id) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS facts_search         ON facts USING GIN (search_vector);
-CREATE INDEX IF NOT EXISTS facts_tags           ON facts USING GIN (tags);
+CREATE INDEX IF NOT EXISTS insights_project_active ON insights (project_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS insights_search         ON insights USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS insights_tags           ON insights USING GIN (tags);
 
 INSERT INTO schema_migrations (version) VALUES (1) ON CONFLICT DO NOTHING;
 ```

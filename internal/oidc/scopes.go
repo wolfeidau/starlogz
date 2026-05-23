@@ -7,9 +7,9 @@ import (
 )
 
 var supportedScopes = map[string]bool{
-	"facts:read":  true,
-	"facts:write": true,
-	"org:admin":   true,
+	"insights:read":  true,
+	"insights:write": true,
+	"org:admin":      true,
 }
 
 func writeOAuthError(w http.ResponseWriter, errCode, description string, status int) {

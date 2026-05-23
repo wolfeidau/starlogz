@@ -214,7 +214,7 @@ func TestMCP_NoAuth_Returns401(t *testing.T) {
 func TestMCP_ValidJWT_PassesAuth(t *testing.T) {
 	ts, oidcSrv := testFixture(t)
 
-	tokenString, err := oidcSrv.IssueJWT("12345678", "user@example.com", "facts:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := oidcSrv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{}`))
