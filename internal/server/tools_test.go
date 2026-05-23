@@ -157,6 +157,22 @@ func resultText(t *testing.T, res *mcp.CallToolResult) string {
 	return tc.Text
 }
 
+// insightWriteArgs builds insight_write arguments; category and source are required by the tool schema.
+func insightWriteArgs(project, content string, extra map[string]any) map[string]any {
+	args := map[string]any{
+		"project":  project,
+		"content":  content,
+		"key":      "",
+		"tags":     []string{},
+		"category": "fact",
+		"source":   "agent",
+	}
+	for k, v := range extra {
+		args[k] = v
+	}
+	return args
+}
+
 // callTool invokes a tool with the given JSON-marshalable arguments and asserts
 // the RPC itself succeeded. The returned result may still carry IsError=true,
 // which the caller is expected to inspect.
@@ -187,12 +203,7 @@ func TestInsightDelete_CrossOrg_Forbidden(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read facts:write"))
 
-	writeRes := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
-		"project": "demo",
-		"content": "alice's secret",
-		"key":     "",
-		"tags":    []string{},
-	})
+	writeRes := callTool(t, ctx, aliceSess, "insight_write", insightWriteArgs("demo", "alice's secret", nil))
 	require.False(t, writeRes.IsError, "insight_write failed: %s", resultText(t, writeRes))
 
 	var written struct {
@@ -310,12 +321,7 @@ func TestInsightWrite_AutoCreatesProject(t *testing.T) {
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	res := callTool(t, ctx, sess, "insight_write", map[string]any{
-		"project": "auto-project",
-		"content": "hello",
-		"key":     "",
-		"tags":    []string{},
-	})
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("auto-project", "hello", nil))
 	require.False(t, res.IsError, "insight_write failed: %s", resultText(t, res))
 
 	listRes := callTool(t, ctx, sess, "project_list", map[string]any{})
@@ -330,12 +336,7 @@ func TestInsightWrite_RequiresWriteScope(t *testing.T) {
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read"))
 
-	res := callTool(t, ctx, sess, "insight_write", map[string]any{
-		"project": "demo",
-		"content": "should fail",
-		"key":     "",
-		"tags":    []string{},
-	})
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "should fail", nil))
 	require.True(t, res.IsError)
 	require.Contains(t, resultText(t, res), "missing required scope")
 }
@@ -352,22 +353,12 @@ func TestInsightWrite_UpsertsByKey(t *testing.T) {
 		Updated bool   `json:"updated"`
 	}
 
-	res1 := callTool(t, ctx, sess, "insight_write", map[string]any{
-		"project": "demo",
-		"content": "original",
-		"key":     "stable-key",
-		"tags":    []string{},
-	})
+	res1 := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "original", map[string]any{"key": "stable-key"}))
 	require.False(t, res1.IsError, "first write failed: %s", resultText(t, res1))
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, res1)), &result1))
 	require.False(t, result1.Updated, "first write should not be an update")
 
-	res2 := callTool(t, ctx, sess, "insight_write", map[string]any{
-		"project": "demo",
-		"content": "updated",
-		"key":     "stable-key",
-		"tags":    []string{},
-	})
+	res2 := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "updated", map[string]any{"key": "stable-key"}))
 	require.False(t, res2.IsError, "second write failed: %s", resultText(t, res2))
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, res2)), &result2))
 	require.Equal(t, result1.ID, result2.ID, "upsert must return the same ID")
@@ -386,12 +377,7 @@ func TestInsightList_ScopedToCallerOrg(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
 
-	wr := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
-		"project": "alice-proj",
-		"content": "alice data",
-		"key":     "",
-		"tags":    []string{},
-	})
+	wr := callTool(t, ctx, aliceSess, "insight_write", insightWriteArgs("alice-proj", "alice data", nil))
 	require.False(t, wr.IsError)
 
 	res := callTool(t, ctx, bobSess, "insight_list", map[string]any{
@@ -414,12 +400,7 @@ func TestInsightSearch_ScopedToCallerOrg(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
 
-	wr := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
-		"project": "alice-proj",
-		"content": "alice data",
-		"key":     "",
-		"tags":    []string{},
-	})
+	wr := callTool(t, ctx, aliceSess, "insight_write", insightWriteArgs("alice-proj", "alice data", nil))
 	require.False(t, wr.IsError)
 
 	res := callTool(t, ctx, bobSess, "insight_search", map[string]any{
@@ -441,12 +422,7 @@ func TestInsightSearch_ReturnsMatchingInsights(t *testing.T) {
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
 	for _, content := range []string{"golang concurrency patterns", "python asyncio basics"} {
-		wr := callTool(t, ctx, sess, "insight_write", map[string]any{
-			"project": "search-test",
-			"content": content,
-			"key":     "",
-			"tags":    []string{},
-		})
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("search-test", content, nil))
 		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	}
 
@@ -472,12 +448,7 @@ func TestInsightListTags_ScopedToCallerOrg(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read"))
 
-	wr := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
-		"project": "alice-proj",
-		"content": "alice data",
-		"key":     "",
-		"tags":    []string{"go"},
-	})
+	wr := callTool(t, ctx, aliceSess, "insight_write", insightWriteArgs("alice-proj", "alice data", map[string]any{"tags": []string{"go"}}))
 	require.False(t, wr.IsError)
 
 	res := callTool(t, ctx, bobSess, "insight_list_tags", map[string]any{
@@ -498,12 +469,7 @@ func TestInsightListTags_ReturnsByFrequency(t *testing.T) {
 
 	// "go" appears 3 times, "concurrency" once — go must sort first.
 	for _, tags := range [][]string{{"go", "concurrency"}, {"go"}, {"go"}} {
-		wr := callTool(t, ctx, sess, "insight_write", map[string]any{
-			"project": "tags-test",
-			"content": "content",
-			"key":     "",
-			"tags":    tags,
-		})
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("tags-test", "content", map[string]any{"tags": tags}))
 		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	}
 
@@ -540,12 +506,7 @@ func TestInsightList_RespectsTagFilter(t *testing.T) {
 		{"python fact", []string{"python"}},
 		{"both fact", []string{"go", "python"}},
 	} {
-		wr := callTool(t, ctx, sess, "insight_write", map[string]any{
-			"project": "tagged",
-			"content": w.content,
-			"key":     "",
-			"tags":    w.tags,
-		})
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("tagged", w.content, map[string]any{"tags": w.tags}))
 		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	}
 
@@ -638,12 +599,7 @@ func TestInsightDelete_RemovesInsight(t *testing.T) {
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	wr := callTool(t, ctx, sess, "insight_write", map[string]any{
-		"project": "delete-test",
-		"content": "to be deleted",
-		"key":     "",
-		"tags":    []string{},
-	})
+	wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("delete-test", "to be deleted", nil))
 	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	var written struct {
 		ID string `json:"id"`
@@ -730,12 +686,7 @@ func TestInsightUpdate_CrossOrg_Forbidden(t *testing.T) {
 	aliceSess := f.connect(t, ctx, f.tokenFor(t, alice.ID, "facts:read facts:write"))
 	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "facts:read facts:write"))
 
-	writeRes := callTool(t, ctx, aliceSess, "insight_write", map[string]any{
-		"project": "demo",
-		"content": "alice's original",
-		"key":     "",
-		"tags":    []string{},
-	})
+	writeRes := callTool(t, ctx, aliceSess, "insight_write", insightWriteArgs("demo", "alice's original", nil))
 	require.False(t, writeRes.IsError, "insight_write failed: %s", resultText(t, writeRes))
 
 	var written struct {
@@ -766,12 +717,7 @@ func TestInsightUpdate_ChangesContentAndTags(t *testing.T) {
 	user := f.makeUser(t, ctx, "alice")
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
 
-	wr := callTool(t, ctx, sess, "insight_write", map[string]any{
-		"project": "update-test",
-		"content": "original content",
-		"key":     "",
-		"tags":    []string{"old-tag"},
-	})
+	wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("update-test", "original content", map[string]any{"tags": []string{"old-tag"}}))
 	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
 	var written struct {
 		ID string `json:"id"`

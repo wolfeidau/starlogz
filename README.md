@@ -23,7 +23,7 @@ All tools require `facts:read`. Write tools require `facts:write`.
 |------|-------|-------------|
 | `whoami` | `facts:read` | Returns your user ID and token scopes. Useful for verifying authentication. |
 | `project_ensure` | `facts:read` | Creates a project if it does not exist; returns it either way. Use when you want a custom display name. |
-| `insight_write` | `facts:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Optionally supply `category` and `source`. |
+| `insight_write` | `facts:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Requires `category` and `source`. |
 | `insight_search` | `facts:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns results ordered by relevance. |
 | `insight_list` | `facts:read` | Lists all live insights in a project, newest first. Optional tag filter. |
 | `insight_update` | `facts:write` | Updates content and/or tags of an existing insight. |
@@ -147,8 +147,8 @@ PostgreSQL is the only backing store. The schema is applied automatically at sta
 |--------|------|-------|
 | `key` | `text \| NULL` | Optional stable identifier; unique per project among live insights |
 | `content` | `text` | The insight body |
-| `category` | `text` | `fact`, `decision`, `insight`, `preference`, `context`, or `general` (default) |
-| `source` | `text` | `user` (default), `repo`, `agent`, or `command` |
+| `category` | `text` | Required on write. One of: `fact`, `decision`, `insight`, `preference`, `context`, `general` |
+| `source` | `text` | Required on write. One of: `user`, `repo`, `agent`, `command` |
 | `tags` | `text[]` | GIN-indexed for tag filtering |
 | `search_vector` | `tsvector` | Generated column; GIN-indexed for full-text search |
 | `deleted_at` | `timestamptz \| NULL` | `NULL` = live; set on soft-delete |

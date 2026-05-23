@@ -35,7 +35,7 @@ func newMCPServer(st store.Store) *mcpServer {
 	}, ms.projectEnsure)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_write",
-		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier.",
+		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier. Requires category and source.",
 	}, ms.insightWrite)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
@@ -126,6 +126,21 @@ type insightUpdateInput struct {
 	Tags    []string `json:"tags"`
 }
 
+var (
+	insightCategories = []string{"fact", "decision", "insight", "preference", "context", "general"}
+	insightSources    = []string{"user", "repo", "agent", "command"}
+)
+
+func validateInsightCategorySource(category, source string) error {
+	if !slices.Contains(insightCategories, category) {
+		return fmt.Errorf("invalid category %q (must be one of: fact, decision, insight, preference, context, general)", category)
+	}
+	if !slices.Contains(insightSources, source) {
+		return fmt.Errorf("invalid source %q (must be one of: user, repo, agent, command)", source)
+	}
+	return nil
+}
+
 type tagCountResponse struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
@@ -180,6 +195,9 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	project, err := ms.store.EnsureProject(ctx, org.ID, user.ID, in.Project, in.Project)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ensure project: %w", err)
+	}
+	if err := validateInsightCategorySource(in.Category, in.Source); err != nil {
+		return nil, nil, err
 	}
 	tags := in.Tags
 	if tags == nil {

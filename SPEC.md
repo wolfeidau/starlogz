@@ -150,8 +150,8 @@ CREATE INDEX insights_tags           ON insights USING GIN (tags);
 | Field         | Type        | Notes                                                      |
 |---------------|-------------|------------------------------------------------------------|
 | `key`         | text        | Optional stable identifier; unique per project among live insights. Provide on `insight_write` to upsert in place. |
-| `category`    | enum        | `fact`, `decision`, `insight`, `preference`, `context`, or `general` (default). Caller-provided. |
-| `source`      | enum        | `user`, `repo`, `agent`, or `command`. Caller-provided; defaults to `user`. |
+| `category`    | enum        | Required on write. One of: `fact`, `decision`, `insight`, `preference`, `context`, `general`. |
+| `source`      | enum        | Required on write. One of: `user`, `repo`, `agent`, `command`. |
 | `tags`        | text[]      | Lowercase, hyphen-separated by convention. Server normalises on write. |
 | `deleted_at`  | timestamptz | Soft delete. NULL = active. Hard delete is not exposed via MCP. |
 | `search_vector` | tsvector  | Generated column, GIN-indexed. English-only in v0.2. |
@@ -257,7 +257,7 @@ All tools require at minimum `facts:read`. Write tools require
 | `whoami`           | (any)         | Returns user ID and token scopes. |
 | `project_ensure`   | `facts:read`  | Creates a project if missing; returns it either way. |
 | `project_list`     | `facts:read`  | Lists projects accessible to the caller. |
-| `insight_write`    | `facts:write` | Writes an insight. Auto-creates the project. With `key`, upserts in place. Accepts optional `category` and `source`. |
+| `insight_write`    | `facts:write` | Writes an insight. Auto-creates the project. With `key`, upserts in place. Requires `category` and `source`. |
 | `insight_search`   | `facts:read`  | Full-text search across live insights in a project. |
 | `insight_list`     | `facts:read`  | Lists live insights in a project, newest first. |
 | `insight_update`   | `facts:write` | Updates content and/or tags of an existing insight. |

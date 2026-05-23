@@ -32,8 +32,8 @@ The core entity is `Insight` (`internal/store/store.go`):
 | `key`      | text     | Optional stable identifier; unique per project among live rows  |
 | `content`  | text     | The insight body                                                |
 | `tags`     | text[]   | GIN-indexed for filtering                                       |
-| `category` | text     | `fact`, `decision`, `insight`, `preference`, `context`, `general` (default) |
-| `source`   | text     | `user` (default), `repo`, `agent`, `command`                    |
+| `category` | text     | Required on write: `fact`, `decision`, `insight`, `preference`, `context`, `general` |
+| `source`   | text     | Required on write: `user`, `repo`, `agent`, `command`                    |
 | `created_by` | UUID   | FK → users                                                      |
 | `created_at` | timestamptz | |
 | `updated_at` | timestamptz | |
@@ -50,7 +50,7 @@ All tools require `facts:read`. Write tools also require `facts:write`.
 | `whoami`           | any           | Returns user ID and token scopes |
 | `project_ensure`   | `facts:read`  | Creates a project if missing; returns it either way |
 | `project_list`     | `facts:read`  | Lists projects in the caller's personal org |
-| `insight_write`    | `facts:write` | Writes an insight; auto-creates project. With `key`, upserts. Accepts `category` and `source`. |
+| `insight_write`    | `facts:write` | Writes an insight; auto-creates project. With `key`, upserts. Requires `category` and `source`. |
 | `insight_search`   | `facts:read`  | Full-text search over live insights |
 | `insight_list`     | `facts:read`  | Lists live insights, newest first. Optional tag filter. |
 | `insight_update`   | `facts:write` | Updates content and/or tags of an existing insight |
