@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -131,7 +132,7 @@ var (
 	insightSources    = []string{"user", "repo", "agent", "command"}
 )
 
-func validateInsightCategorySource(category, source string) error {
+func validateCategorySource(category, source string) error {
 	if !slices.Contains(insightCategories, category) {
 		return fmt.Errorf("invalid category %q (must be one of: fact, decision, insight, preference, context, general)", category)
 	}
@@ -139,6 +140,14 @@ func validateInsightCategorySource(category, source string) error {
 		return fmt.Errorf("invalid source %q (must be one of: user, repo, agent, command)", source)
 	}
 	return nil
+}
+
+func normaliseTags(tags []string) []string {
+	out := make([]string, len(tags))
+	for i, t := range tags {
+		out[i] = strings.ToLower(t)
+	}
+	return out
 }
 
 type tagCountResponse struct {
@@ -188,6 +197,15 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
+	if in.Project == "" {
+		return nil, nil, fmt.Errorf("project is required")
+	}
+	if in.Content == "" {
+		return nil, nil, fmt.Errorf("content is required")
+	}
+	if err := validateCategorySource(in.Category, in.Source); err != nil {
+		return nil, nil, err
+	}
 	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
@@ -196,13 +214,7 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	if err != nil {
 		return nil, nil, fmt.Errorf("ensure project: %w", err)
 	}
-	if err := validateInsightCategorySource(in.Category, in.Source); err != nil {
-		return nil, nil, err
-	}
-	tags := in.Tags
-	if tags == nil {
-		tags = []string{}
-	}
+	tags := normaliseTags(in.Tags)
 	insight, err := ms.store.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: project.ID,
 		Key:       in.Key,
@@ -225,6 +237,12 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	ms.logger(ctx).InfoContext(ctx, "insight_search call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
+	}
+	if in.Project == "" {
+		return nil, nil, fmt.Errorf("project is required")
+	}
+	if in.Query == "" {
+		return nil, nil, fmt.Errorf("query is required")
 	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
@@ -251,6 +269,9 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, in insightListInput) (*mcp.CallToolResult, any, error) {
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
+	}
+	if in.Project == "" {
+		return nil, nil, fmt.Errorf("project is required")
 	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
@@ -336,6 +357,9 @@ func (ms *mcpServer) insightListTags(ctx context.Context, req *mcp.CallToolReque
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
+	if in.Project == "" {
+		return nil, nil, fmt.Errorf("project is required")
+	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
@@ -378,11 +402,15 @@ func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
 	}
+	var tags []string
+	if in.Tags != nil {
+		tags = normaliseTags(in.Tags)
+	}
 	insight, err := ms.store.UpdateInsight(ctx, store.UpdateInsightParams{
 		OrgID:     org.ID,
 		InsightID: insightID,
 		Content:   in.Content,
-		Tags:      in.Tags,
+		Tags:      tags,
 	})
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("insight %q not found or already deleted", in.ID)

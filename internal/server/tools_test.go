@@ -341,6 +341,100 @@ func TestInsightWrite_RequiresWriteScope(t *testing.T) {
 	require.Contains(t, resultText(t, res), "missing required scope")
 }
 
+func TestInsightWrite_RejectsInvalidCategory(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "content", map[string]any{"category": "bogus"}))
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "invalid category")
+
+	// Confirm no project was auto-created as a side effect.
+	listRes := callTool(t, ctx, sess, "project_list", map[string]any{})
+	require.False(t, listRes.IsError)
+	var listed struct {
+		Projects []any `json:"projects"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, listRes)), &listed))
+	require.Empty(t, listed.Projects, "invalid write must not create the project")
+}
+
+func TestInsightWrite_RejectsInvalidSource(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "content", map[string]any{"source": "keyboard"}))
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "invalid source")
+}
+
+func TestInsightWrite_RejectsEmptyContent(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "", nil))
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "content is required")
+}
+
+func TestInsightWrite_RejectsEmptyProject(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("", "content", nil))
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "project is required")
+}
+
+func TestInsightWrite_NormalisesTags(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "content", map[string]any{"tags": []string{"Go", "HTTP2"}}))
+	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+
+	var written struct{ ID string `json:"id"` }
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, wr)), &written))
+
+	listRes := callTool(t, ctx, sess, "insight_list", map[string]any{"project": "demo", "limit": 10})
+	require.False(t, listRes.IsError)
+	var listed struct {
+		Insights []struct {
+			Tags []string `json:"tags"`
+		} `json:"insights"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, listRes)), &listed))
+	require.Len(t, listed.Insights, 1)
+	require.Equal(t, []string{"go", "http2"}, listed.Insights[0].Tags)
+}
+
+func TestInsightSearch_RejectsEmptyQuery(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "facts:read facts:write"))
+
+	res := callTool(t, ctx, sess, "insight_search", map[string]any{"project": "demo", "query": "", "limit": 10})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "query is required")
+}
+
 func TestInsightWrite_UpsertsByKey(t *testing.T) {
 	ctx := context.Background()
 	f := newToolFixture(t)
