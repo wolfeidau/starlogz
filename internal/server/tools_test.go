@@ -188,6 +188,48 @@ func callTool(t *testing.T, ctx context.Context, sess *mcp.ClientSession, name s
 	return res
 }
 
+func inputSchemaMap(t *testing.T, tools []*mcp.Tool, name string) map[string]any {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name != name {
+			continue
+		}
+		raw, err := json.Marshal(tool.InputSchema)
+		require.NoError(t, err)
+		var schema map[string]any
+		require.NoError(t, json.Unmarshal(raw, &schema))
+		return schema
+	}
+	require.FailNowf(t, "tool not found", "tool %q not found", name)
+	return nil
+}
+
+func schemaProperty(t *testing.T, schema map[string]any, name string) map[string]any {
+	t.Helper()
+	properties, ok := schema["properties"].(map[string]any)
+	require.True(t, ok, "schema properties missing")
+	property, ok := properties[name].(map[string]any)
+	require.True(t, ok, "schema property %q missing", name)
+	return property
+}
+
+func schemaRequired(t *testing.T, schema map[string]any) []string {
+	t.Helper()
+	raw, ok := schema["required"].([]any)
+	require.True(t, ok, "schema required missing")
+	out := make([]string, len(raw))
+	for i, v := range raw {
+		out[i], ok = v.(string)
+		require.True(t, ok, "required entry must be a string")
+	}
+	return out
+}
+
+func requireSchemaNumber(t *testing.T, expected float64, actual any) {
+	t.Helper()
+	require.InDelta(t, expected, actual, 0)
+}
+
 // --- Cross-org isolation regression (review #1) ---
 
 // TestInsightDelete_CrossOrg_Forbidden proves that an insight written by user A's
@@ -241,6 +283,57 @@ func TestWhoami_ReturnsIdentityAndScopes(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
 	require.Equal(t, user.ID.String(), got.UserID)
 	require.ElementsMatch(t, []string{"insights:read", "insights:write"}, got.Scopes)
+}
+
+func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
+	ctx := context.Background()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	list, err := sess.ListTools(ctx, nil)
+	require.NoError(t, err)
+
+	projectEnsure := inputSchemaMap(t, list.Tools, "project_ensure")
+	require.ElementsMatch(t, []string{"slug"}, schemaRequired(t, projectEnsure))
+	requireSchemaNumber(t, 1, schemaProperty(t, projectEnsure, "slug")["minLength"])
+
+	insightWrite := inputSchemaMap(t, list.Tools, "insight_write")
+	require.ElementsMatch(t, []string{"project", "content", "category", "source"}, schemaRequired(t, insightWrite))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightWrite, "project")["minLength"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightWrite, "content")["minLength"])
+	require.ElementsMatch(t, []any{"fact", "decision", "insight", "preference", "context", "general"}, schemaProperty(t, insightWrite, "category")["enum"])
+	require.ElementsMatch(t, []any{"user", "repo", "agent", "command"}, schemaProperty(t, insightWrite, "source")["enum"])
+
+	insightSearch := inputSchemaMap(t, list.Tools, "insight_search")
+	require.ElementsMatch(t, []string{"project", "query"}, schemaRequired(t, insightSearch))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "project")["minLength"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "query")["minLength"])
+	requireSchemaNumber(t, 0, schemaProperty(t, insightSearch, "limit")["minimum"])
+	requireSchemaNumber(t, 100, schemaProperty(t, insightSearch, "limit")["maximum"])
+
+	insightList := inputSchemaMap(t, list.Tools, "insight_list")
+	require.ElementsMatch(t, []string{"project"}, schemaRequired(t, insightList))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightList, "project")["minLength"])
+	requireSchemaNumber(t, 0, schemaProperty(t, insightList, "limit")["minimum"])
+	requireSchemaNumber(t, 200, schemaProperty(t, insightList, "limit")["maximum"])
+
+	insightDelete := inputSchemaMap(t, list.Tools, "insight_delete")
+	require.ElementsMatch(t, []string{"id"}, schemaRequired(t, insightDelete))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightDelete, "id")["minLength"])
+	require.Equal(t, "uuid", schemaProperty(t, insightDelete, "id")["format"])
+
+	insightListTags := inputSchemaMap(t, list.Tools, "insight_list_tags")
+	require.ElementsMatch(t, []string{"project"}, schemaRequired(t, insightListTags))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightListTags, "project")["minLength"])
+	requireSchemaNumber(t, 0, schemaProperty(t, insightListTags, "limit")["minimum"])
+	requireSchemaNumber(t, 200, schemaProperty(t, insightListTags, "limit")["maximum"])
+
+	insightUpdate := inputSchemaMap(t, list.Tools, "insight_update")
+	require.ElementsMatch(t, []string{"id"}, schemaRequired(t, insightUpdate))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightUpdate, "id")["minLength"])
+	require.Equal(t, "uuid", schemaProperty(t, insightUpdate, "id")["format"])
 }
 
 // --- project_ensure ---
@@ -350,7 +443,6 @@ func TestInsightWrite_RejectsInvalidCategory(t *testing.T) {
 
 	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "content", map[string]any{"category": "bogus"}))
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "invalid category")
 
 	// Confirm no project was auto-created as a side effect.
 	listRes := callTool(t, ctx, sess, "project_list", map[string]any{})
@@ -371,7 +463,6 @@ func TestInsightWrite_RejectsInvalidSource(t *testing.T) {
 
 	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "content", map[string]any{"source": "keyboard"}))
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "invalid source")
 }
 
 func TestInsightWrite_RejectsEmptyContent(t *testing.T) {
@@ -383,7 +474,6 @@ func TestInsightWrite_RejectsEmptyContent(t *testing.T) {
 
 	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "", nil))
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "content is required")
 }
 
 func TestInsightWrite_RejectsEmptyProject(t *testing.T) {
@@ -395,7 +485,6 @@ func TestInsightWrite_RejectsEmptyProject(t *testing.T) {
 
 	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("", "content", nil))
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "project is required")
 }
 
 func TestInsightWrite_NormalisesTags(t *testing.T) {
@@ -434,7 +523,6 @@ func TestInsightSearch_RejectsEmptyQuery(t *testing.T) {
 
 	res := callTool(t, ctx, sess, "insight_search", map[string]any{"project": "demo", "query": "", "tags": []string{}, "limit": 10})
 	require.True(t, res.IsError)
-	require.Contains(t, resultText(t, res), "query is required")
 }
 
 func TestInsightWrite_UpsertsByKey(t *testing.T) {
