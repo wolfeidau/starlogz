@@ -341,7 +341,7 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	}
 
 	_, err = tx.Exec(ctx,
-		`DELETE FROM grants WHERE user_id = $1 AND client_id = $2 AND jwt_expiry < now() AND jti != $3`,
+		`DELETE FROM grants WHERE user_id = $1 AND client_id IS NOT DISTINCT FROM $2 AND jwt_expiry < now() AND jti != $3`,
 		g.UserID, clientID, g.JTI,
 	)
 	if err != nil {

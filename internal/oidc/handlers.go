@@ -237,8 +237,12 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 				return
 			}
 		}
-		grantUserID, _ := uuid.Parse(pc.Sub)
-		if err := s.grants.UpsertGrant(ctx, storepkg.Grant{
+		grantUserID, parseErr := uuid.Parse(pc.Sub)
+		if parseErr != nil {
+			// sub must be a valid UUID; if not, skip grant storage but still issue the JWT.
+			log.ErrorContext(ctx, "upsert grant skipped: sub is not a valid UUID", slog.Any("error", parseErr))
+			ourRefreshToken = ""
+		} else if err := s.grants.UpsertGrant(ctx, storepkg.Grant{
 			JTI:                jti,
 			UserID:             grantUserID,
 			OurRefreshToken:    ourRefreshToken,
