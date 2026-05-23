@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
@@ -33,22 +34,27 @@ func newMCPServer(st store.Store) *mcpServer {
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_ensure",
 		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; insight_write auto-creates projects.",
+		InputSchema: projectEnsureSchema,
 	}, ms.projectEnsure)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_write",
 		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier. Requires category and source.",
+		InputSchema: insightWriteSchema,
 	}, ms.insightWrite)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
 		Description: "Full-text search over live insights in a project. Returns results ordered by relevance.",
+		InputSchema: insightSearchSchema,
 	}, ms.insightSearch)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list",
 		Description: "Lists all live insights in a project, newest first. Optionally filter by a single tag.",
+		InputSchema: insightListSchema,
 	}, ms.insightList)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_delete",
 		Description: "Soft-deletes an insight by ID. The insight no longer appears in list or search results.",
+		InputSchema: insightDeleteSchema,
 	}, ms.insightDelete)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_list",
@@ -57,10 +63,12 @@ func newMCPServer(st store.Store) *mcpServer {
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list_tags",
 		Description: "Returns tags for a project ordered by usage frequency. Call before writing tags to avoid fragmentation.",
+		InputSchema: insightListTagsSchema,
 	}, ms.insightListTags)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_update",
 		Description: "Updates the content and/or tags of an existing insight. Supply only the fields you want to change.",
+		InputSchema: insightUpdateSchema,
 	}, ms.insightUpdate)
 	return ms
 }
@@ -127,20 +135,76 @@ type insightUpdateInput struct {
 	Tags    []string `json:"tags"`
 }
 
-var (
-	insightCategories = []string{"fact", "decision", "insight", "preference", "context", "general"}
-	insightSources    = []string{"user", "repo", "agent", "command"}
-)
-
-func validateCategorySource(category, source string) error {
-	if !slices.Contains(insightCategories, category) {
-		return fmt.Errorf("invalid category %q (must be one of: fact, decision, insight, preference, context, general)", category)
+func inputSchemaFor[T any]() *jsonschema.Schema {
+	s, err := jsonschema.For[T](nil)
+	if err != nil {
+		panic(fmt.Errorf("infer input schema: %w", err))
 	}
-	if !slices.Contains(insightSources, source) {
-		return fmt.Errorf("invalid source %q (must be one of: user, repo, agent, command)", source)
-	}
-	return nil
+	return s
 }
+
+var (
+	projectEnsureSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[projectEnsureInput]()
+		s.Properties["slug"].MinLength = jsonschema.Ptr(1)
+		s.Required = []string{"slug"}
+		return s
+	}()
+
+	insightWriteSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightWriteInput]()
+		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties["content"].MinLength = jsonschema.Ptr(1)
+		s.Properties["category"].Enum = []any{"fact", "decision", "insight", "preference", "context", "general"}
+		s.Properties["source"].Enum = []any{"user", "repo", "agent", "command"}
+		s.Required = []string{"project", "content", "category", "source"}
+		return s
+	}()
+
+	insightSearchSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightSearchInput]()
+		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties["query"].MinLength = jsonschema.Ptr(1)
+		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
+		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Required = []string{"project", "query"}
+		return s
+	}()
+
+	insightListSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightListInput]()
+		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
+		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
+		s.Required = []string{"project"}
+		return s
+	}()
+
+	insightDeleteSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightDeleteInput]()
+		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].Format = "uuid"
+		s.Required = []string{"id"}
+		return s
+	}()
+
+	insightListTagsSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightListTagsInput]()
+		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
+		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
+		s.Required = []string{"project"}
+		return s
+	}()
+
+	insightUpdateSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightUpdateInput]()
+		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].Format = "uuid"
+		s.Required = []string{"id"}
+		return s
+	}()
+)
 
 func normaliseTags(tags []string) []string {
 	out := make([]string, len(tags))
@@ -197,15 +261,6 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	if in.Project == "" {
-		return nil, nil, fmt.Errorf("project is required")
-	}
-	if in.Content == "" {
-		return nil, nil, fmt.Errorf("content is required")
-	}
-	if err := validateCategorySource(in.Category, in.Source); err != nil {
-		return nil, nil, err
-	}
 	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
@@ -238,12 +293,6 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	if in.Project == "" {
-		return nil, nil, fmt.Errorf("project is required")
-	}
-	if in.Query == "" {
-		return nil, nil, fmt.Errorf("query is required")
-	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
@@ -269,9 +318,6 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, in insightListInput) (*mcp.CallToolResult, any, error) {
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
-	}
-	if in.Project == "" {
-		return nil, nil, fmt.Errorf("project is required")
 	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
@@ -356,9 +402,6 @@ func (ms *mcpServer) insightListTags(ctx context.Context, req *mcp.CallToolReque
 	ms.logger(ctx).InfoContext(ctx, "insight_list_tags call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
-	}
-	if in.Project == "" {
-		return nil, nil, fmt.Errorf("project is required")
 	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
