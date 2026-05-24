@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -37,4 +38,12 @@ func TestInitSentry_InvalidDSN(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, enabled)
 	require.Nil(t, shutdown)
+}
+
+func TestNewSentrySlogHandler_CapturesErrorEventsOnly(t *testing.T) {
+	handler := NewSentrySlogHandler(context.Background())
+
+	require.False(t, handler.Enabled(context.Background(), slog.LevelInfo))
+	require.False(t, handler.Enabled(context.Background(), slog.LevelWarn))
+	require.True(t, handler.Enabled(context.Background(), slog.LevelError))
 }

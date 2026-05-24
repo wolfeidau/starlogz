@@ -45,6 +45,7 @@ func InitSentry(_ context.Context, serviceName, version string) (func(context.Co
 func NewSentrySlogHandler(ctx context.Context) slog.Handler {
 	return sentryslog.Option{
 		EventLevel: []slog.Level{slog.LevelError},
+		LogLevel:   []slog.Level{},
 		AddSource:  true,
 	}.NewSentryHandler(ctx)
 }

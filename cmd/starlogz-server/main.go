@@ -82,6 +82,9 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		),
 	)
 	child.Info("starlogz server started")
+	if sentryEnabled {
+		child.Info("sentry enabled")
+	}
 
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
