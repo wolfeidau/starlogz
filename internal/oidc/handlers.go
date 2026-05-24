@@ -734,7 +734,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		rawScope := q.Get("scope")
 		scope := normalizeScope(rawScope, defaultAuthorizeScope)
 		if client != nil {
-			registeredScope := normalizeScope(client.Scope, defaultAuthorizeScope)
+			registeredScope := normalizeScope(client.Scope, defaultRegisteredClientScope)
 			if err := validateSupportedScope(registeredScope); err != nil {
 				log.ErrorContext(ctx, "registered client has invalid scope", slog.Any("error", err))
 				writeOAuthError(w, "server_error", "registered client has invalid scope", http.StatusInternalServerError)
