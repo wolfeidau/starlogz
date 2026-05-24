@@ -435,6 +435,11 @@ func TestAuthorizeHandler_DefaultsScope(t *testing.T) {
 	srv.AuthorizeHandler().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusFound, w.Code)
+	location, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	pending, err := srv.authState.ConsumePendingAuth(context.Background(), location.Query().Get("state"))
+	require.NoError(t, err)
+	require.Equal(t, defaultAuthorizeScope, pending.Scope)
 }
 
 func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T) {
