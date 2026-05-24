@@ -100,6 +100,8 @@ All configuration is via environment variables.
 | `DATABASE_URL` | (none) | Yes | PostgreSQL connection string (pgx DSN) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | No | OTLP collector endpoint. Omit to disable telemetry entirely. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | (none) | No | e.g. `x-honeycomb-team=<key>` |
+| `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
+| `SENTRY_ENVIRONMENT` | (none) | No | Sentry environment tag, e.g. `production`, `staging`. |
 
 ## Commands
 
@@ -177,6 +179,8 @@ Store tests spin up a real PostgreSQL container via `testcontainers-go`. Docker 
 ## Observability
 
 Traces and metrics are exported via OTLP gRPC when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. All HTTP handlers are wrapped with `otelhttp`. Omitting the endpoint disables telemetry with no overhead.
+
+Error events are forwarded to Sentry when `SENTRY_DSN` is set. Only `Error`-level log records are captured; `Info` and `Warn` are not forwarded. The HTTP middleware also captures panics and associates them with the triggering request. Omitting `SENTRY_DSN` disables Sentry entirely with no overhead.
 
 ## Current limitations
 
