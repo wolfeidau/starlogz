@@ -718,7 +718,7 @@ func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 // WriteInsight creates or updates an insight. If Key is set and a live insight with that key exists in the
 // project it is updated in place; otherwise a new row is inserted.
 func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "writing insight", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("content", p.Content), slog.String("category", p.Category), slog.String("source", p.Source), slog.String("created_by", p.CreatedBy.String()))
+	s.logger(ctx).DebugContext(ctx, "writing insight", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("category", p.Category), slog.String("source", p.Source), slog.String("created_by", p.CreatedBy.String()))
 
 	if p.Key != "" {
 		f, err := s.updateInsightByKey(ctx, p)
@@ -865,7 +865,7 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 
 // UpdateInsight patches content and/or tags on an existing live insight, scoped to orgID.
 func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) (*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.String("content", p.Content), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
+	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
 
 	tags := p.Tags
 	if tags == nil {

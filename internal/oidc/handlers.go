@@ -78,9 +78,12 @@ func (s *Server) LogoutHandler() http.Handler {
 			return
 		}
 
+		log := ctxlog.LoggerFrom(r.Context())
+
 		const prefix = "Bearer "
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, prefix) {
+			log.WarnContext(r.Context(), "logout: missing bearer token")
 			writeOAuthError(w, "invalid_request", "missing bearer token", http.StatusUnauthorized)
 			return
 		}
@@ -88,24 +91,27 @@ func (s *Server) LogoutHandler() http.Handler {
 
 		tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), s.pubkey))
 		if err != nil {
+			log.WarnContext(r.Context(), "logout: token verification failed", slog.Any("error", err))
 			writeOAuthError(w, "invalid_token", "token verification failed", http.StatusUnauthorized)
 			return
 		}
 
 		var jti string
 		if err := tok.Get("jti", &jti); err != nil || jti == "" {
+			log.WarnContext(r.Context(), "logout: missing jti claim")
 			writeOAuthError(w, "invalid_token", "missing jti claim", http.StatusUnauthorized)
 			return
 		}
 
 		exp, ok := tok.Expiration()
 		if !ok {
+			log.WarnContext(r.Context(), "logout: missing expiration claim")
 			writeOAuthError(w, "invalid_token", "missing expiration claim", http.StatusUnauthorized)
 			return
 		}
 
 		ctx := r.Context()
-		log := ctxlog.LoggerFrom(ctx).With(slog.String("jti", jti))
+		log = ctxlog.LoggerFrom(ctx).With(slog.String("jti", jti))
 		ctx = ctxlog.WithLogger(ctx, log)
 
 		if err := s.revocation.RevokeToken(ctx, jti, exp); err != nil {
@@ -162,6 +168,7 @@ func (s *Server) TokenHandler() http.Handler {
 
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		if err := r.ParseForm(); err != nil {
+			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: failed to parse form", slog.Any("error", err))
 			writeOAuthError(w, "invalid_request", "failed to parse request body", http.StatusBadRequest)
 			return
 		}
@@ -172,23 +179,28 @@ func (s *Server) TokenHandler() http.Handler {
 		case "refresh_token":
 			s.handleRefreshGrant(w, r, r.PostForm)
 		default:
+			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: unsupported grant_type",
+				slog.String("grant_type", r.PostForm.Get("grant_type")),
+			)
 			writeOAuthError(w, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token", http.StatusBadRequest)
 		}
 	})
 }
 
 func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, form url.Values) {
+	log := ctxlog.LoggerFrom(r.Context())
+
 	code := form.Get("code")
 	codeVerifier := form.Get("code_verifier")
 	if code == "" || codeVerifier == "" {
+		log.WarnContext(r.Context(), "auth code grant: missing code or code_verifier")
 		writeOAuthError(w, "invalid_request", "code and code_verifier are required", http.StatusBadRequest)
 		return
 	}
 
-	log := ctxlog.LoggerFrom(r.Context())
-
 	pc, err := s.authState.ConsumeAuthCode(r.Context(), code)
 	if errors.Is(err, storepkg.ErrNotFound) {
+		log.WarnContext(r.Context(), "auth code invalid or expired")
 		writeOAuthError(w, "invalid_grant", "invalid or expired authorization code", http.StatusBadRequest)
 		return
 	}
@@ -200,6 +212,10 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 
 	// RFC 6749 §4.1.3: redirect_uri must be present and identical.
 	if form.Get("redirect_uri") != pc.RedirectURI {
+		log.WarnContext(r.Context(), "redirect_uri mismatch",
+			slog.String("request_uri", form.Get("redirect_uri")),
+			slog.String("stored_uri", pc.RedirectURI),
+		)
 		writeOAuthError(w, "invalid_grant", "redirect_uri does not match authorization request", http.StatusBadRequest)
 		return
 	}
@@ -207,6 +223,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	// Verify PKCE: BASE64URL(SHA256(code_verifier)) must equal stored code_challenge.
 	h := sha256.Sum256([]byte(codeVerifier))
 	if base64.RawURLEncoding.EncodeToString(h[:]) != pc.CodeChallenge {
+		log.WarnContext(r.Context(), "PKCE verification failed")
 		writeOAuthError(w, "invalid_grant", "code_verifier does not match code_challenge", http.StatusBadRequest)
 		return
 	}
@@ -276,23 +293,27 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form url.Values) {
 	refreshToken := form.Get("refresh_token")
 	clientID := form.Get("client_id")
-	if refreshToken == "" || clientID == "" {
-		writeOAuthError(w, "invalid_request", "refresh_token and client_id are required", http.StatusBadRequest)
-		return
-	}
-
-	if s.grants == nil {
-		writeOAuthError(w, "invalid_grant", "refresh token grant not supported", http.StatusBadRequest)
-		return
-	}
 
 	// Enrich the logger with client_id as soon as it's known.
 	ctx := r.Context()
 	log := ctxlog.LoggerFrom(ctx).With(slog.String("client_id", clientID), logattr.ObscureString("refresh_token", refreshToken))
 	ctx = ctxlog.WithLogger(ctx, log)
 
+	if refreshToken == "" || clientID == "" {
+		log.WarnContext(ctx, "refresh grant: missing refresh_token or client_id")
+		writeOAuthError(w, "invalid_request", "refresh_token and client_id are required", http.StatusBadRequest)
+		return
+	}
+
+	if s.grants == nil {
+		log.WarnContext(ctx, "refresh grant: grant store not configured")
+		writeOAuthError(w, "invalid_grant", "refresh token grant not supported", http.StatusBadRequest)
+		return
+	}
+
 	grant, err := s.grants.GetGrantByRefreshToken(ctx, refreshToken)
 	if errors.Is(err, storepkg.ErrNotFound) {
+		log.WarnContext(ctx, "refresh token not found or already used")
 		writeOAuthError(w, "invalid_grant", "refresh token not found or already used", http.StatusBadRequest)
 		return
 	}
@@ -329,12 +350,16 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	}
 
 	if grant.RefreshToken == "" {
+		log.WarnContext(ctx, "grant has no GitHub refresh token")
 		writeOAuthError(w, "invalid_grant", "grant has no GitHub refresh token", http.StatusBadRequest)
 		return
 	}
 
 	// If GitHub refresh token has already expired, drop the grant and force re-auth.
 	if !grant.RefreshTokenExpiry.IsZero() && time.Now().After(grant.RefreshTokenExpiry) {
+		log.WarnContext(ctx, "GitHub refresh token expired; tearing down grant",
+			slog.Time("refresh_token_expiry", grant.RefreshTokenExpiry),
+		)
 		s.tearDownGrant(ctx, grant.JTI, grant.JWTExpiry)
 		writeOAuthError(w, "invalid_grant", "GitHub refresh token has expired", http.StatusBadRequest)
 		return
@@ -413,6 +438,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	if _, err := s.grants.RotateGrant(storeCtx, refreshToken, grant.JTI, grant.JWTExpiry, newGrant); err != nil {
 		if errors.Is(err, storepkg.ErrNotFound) {
 			// Concurrent refresh: another request already consumed this token.
+			log.WarnContext(ctx, "concurrent token refresh: grant already rotated")
 			writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
 			return
 		}
@@ -453,6 +479,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 
 		var req oauthex.ClientRegistrationMetadata
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.WarnContext(r.Context(), "DCR: failed to parse request body", slog.Any("error", err))
 			writeOAuthError(w, "invalid_client_metadata", "failed to parse request body", http.StatusBadRequest)
 			return
 		}
@@ -466,16 +493,21 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 		)
 
 		if len(req.RedirectURIs) == 0 {
+			log.WarnContext(r.Context(), "DCR: redirect_uris is required")
 			writeOAuthError(w, "invalid_client_metadata", "redirect_uris is required", http.StatusBadRequest)
 			return
 		}
 
 		if err := validateRedirectURIs(req.RedirectURIs); err != nil {
+			log.WarnContext(r.Context(), "DCR: invalid redirect_uris", slog.Any("error", err))
 			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		if req.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != "none" {
+			log.WarnContext(r.Context(), "DCR: unsupported token_endpoint_auth_method",
+				slog.String("method", req.TokenEndpointAuthMethod),
+			)
 			writeOAuthError(w, "invalid_client_metadata", "only token_endpoint_auth_method=none is supported", http.StatusBadRequest)
 			return
 		}
@@ -630,6 +662,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		q := r.URL.Query()
 
 		if q.Get("response_type") != "code" {
+			log.WarnContext(ctx, "authorize: unsupported response_type", slog.String("response_type", q.Get("response_type")))
 			writeOAuthError(w, "unsupported_response_type", "only response_type=code is supported", http.StatusBadRequest)
 			return
 		}
@@ -641,17 +674,20 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			ctx = ctxlog.WithLogger(ctx, log)
 		}
 		if redirectURI == "" {
+			log.WarnContext(ctx, "authorize: missing redirect_uri")
 			writeOAuthError(w, "invalid_request", "redirect_uri is required", http.StatusBadRequest)
 			return
 		}
 
 		if s.clients != nil {
 			if clientID == "" {
+				log.WarnContext(ctx, "authorize: missing client_id")
 				writeOAuthError(w, "invalid_request", "client_id is required", http.StatusBadRequest)
 				return
 			}
 			client, err := s.clients.GetClient(ctx, clientID)
 			if errors.Is(err, storepkg.ErrNotFound) {
+				log.WarnContext(ctx, "authorize: unknown client_id")
 				writeOAuthError(w, "invalid_client", "unknown client_id", http.StatusBadRequest)
 				return
 			}
@@ -661,6 +697,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 				return
 			}
 			if !slices.Contains(client.RedirectURIs, redirectURI) {
+				log.WarnContext(ctx, "authorize: redirect_uri not registered", slog.String("redirect_uri", redirectURI))
 				writeOAuthError(w, "invalid_request", "redirect_uri not registered for this client", http.StatusBadRequest)
 				return
 			}
@@ -668,11 +705,15 @@ func (s *Server) AuthorizeHandler() http.Handler {
 
 		codeChallenge := q.Get("code_challenge")
 		if codeChallenge == "" {
+			log.WarnContext(ctx, "authorize: missing code_challenge")
 			writeOAuthError(w, "invalid_request", "code_challenge is required (PKCE mandatory)", http.StatusBadRequest)
 			return
 		}
 
 		if q.Get("code_challenge_method") != "S256" {
+			log.WarnContext(ctx, "authorize: unsupported code_challenge_method",
+				slog.String("method", q.Get("code_challenge_method")),
+			)
 			writeOAuthError(w, "invalid_request", "only code_challenge_method=S256 is supported", http.StatusBadRequest)
 			return
 		}
@@ -683,6 +724,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		}
 		for _, sc := range strings.Fields(scope) {
 			if !supportedScopes[sc] {
+				log.WarnContext(ctx, "authorize: unknown scope", slog.String("scope", sc))
 				writeOAuthError(w, "invalid_scope", "unknown scope: "+sc, http.StatusBadRequest)
 				return
 			}
