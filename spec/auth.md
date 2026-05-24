@@ -168,6 +168,8 @@ discovery document MUST refuse to proceed.
      &code_challenge=<challenge>
      &code_challenge_method=S256
    ```
+   If `scope` is omitted, the server uses the registered client scope from DCR
+   when available, otherwise `insights:read`.
 5. **GitHub redirect** — server stores PKCE state in short-lived session,
    redirects to GitHub OAuth2
 6. **Callback** — GitHub redirects to `GET /auth/github/callback?code=...&state=...`
@@ -217,6 +219,10 @@ Required: `redirect_uris` (non-empty array). Each URI is validated:
 Only `token_endpoint_auth_method=none` is accepted (public clients only).
 `grant_types` is normalised to `["authorization_code"]` — unsupported types
 are silently dropped per RFC 7591 §3.2.1 rather than rejected.
+
+If `scope` is omitted, it defaults to `insights:read insights:write`. Supplied
+scopes are validated against the server's supported scope set and stored as the
+client's registered default and maximum allowed scope set.
 
 Client registrations are persisted to the `oauth_clients` table with a 90-day TTL
 (`expires_at = issued_at + 90 days`). A future cleanup job can prune expired rows.

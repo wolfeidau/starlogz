@@ -490,6 +490,7 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 			slog.Any("redirect_uris", req.RedirectURIs),
 			slog.String("token_endpoint_auth_method", req.TokenEndpointAuthMethod),
 			slog.String("client_name", req.ClientName),
+			slog.String("requested_scope", req.Scope),
 		)
 
 		if len(req.RedirectURIs) == 0 {
@@ -519,6 +520,12 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 		if req.TokenEndpointAuthMethod == "" {
 			req.TokenEndpointAuthMethod = "none"
 		}
+		req.Scope = normalizeScope(req.Scope, defaultRegisteredClientScope)
+		if err := validateSupportedScope(req.Scope); err != nil {
+			log.WarnContext(r.Context(), "DCR: invalid scope", slog.Any("error", err), slog.String("scope", req.Scope))
+			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		now := time.Now()
 		clientID := uuid.New().String()
@@ -542,6 +549,10 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 				return
 			}
 		}
+		log.InfoContext(ctx, "DCR client registered",
+			slog.String("client_id", clientID),
+			slog.String("registered_scope", req.Scope),
+		)
 
 		resp := &oauthex.ClientRegistrationResponse{
 			ClientRegistrationMetadata: req,
@@ -679,13 +690,15 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
+		var client *storepkg.OAuthClient
 		if s.clients != nil {
 			if clientID == "" {
 				log.WarnContext(ctx, "authorize: missing client_id")
 				writeOAuthError(w, "invalid_request", "client_id is required", http.StatusBadRequest)
 				return
 			}
-			client, err := s.clients.GetClient(ctx, clientID)
+			var err error
+			client, err = s.clients.GetClient(ctx, clientID)
 			if errors.Is(err, storepkg.ErrNotFound) {
 				log.WarnContext(ctx, "authorize: unknown client_id")
 				writeOAuthError(w, "invalid_client", "unknown client_id", http.StatusBadRequest)
@@ -718,16 +731,30 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
-		scope := q.Get("scope")
-		if scope == "" {
-			scope = "insights:read"
-		}
-		for _, sc := range strings.Fields(scope) {
-			if !supportedScopes[sc] {
-				log.WarnContext(ctx, "authorize: unknown scope", slog.String("scope", sc))
-				writeOAuthError(w, "invalid_scope", "unknown scope: "+sc, http.StatusBadRequest)
+		rawScope := q.Get("scope")
+		scope := normalizeScope(rawScope, defaultAuthorizeScope)
+		if client != nil {
+			registeredScope := normalizeScope(client.Scope, defaultAuthorizeScope)
+			if err := validateSupportedScope(registeredScope); err != nil {
+				log.ErrorContext(ctx, "registered client has invalid scope", slog.Any("error", err))
+				writeOAuthError(w, "server_error", "registered client has invalid scope", http.StatusInternalServerError)
 				return
 			}
+			if len(strings.Fields(rawScope)) == 0 {
+				scope = registeredScope
+			} else if sc, ok := firstScopeOutsideAllowed(scope, registeredScope); ok {
+				log.WarnContext(ctx, "authorize: scope not registered for client",
+					slog.String("scope", sc),
+					slog.String("registered_scope", registeredScope),
+				)
+				writeOAuthError(w, "invalid_scope", "scope not registered for this client: "+sc, http.StatusBadRequest)
+				return
+			}
+		}
+		if err := validateSupportedScope(scope); err != nil {
+			log.WarnContext(ctx, "authorize: invalid scope", slog.Any("error", err), slog.String("scope", scope))
+			writeOAuthError(w, "invalid_scope", err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		githubState := uuid.New().String()
