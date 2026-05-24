@@ -4,6 +4,8 @@ go 1.26.1
 
 require (
 	github.com/alecthomas/kong v1.15.0
+	github.com/getsentry/sentry-go v0.46.2
+	github.com/getsentry/sentry-go/slog v0.46.2
 	github.com/google/jsonschema-go v0.4.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
