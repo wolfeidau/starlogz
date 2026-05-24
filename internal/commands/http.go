@@ -61,6 +61,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		Logger:             globals.Logger,
 		Store:              st,
 		ShutdownTimeout:    c.ShutdownTimeout,
+		SentryHandler:      globals.SentryHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)

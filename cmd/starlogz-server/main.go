@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -42,22 +43,35 @@ func main() {
 	cmd.FatalIfErrorf(run(ctx, cmd, cli.Development))
 }
 
-func newLogger(development bool) *slog.Logger {
+func newLogger(ctx context.Context, development, sentryEnabled bool) *slog.Logger {
+	var handler slog.Handler
 	if development {
-		return slog.New(telemetry.NewOTelHandler(tint.NewHandler(os.Stderr, &tint.Options{
+		handler = tint.NewHandler(os.Stderr, &tint.Options{
 			Level:      slog.LevelDebug,
 			TimeFormat: time.Kitchen,
-		})))
+		})
+	} else {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		})
 	}
-	return slog.New(telemetry.NewOTelHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})))
+
+	handler = telemetry.NewOTelHandler(handler)
+	if sentryEnabled {
+		handler = slog.NewMultiHandler(handler, telemetry.NewSentrySlogHandler(ctx))
+	}
+	return slog.New(handler)
 }
 
 func run(ctx context.Context, cmd *kong.Context, development bool) error {
 	buildInfo, _ := debug.ReadBuildInfo()
 
-	logger := newLogger(development)
+	sentryShutdown, sentryEnabled, err := telemetry.InitSentry(ctx, "starlogz-server", version)
+	if err != nil {
+		return err
+	}
+
+	logger := newLogger(ctx, development, sentryEnabled)
 	slog.SetDefault(logger)
 
 	child := logger.With(
@@ -68,6 +82,17 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		),
 	)
 	child.Info("starlogz server started")
+	if sentryEnabled {
+		child.Info("sentry enabled")
+	}
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := sentryShutdown(shutdownCtx); err != nil {
+			child.Error("sentry shutdown error", slog.Any("error", err))
+		}
+	}()
 
 	telShutdown, err := telemetry.InitTelemetry(ctx, "starlogz-server", version)
 	if err != nil {
@@ -81,5 +106,10 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		}
 	}()
 
-	return cmd.Run(&commands.Globals{Logger: child})
+	var sentryHandler func(http.Handler) http.Handler
+	if sentryEnabled {
+		sentryHandler = telemetry.NewSentryHTTPHandler()
+	}
+
+	return cmd.Run(&commands.Globals{Logger: child, SentryHandler: sentryHandler})
 }

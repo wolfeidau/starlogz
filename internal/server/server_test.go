@@ -73,6 +73,10 @@ func (m *memRevocation) IsTokenRevoked(_ context.Context, jti string) (bool, err
 // testFixture returns a running httptest.Server and an oidc.Server that shares the same
 // signing key, so tests can issue valid JWTs for authenticated requests.
 func testFixture(t *testing.T) (*httptest.Server, *oidc.Server) {
+	return testFixtureWithConfig(t, nil)
+}
+
+func testFixtureWithConfig(t *testing.T, configure func(*server.Config)) (*httptest.Server, *oidc.Server) {
 	t.Helper()
 
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
@@ -89,13 +93,17 @@ func testFixture(t *testing.T) (*httptest.Server, *oidc.Server) {
 	}, raw)
 	require.NoError(t, err)
 
-	srv, err := server.New(server.Config{
+	cfg := server.Config{
 		BaseURL:    "http://localhost",
 		PrivKey:    raw,
 		Logger:     slog.Default(),
 		AuthState:  newMemAuthState(),
 		Revocation: revocation,
-	})
+	}
+	if configure != nil {
+		configure(&cfg)
+	}
+	srv, err := server.New(cfg)
 	require.NoError(t, err)
 
 	ts := httptest.NewServer(srv.Handler())
@@ -120,6 +128,26 @@ func TestHealth_OK(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.Equal(t, "healthy", body["status"])
 	require.NotEmpty(t, body["time"])
+}
+
+func TestSentryHandler_ConfiguredWrapsRequests(t *testing.T) {
+	var wrapped bool
+	ts, _ := testFixtureWithConfig(t, func(cfg *server.Config) {
+		cfg.SentryHandler = func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wrapped = true
+				w.Header().Set("X-Sentry-Wrapped", "true")
+				next.ServeHTTP(w, r)
+			})
+		}
+	})
+
+	resp, err := http.Get(ts.URL + "/health")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.True(t, wrapped)
+	require.Equal(t, "true", resp.Header.Get("X-Sentry-Wrapped"))
 }
 
 func TestHealth_WrongMethod(t *testing.T) {

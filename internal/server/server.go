@@ -32,6 +32,7 @@ type Config struct {
 	AuthState          oidc.AuthStateStore  // if nil, Store is used
 	Revocation         oidc.RevocationStore // if nil, Store is used
 	ShutdownTimeout    time.Duration
+	SentryHandler      func(http.Handler) http.Handler
 }
 
 // Server is the configured HTTP server ready to serve requests.
@@ -107,10 +108,11 @@ func New(cfg Config) (*Server, error) {
 		authenticatedHandler.ServeHTTP(w, r)
 	})
 
-	srv.handler = otelhttp.NewHandler(
-		middleware.CORS(middleware.AccessLog(cfg.Logger)(mux)),
-		name,
-	)
+	handler := middleware.CORS(middleware.AccessLog(cfg.Logger)(mux))
+	if cfg.SentryHandler != nil {
+		handler = cfg.SentryHandler(handler)
+	}
+	srv.handler = otelhttp.NewHandler(handler, name)
 
 	return srv, nil
 }

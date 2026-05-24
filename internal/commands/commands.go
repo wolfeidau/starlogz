@@ -1,7 +1,11 @@
 package commands
 
-import "log/slog"
+import (
+	"log/slog"
+	"net/http"
+)
 
 type Globals struct {
-	Logger *slog.Logger
+	Logger        *slog.Logger
+	SentryHandler func(http.Handler) http.Handler
 }
