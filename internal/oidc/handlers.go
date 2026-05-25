@@ -742,7 +742,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			}
 			if len(strings.Fields(rawScope)) == 0 {
 				scope = registeredScope
-			} else if sc, ok := firstScopeOutsideAllowed(scope, registeredScope); ok {
+			} else if sc, ok := firstDisallowedScope(scope, registeredScope); ok {
 				log.WarnContext(ctx, "authorize: scope not registered for client",
 					slog.String("scope", sc),
 					slog.String("registered_scope", registeredScope),

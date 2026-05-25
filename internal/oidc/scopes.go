@@ -46,7 +46,7 @@ func validateSupportedScope(scope string) error {
 	return nil
 }
 
-func firstScopeOutsideAllowed(scope, allowedScope string) (string, bool) {
+func firstDisallowedScope(scope, allowedScope string) (string, bool) {
 	allowed := make(map[string]bool)
 	for _, sc := range strings.Fields(allowedScope) {
 		allowed[sc] = true
