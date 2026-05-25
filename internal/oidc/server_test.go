@@ -1859,12 +1859,13 @@ func (s *testClientStore) GetClient(_ context.Context, clientID string) (*store.
 func TestDCRHandler_PersistsToClientStore(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	cs := &testClientStore{}
+	srv.clients = cs
 
 	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"My Client","scope":"insights:read"}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	srv.dcrHandler(cs).ServeHTTP(w, req)
+	srv.DCRHandler().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusCreated, w.Code)
 	require.Len(t, cs.records, 1)
