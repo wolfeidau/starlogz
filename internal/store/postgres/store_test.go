@@ -579,6 +579,18 @@ func TestSaveClient(t *testing.T) {
 	}
 
 	require.NoError(t, st.SaveClient(ctx, c))
+
+	got, err := st.GetClient(ctx, c.ClientID)
+	require.NoError(t, err)
+	require.Equal(t, c.ClientID, got.ClientID)
+	require.Equal(t, c.ClientName, got.ClientName)
+	require.Equal(t, c.RedirectURIs, got.RedirectURIs)
+	require.Equal(t, c.GrantTypes, got.GrantTypes)
+	require.Equal(t, c.ResponseTypes, got.ResponseTypes)
+	require.Equal(t, c.TokenEndpointAuthMethod, got.TokenEndpointAuthMethod)
+	require.Equal(t, c.Scope, got.Scope)
+	require.WithinDuration(t, c.IssuedAt, got.IssuedAt, time.Second)
+	require.WithinDuration(t, c.ExpiresAt, got.ExpiresAt, time.Second)
 }
 
 func TestSaveClient_DuplicateClientID(t *testing.T) {

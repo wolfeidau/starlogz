@@ -368,6 +368,7 @@ func TestDCRHandler_DefaultsApplied(t *testing.T) {
 	require.Equal(t, []any{"authorization_code"}, resp["grant_types"])
 	require.Equal(t, []any{"code"}, resp["response_types"])
 	require.Equal(t, "none", resp["token_endpoint_auth_method"])
+	require.Equal(t, defaultRegisteredClientScope, resp["scope"])
 }
 
 func TestDCRHandler_WrongMethod(t *testing.T) {
@@ -376,6 +377,22 @@ func TestDCRHandler_WrongMethod(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.DCRHandler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestDCRHandler_UnknownScope(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	body := `{"redirect_uris":["https://client.example.com/callback"],"scope":"insights:read unknown:scope"}`
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_client_metadata", errResp["error"])
+	require.Contains(t, errResp["error_description"], "unknown:scope")
 }
 
 // --- Authorize ---
@@ -418,6 +435,69 @@ func TestAuthorizeHandler_DefaultsScope(t *testing.T) {
 	srv.AuthorizeHandler().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusFound, w.Code)
+	location, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	pending, err := srv.authState.ConsumePendingAuth(context.Background(), location.Query().Get("state"))
+	require.NoError(t, err)
+	require.Equal(t, defaultAuthorizeScope, pending.Scope)
+}
+
+func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.clients = &testClientStore{records: []store.OAuthClient{{
+		ClientID:     "registered-client",
+		RedirectURIs: []string{"https://client.example.com/callback"},
+		Scope:        "insights:read insights:write",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}}}
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"registered-client"},
+		"redirect_uri":          {"https://client.example.com/callback"},
+		"code_challenge":        {pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+	location, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	pending, err := srv.authState.ConsumePendingAuth(context.Background(), location.Query().Get("state"))
+	require.NoError(t, err)
+	require.Equal(t, "insights:read insights:write", pending.Scope)
+}
+
+func TestAuthorizeHandler_RejectsScopeOutsideRegisteredClient(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.clients = &testClientStore{records: []store.OAuthClient{{
+		ClientID:     "read-only-client",
+		RedirectURIs: []string{"https://client.example.com/callback"},
+		Scope:        "insights:read",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}}}
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"read-only-client"},
+		"redirect_uri":          {"https://client.example.com/callback"},
+		"scope":                 {"insights:read insights:write"},
+		"code_challenge":        {pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_scope", errResp["error"])
+	require.Contains(t, errResp["error_description"], "insights:write")
 }
 
 func TestAuthorizeHandler_MissingCodeChallenge(t *testing.T) {
