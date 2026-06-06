@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -336,14 +335,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			slog.String("request_client_id", clientID),
 			slog.String("grant_client_id", grant.ClientID),
 		}
-		if s.clients != nil {
-			if rc, err := s.clients.GetClient(ctx, clientID); err == nil {
-				warnFields = append(warnFields, slog.String("request_client_name", rc.ClientName))
-			}
-			if gc, err := s.clients.GetClient(ctx, grant.ClientID); err == nil {
-				warnFields = append(warnFields, slog.String("grant_client_name", gc.ClientName))
-			}
-		}
+		warnFields = s.appendClientNames(ctx, warnFields, clientID, grant.ClientID)
 		log.WarnContext(ctx, "client_id mismatch on token refresh", warnFields...)
 		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
 		return
@@ -465,10 +457,6 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 
 // DCRHandler returns an HTTP handler for Dynamic Client Registration (RFC 7591).
 func (s *Server) DCRHandler() http.Handler {
-	return s.dcrHandler(s.clients)
-}
-
-func (s *Server) dcrHandler(store ClientStore) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -531,23 +519,21 @@ func (s *Server) dcrHandler(store ClientStore) http.Handler {
 		clientID := uuid.New().String()
 		ctx := r.Context()
 
-		if store != nil {
-			rec := storepkg.OAuthClient{
-				ClientID:                clientID,
-				ClientName:              req.ClientName,
-				TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
-				Scope:                   req.Scope,
-				RedirectURIs:            req.RedirectURIs,
-				GrantTypes:              req.GrantTypes,
-				ResponseTypes:           req.ResponseTypes,
-				IssuedAt:                now,
-				ExpiresAt:               now.Add(clientRegistrationTTL),
-			}
-			if err := store.SaveClient(ctx, rec); err != nil {
-				log.ErrorContext(ctx, "failed to persist DCR client", slog.String("client_id", clientID), slog.Any("error", err))
-				writeOAuthError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
-				return
-			}
+		rec := storepkg.OAuthClient{
+			ClientID:                clientID,
+			ClientName:              req.ClientName,
+			TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
+			Scope:                   req.Scope,
+			RedirectURIs:            req.RedirectURIs,
+			GrantTypes:              req.GrantTypes,
+			ResponseTypes:           req.ResponseTypes,
+			IssuedAt:                now,
+			ExpiresAt:               now.Add(clientRegistrationTTL),
+		}
+		if err := s.saveRegisteredClient(ctx, rec); err != nil {
+			log.ErrorContext(ctx, "failed to persist DCR client", slog.String("client_id", clientID), slog.Any("error", err))
+			writeOAuthError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
+			return
 		}
 		log.InfoContext(ctx, "DCR client registered",
 			slog.String("client_id", clientID),
@@ -690,30 +676,10 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
-		var client *storepkg.OAuthClient
-		if s.clients != nil {
-			if clientID == "" {
-				log.WarnContext(ctx, "authorize: missing client_id")
-				writeOAuthError(w, "invalid_request", "client_id is required", http.StatusBadRequest)
-				return
-			}
-			var err error
-			client, err = s.clients.GetClient(ctx, clientID)
-			if errors.Is(err, storepkg.ErrNotFound) {
-				log.WarnContext(ctx, "authorize: unknown client_id")
-				writeOAuthError(w, "invalid_client", "unknown client_id", http.StatusBadRequest)
-				return
-			}
-			if err != nil {
-				log.ErrorContext(ctx, "get client failed", slog.Any("error", err))
-				writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
-				return
-			}
-			if !slices.Contains(client.RedirectURIs, redirectURI) {
-				log.WarnContext(ctx, "authorize: redirect_uri not registered", slog.String("redirect_uri", redirectURI))
-				writeOAuthError(w, "invalid_request", "redirect_uri not registered for this client", http.StatusBadRequest)
-				return
-			}
+		client, reqErr := s.registeredClientForAuthorize(ctx, log, clientID, redirectURI)
+		if reqErr != nil {
+			writeOAuthError(w, reqErr.code, reqErr.description, reqErr.status)
+			return
 		}
 
 		codeChallenge := q.Get("code_challenge")
