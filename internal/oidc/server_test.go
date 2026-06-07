@@ -131,6 +131,13 @@ func pkceChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
+func TestDurationOrDefault(t *testing.T) {
+	def := 30 * time.Second
+	require.Equal(t, def, durationOrDefault(nil, def))
+	require.Equal(t, time.Duration(0), durationOrDefault(durationPtr(0), def))
+	require.Equal(t, 2*time.Hour, durationOrDefault(durationPtr(2*time.Hour), def))
+}
+
 func TestNewServer_RefreshTokenDurationDefaults(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	require.Equal(t, DefaultRefreshTokenGracePeriod, srv.refreshTokenGracePeriod)

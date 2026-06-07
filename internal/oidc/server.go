@@ -95,7 +95,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 	}
 	refreshTokenGracePeriod, retiredRefreshTokenRetention, err := resolveRefreshTokenDurations(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid refresh token config: %w", err)
 	}
 
 	base, err := url.Parse(cfg.BaseURL)
@@ -158,10 +158,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 }
 
 func resolveRefreshTokenDurations(cfg Config) (time.Duration, time.Duration, error) {
-	gracePeriod := DefaultRefreshTokenGracePeriod
-	if cfg.RefreshTokenGracePeriod != nil {
-		gracePeriod = *cfg.RefreshTokenGracePeriod
-	}
+	gracePeriod := durationOrDefault(cfg.RefreshTokenGracePeriod, DefaultRefreshTokenGracePeriod)
 	if gracePeriod < 0 {
 		return 0, 0, fmt.Errorf("refresh token grace period must be >= 0")
 	}
@@ -169,10 +166,7 @@ func resolveRefreshTokenDurations(cfg Config) (time.Duration, time.Duration, err
 		return 0, 0, fmt.Errorf("refresh token grace period must be <= %s", maxRefreshTokenGracePeriod)
 	}
 
-	retention := DefaultRetiredRefreshTokenRetention
-	if cfg.RetiredRefreshTokenRetention != nil {
-		retention = *cfg.RetiredRefreshTokenRetention
-	}
+	retention := durationOrDefault(cfg.RetiredRefreshTokenRetention, DefaultRetiredRefreshTokenRetention)
 	if retention <= 0 {
 		return 0, 0, fmt.Errorf("retired refresh token retention must be > 0")
 	}
@@ -180,6 +174,13 @@ func resolveRefreshTokenDurations(cfg Config) (time.Duration, time.Duration, err
 		return 0, 0, fmt.Errorf("retired refresh token retention must be >= refresh token grace period")
 	}
 	return gracePeriod, retention, nil
+}
+
+func durationOrDefault(v *time.Duration, def time.Duration) time.Duration {
+	if v != nil {
+		return *v
+	}
+	return def
 }
 
 // AuthServerMeta returns the pre-built OAuth2 authorization server metadata.
