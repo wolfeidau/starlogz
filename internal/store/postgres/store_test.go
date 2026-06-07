@@ -503,7 +503,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 		JWTExpiry:          now.Add(14 * 24 * time.Hour),
 	}
 
-	got, err := st.RotateGrant(ctx, "our-refresh-old", original.JTI, original.JWTExpiry, rotated)
+	got, err := st.RotateGrant(ctx, "our-refresh-old", original.JTI, original.JWTExpiry, rotated, nil)
 	require.NoError(t, err)
 	require.Equal(t, "rotate-jti-new", got.JTI)
 	require.Equal(t, "our-refresh-new", got.OurRefreshToken)
@@ -944,7 +944,7 @@ func TestRotateGrant_Success(t *testing.T) {
 		JWTExpiry:          now.Add(7 * 24 * time.Hour),
 	}
 
-	got, err := st.RotateGrant(ctx, "old-refresh-token", original.JTI, original.JWTExpiry, rotated)
+	got, err := st.RotateGrant(ctx, "old-refresh-token", original.JTI, original.JWTExpiry, rotated, nil)
 	require.NoError(t, err)
 	require.Equal(t, rotated.JTI, got.JTI)
 	require.Equal(t, rotated.OurRefreshToken, got.OurRefreshToken)
@@ -959,6 +959,155 @@ func TestRotateGrant_Success(t *testing.T) {
 	found, err := st.GetGrantByRefreshToken(ctx, "new-refresh-token")
 	require.NoError(t, err)
 	require.Equal(t, rotated.JTI, found.JTI)
+}
+
+func TestRotateGrant_RecordsRetiredRefreshToken(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := context.Background()
+
+	u, err := st.UpsertUser(ctx, 1250, "retired@example.com", "retireduser")
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	original := store.Grant{
+		JTI:                "jti-retired-old",
+		UserID:             u.ID,
+		OurRefreshToken:    "retired-old-refresh",
+		ClientID:           "client-retired",
+		AccessToken:        "gha_old",
+		RefreshToken:       "ghr_old",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(180 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}
+	require.NoError(t, st.UpsertGrant(ctx, original))
+
+	rotated := store.Grant{
+		JTI:                "jti-retired-new",
+		UserID:             u.ID,
+		OurRefreshToken:    "retired-new-refresh",
+		ClientID:           "client-retired",
+		AccessToken:        "gha_new",
+		RefreshToken:       "ghr_new",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(179 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}
+	graceExpires := now.Add(30 * time.Second)
+	retainedUntil := now.Add(24 * time.Hour)
+	_, err = st.RotateGrant(ctx, "retired-old-refresh", original.JTI, original.JWTExpiry, rotated, &store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("retired-old-refresh"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		UserID:         u.ID,
+		ClientID:       original.ClientID,
+		OldJTI:         original.JTI,
+		ReplacementJTI: rotated.JTI,
+		GraceExpiresAt: graceExpires,
+		RetainedUntil:  retainedUntil,
+	})
+	require.NoError(t, err)
+
+	retired, err := st.GetRetiredRefreshToken(ctx, store.HashRefreshToken("retired-old-refresh"))
+	require.NoError(t, err)
+	require.Equal(t, store.RetiredRefreshTokenReasonRotated, retired.Reason)
+	require.Equal(t, u.ID, retired.UserID)
+	require.Equal(t, original.ClientID, retired.ClientID)
+	require.Equal(t, original.JTI, retired.OldJTI)
+	require.Equal(t, rotated.JTI, retired.ReplacementJTI)
+	require.WithinDuration(t, graceExpires, retired.GraceExpiresAt, time.Second)
+	require.WithinDuration(t, retainedUntil, retired.RetainedUntil, time.Second)
+}
+
+func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := context.Background()
+
+	u, err := st.UpsertUser(ctx, 1260, "rollback@example.com", "rollbackuser")
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	original := store.Grant{
+		JTI:                "jti-rollback-old",
+		UserID:             u.ID,
+		OurRefreshToken:    "rollback-old-refresh",
+		ClientID:           "client-rollback",
+		AccessToken:        "gha_old",
+		RefreshToken:       "ghr_old",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(180 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}
+	require.NoError(t, st.UpsertGrant(ctx, original))
+
+	_, err = st.RotateGrant(ctx, "rollback-old-refresh", original.JTI, original.JWTExpiry, store.Grant{
+		JTI:                "jti-rollback-new",
+		UserID:             u.ID,
+		OurRefreshToken:    "rollback-new-refresh",
+		ClientID:           "client-rollback",
+		AccessToken:        "gha_new",
+		RefreshToken:       "ghr_new",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(179 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}, &store.RetiredRefreshToken{
+		TokenHash: store.HashRefreshToken("rollback-old-refresh"),
+		// Missing Reason should abort the transaction.
+		RetainedUntil: now.Add(24 * time.Hour),
+	})
+	require.Error(t, err)
+
+	_, err = st.GetGrantByRefreshToken(ctx, "rollback-old-refresh")
+	require.NoError(t, err, "old grant must remain live after failed retired-token insert")
+	_, err = st.GetGrantByRefreshToken(ctx, "rollback-new-refresh")
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.GetRetiredRefreshToken(ctx, store.HashRefreshToken("rollback-old-refresh"))
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestGetRetiredRefreshToken_PrunesExpiredRetention(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := context.Background()
+
+	u, err := st.UpsertUser(ctx, 1270, "pruneretired@example.com", "pruneretired")
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	original := store.Grant{
+		JTI:                "jti-retention-old",
+		UserID:             u.ID,
+		OurRefreshToken:    "retention-old-refresh",
+		ClientID:           "client-retention",
+		AccessToken:        "gha_old",
+		RefreshToken:       "ghr_old",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(180 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}
+	require.NoError(t, st.UpsertGrant(ctx, original))
+
+	_, err = st.RotateGrant(ctx, "retention-old-refresh", original.JTI, original.JWTExpiry, store.Grant{
+		JTI:                "jti-retention-new",
+		UserID:             u.ID,
+		OurRefreshToken:    "retention-new-refresh",
+		ClientID:           "client-retention",
+		AccessToken:        "gha_new",
+		RefreshToken:       "ghr_new",
+		AccessTokenExpiry:  now.Add(8 * time.Hour),
+		RefreshTokenExpiry: now.Add(179 * 24 * time.Hour),
+		JWTExpiry:          now.Add(7 * 24 * time.Hour),
+	}, &store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("retention-old-refresh"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		UserID:         u.ID,
+		ClientID:       original.ClientID,
+		OldJTI:         original.JTI,
+		ReplacementJTI: "jti-retention-new",
+		RetainedUntil:  now.Add(-time.Second),
+	})
+	require.NoError(t, err)
+
+	_, err = st.GetRetiredRefreshToken(ctx, store.HashRefreshToken("retention-old-refresh"))
+	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
@@ -988,7 +1137,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 		AccessToken:     "gha_new",
 		RefreshToken:    "ghr_new",
 		JWTExpiry:       now.Add(7 * 24 * time.Hour),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	// Second rotation with the same old token simulates a concurrent race — must return ErrNotFound.
@@ -999,7 +1148,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 		AccessToken:     "gha_new2",
 		RefreshToken:    "ghr_new2",
 		JWTExpiry:       now.Add(7 * 24 * time.Hour),
-	})
+	}, nil)
 	require.ErrorIs(t, err, store.ErrNotFound, "concurrent rotation must return ErrNotFound")
 }
 
@@ -1021,14 +1170,25 @@ func TestDeleteGrant_Success(t *testing.T) {
 		JWTExpiry:          now.Add(7 * 24 * time.Hour),
 	}))
 
-	require.NoError(t, st.DeleteGrant(ctx, "jti-delete"))
+	require.NoError(t, st.DeleteGrant(ctx, "jti-delete", &store.RetiredRefreshToken{
+		TokenHash:     store.HashRefreshToken("deleted-refresh-token"),
+		Reason:        store.RetiredRefreshTokenReasonGitHubExpired,
+		UserID:        u.ID,
+		ClientID:      "client-delete",
+		OldJTI:        "jti-delete",
+		RetainedUntil: now.Add(24 * time.Hour),
+	}))
 
 	_, err = st.GetGrant(ctx, "jti-delete")
 	require.ErrorIs(t, err, store.ErrNotFound, "deleted grant must not be retrievable")
+	retired, err := st.GetRetiredRefreshToken(ctx, store.HashRefreshToken("deleted-refresh-token"))
+	require.NoError(t, err)
+	require.Equal(t, store.RetiredRefreshTokenReasonGitHubExpired, retired.Reason)
+	require.Equal(t, "jti-delete", retired.OldJTI)
 }
 
 func TestDeleteGrant_NotFound(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	err := st.DeleteGrant(context.Background(), "no-such-jti")
+	err := st.DeleteGrant(context.Background(), "no-such-jti", nil)
 	require.ErrorIs(t, err, store.ErrNotFound)
 }

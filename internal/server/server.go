@@ -23,16 +23,18 @@ const name = "starlogz-mcp-server"
 
 // Config holds all parameters needed to construct the server.
 type Config struct {
-	BaseURL            string
-	GitHubClientID     string
-	GitHubClientSecret string
-	PrivKey            jwk.Key
-	Logger             *slog.Logger
-	Store              store.Store          // nil is allowed; fact tools will return an error
-	AuthState          oidc.AuthStateStore  // if nil, Store is used
-	Revocation         oidc.RevocationStore // if nil, Store is used
-	ShutdownTimeout    time.Duration
-	SentryHandler      func(http.Handler) http.Handler
+	BaseURL                      string
+	GitHubClientID               string
+	GitHubClientSecret           string
+	PrivKey                      jwk.Key
+	Logger                       *slog.Logger
+	Store                        store.Store          // nil is allowed; fact tools will return an error
+	AuthState                    oidc.AuthStateStore  // if nil, Store is used
+	Revocation                   oidc.RevocationStore // if nil, Store is used
+	ShutdownTimeout              time.Duration
+	RefreshTokenGracePeriod      *time.Duration
+	RetiredRefreshTokenRetention *time.Duration
+	SentryHandler                func(http.Handler) http.Handler
 }
 
 // Server is the configured HTTP server ready to serve requests.
@@ -59,14 +61,16 @@ func New(cfg Config) (*Server, error) {
 		revocation = cfg.Store
 	}
 	oidcServer, err := oidc.NewServer(oidc.Config{
-		BaseURL:            cfg.BaseURL,
-		GitHubClientID:     cfg.GitHubClientID,
-		GitHubClientSecret: cfg.GitHubClientSecret,
-		Users:              cfg.Store,
-		Clients:            cfg.Store,
-		Grants:             cfg.Store,
-		AuthState:          authState,
-		Revocation:         revocation,
+		BaseURL:                      cfg.BaseURL,
+		GitHubClientID:               cfg.GitHubClientID,
+		GitHubClientSecret:           cfg.GitHubClientSecret,
+		Users:                        cfg.Store,
+		Clients:                      cfg.Store,
+		Grants:                       cfg.Store,
+		AuthState:                    authState,
+		Revocation:                   revocation,
+		RefreshTokenGracePeriod:      cfg.RefreshTokenGracePeriod,
+		RetiredRefreshTokenRetention: cfg.RetiredRefreshTokenRetention,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)

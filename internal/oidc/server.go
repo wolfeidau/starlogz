@@ -31,9 +31,11 @@ type UserUpserter interface {
 // than the new token live and the old one un-revoked.
 type GrantStore interface {
 	UpsertGrant(ctx context.Context, g store.Grant) error
+	GetGrant(ctx context.Context, jti string) (*store.Grant, error)
 	GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error)
-	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error)
-	DeleteGrant(ctx context.Context, jti string) error
+	GetRetiredRefreshToken(ctx context.Context, tokenHash []byte) (*store.RetiredRefreshToken, error)
+	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant, retired *store.RetiredRefreshToken) (*store.Grant, error)
+	DeleteGrant(ctx context.Context, jti string, retired *store.RetiredRefreshToken) error
 }
 
 // AuthStateStore persists transient OAuth2 authorization state.
@@ -52,31 +54,35 @@ type RevocationStore interface {
 
 // Config holds construction parameters for Server.
 type Config struct {
-	BaseURL            string
-	GitHubClientID     string
-	GitHubClientSecret string
-	Users              UserUpserter    // optional; nil skips user persistence
-	Clients            ClientStore     // optional; nil skips DCR persistence
-	Grants             GrantStore      // optional; nil skips grant persistence
-	AuthState          AuthStateStore  // required
-	Revocation         RevocationStore // required
+	BaseURL                      string
+	GitHubClientID               string
+	GitHubClientSecret           string
+	Users                        UserUpserter    // optional; nil skips user persistence
+	Clients                      ClientStore     // optional; nil skips DCR persistence
+	Grants                       GrantStore      // optional; nil skips grant persistence
+	AuthState                    AuthStateStore  // required
+	Revocation                   RevocationStore // required
+	RefreshTokenGracePeriod      *time.Duration  // optional; nil defaults to 30s, 0 disables grace retry
+	RetiredRefreshTokenRetention *time.Duration  // optional; nil defaults to 24h
 }
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
 type Server struct {
-	baseURL    *url.URL
-	privkey    jwk.Key
-	pubkey     jwk.Key
-	jwksJSON   []byte
-	authMeta   *oauthex.AuthServerMeta
-	resMeta    *oauthex.ProtectedResourceMetadata
-	github     gitHubConnector
-	users      UserUpserter
-	clients    ClientStore
-	grants     GrantStore
-	authState  AuthStateStore
-	revocation RevocationStore
-	logger     *slog.Logger
+	baseURL                      *url.URL
+	privkey                      jwk.Key
+	pubkey                       jwk.Key
+	jwksJSON                     []byte
+	authMeta                     *oauthex.AuthServerMeta
+	resMeta                      *oauthex.ProtectedResourceMetadata
+	github                       gitHubConnector
+	users                        UserUpserter
+	clients                      ClientStore
+	grants                       GrantStore
+	authState                    AuthStateStore
+	revocation                   RevocationStore
+	refreshTokenGracePeriod      time.Duration
+	retiredRefreshTokenRetention time.Duration
+	logger                       *slog.Logger
 }
 
 // NewServer constructs an OIDC Server from config and a loaded private key.
@@ -86,6 +92,10 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 	}
 	if cfg.Revocation == nil {
 		return nil, fmt.Errorf("Config.Revocation is required")
+	}
+	refreshTokenGracePeriod, retiredRefreshTokenRetention, err := resolveRefreshTokenDurations(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	base, err := url.Parse(cfg.BaseURL)
@@ -129,20 +139,47 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 	}
 
 	return &Server{
-		baseURL:    base,
-		privkey:    privkey,
-		pubkey:     pubkey,
-		jwksJSON:   jwksJSON,
-		authMeta:   buildAuthServerMeta(base),
-		resMeta:    buildProtectedResourceMeta(base),
-		github:     newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
-		users:      cfg.Users,
-		clients:    cfg.Clients,
-		grants:     cfg.Grants,
-		authState:  cfg.AuthState,
-		revocation: cfg.Revocation,
-		logger:     slog.Default().With(slog.String("component", "oidc")),
+		baseURL:                      base,
+		privkey:                      privkey,
+		pubkey:                       pubkey,
+		jwksJSON:                     jwksJSON,
+		authMeta:                     buildAuthServerMeta(base),
+		resMeta:                      buildProtectedResourceMeta(base),
+		github:                       newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
+		users:                        cfg.Users,
+		clients:                      cfg.Clients,
+		grants:                       cfg.Grants,
+		authState:                    cfg.AuthState,
+		revocation:                   cfg.Revocation,
+		refreshTokenGracePeriod:      refreshTokenGracePeriod,
+		retiredRefreshTokenRetention: retiredRefreshTokenRetention,
+		logger:                       slog.Default().With(slog.String("component", "oidc")),
 	}, nil
+}
+
+func resolveRefreshTokenDurations(cfg Config) (time.Duration, time.Duration, error) {
+	gracePeriod := DefaultRefreshTokenGracePeriod
+	if cfg.RefreshTokenGracePeriod != nil {
+		gracePeriod = *cfg.RefreshTokenGracePeriod
+	}
+	if gracePeriod < 0 {
+		return 0, 0, fmt.Errorf("refresh token grace period must be >= 0")
+	}
+	if gracePeriod > maxRefreshTokenGracePeriod {
+		return 0, 0, fmt.Errorf("refresh token grace period must be <= %s", maxRefreshTokenGracePeriod)
+	}
+
+	retention := DefaultRetiredRefreshTokenRetention
+	if cfg.RetiredRefreshTokenRetention != nil {
+		retention = *cfg.RetiredRefreshTokenRetention
+	}
+	if retention <= 0 {
+		return 0, 0, fmt.Errorf("retired refresh token retention must be > 0")
+	}
+	if retention < gracePeriod {
+		return 0, 0, fmt.Errorf("retired refresh token retention must be >= refresh token grace period")
+	}
+	return gracePeriod, retention, nil
 }
 
 // AuthServerMeta returns the pre-built OAuth2 authorization server metadata.

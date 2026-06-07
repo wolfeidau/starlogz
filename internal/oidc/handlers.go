@@ -21,10 +21,17 @@ import (
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/logattr"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/telemetry"
 	"golang.org/x/oauth2"
 )
 
-const jwtTTL = 15 * time.Minute
+const (
+	jwtTTL = 15 * time.Minute
+
+	DefaultRefreshTokenGracePeriod      = 30 * time.Second
+	DefaultRetiredRefreshTokenRetention = 24 * time.Hour
+	maxRefreshTokenGracePeriod          = 60 * time.Second
+)
 
 // generateOpaqueToken returns a base64url-encoded 32-byte random value used as our_refresh_token.
 func generateOpaqueToken() (string, error) {
@@ -37,11 +44,15 @@ func generateOpaqueToken() (string, error) {
 
 // writeTokenResponse writes an RFC 6749 token endpoint response with no-store caching.
 // refreshToken/refreshExpiry are added only when refreshToken is non-empty.
-func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, refreshToken string, refreshExpiry time.Time) {
+func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, refreshToken string, refreshExpiry, jwtExpiry time.Time) {
+	expiresIn := int(time.Until(jwtExpiry) / time.Second)
+	if expiresIn < 0 {
+		expiresIn = 0
+	}
 	resp := map[string]any{
 		"access_token": jwt,
 		"token_type":   "Bearer",
-		"expires_in":   int(jwtTTL / time.Second),
+		"expires_in":   expiresIn,
 		"scope":        scope,
 	}
 	if refreshToken != "" {
@@ -58,13 +69,27 @@ func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, 
 // tearDownGrant revokes the JWT and deletes the grant row. Used when a grant is
 // known-bad (GitHub refresh expired, GitHub returned no refresh token) and the
 // client must re-authenticate. Failures are logged but never block the response.
-func (s *Server) tearDownGrant(ctx context.Context, jti string, jwtExpiry time.Time) {
+func (s *Server) tearDownGrant(ctx context.Context, grant *storepkg.Grant, refreshToken, reason string) {
 	log := ctxlog.LoggerFrom(ctx)
-	if err := s.revocation.RevokeToken(ctx, jti, jwtExpiry); err != nil {
+	if err := s.revocation.RevokeToken(ctx, grant.JTI, grant.JWTExpiry); err != nil {
 		log.ErrorContext(ctx, "revoke jti for broken grant failed", slog.Any("error", err))
 	}
-	if err := s.grants.DeleteGrant(ctx, jti); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
+	retired := s.newRetiredRefreshToken(refreshToken, reason, grant, "", time.Time{})
+	if err := s.grants.DeleteGrant(ctx, grant.JTI, retired); err != nil && !errors.Is(err, storepkg.ErrNotFound) {
 		log.ErrorContext(ctx, "delete broken grant failed", slog.Any("error", err))
+	}
+}
+
+func (s *Server) newRetiredRefreshToken(refreshToken, reason string, grant *storepkg.Grant, replacementJTI string, graceExpiresAt time.Time) *storepkg.RetiredRefreshToken {
+	return &storepkg.RetiredRefreshToken{
+		TokenHash:      storepkg.HashRefreshToken(refreshToken),
+		Reason:         reason,
+		UserID:         grant.UserID,
+		ClientID:       grant.ClientID,
+		OldJTI:         grant.JTI,
+		ReplacementJTI: replacementJTI,
+		GraceExpiresAt: graceExpiresAt,
+		RetainedUntil:  time.Now().Add(s.retiredRefreshTokenRetention),
 	}
 }
 
@@ -286,7 +311,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	}
 	log.InfoContext(ctx, "token exchange: issued JWT", logFields...)
 
-	writeTokenResponse(ctx, w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry)
+	writeTokenResponse(ctx, w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry, jwtExpiry)
 }
 
 func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form url.Values) {
@@ -299,25 +324,33 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	ctx = ctxlog.WithLogger(ctx, log)
 
 	if refreshToken == "" || clientID == "" {
-		log.WarnContext(ctx, "refresh grant: missing refresh_token or client_id")
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "invalid_request")
+		log.WarnContext(ctx, "refresh grant: missing refresh_token or client_id",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "invalid_request"),
+		)
 		writeOAuthError(w, "invalid_request", "refresh_token and client_id are required", http.StatusBadRequest)
 		return
 	}
 
 	if s.grants == nil {
-		log.WarnContext(ctx, "refresh grant: grant store not configured")
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "unsupported")
+		log.WarnContext(ctx, "refresh grant: grant store not configured",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "unsupported"),
+		)
 		writeOAuthError(w, "invalid_grant", "refresh token grant not supported", http.StatusBadRequest)
 		return
 	}
 
 	grant, err := s.grants.GetGrantByRefreshToken(ctx, refreshToken)
 	if errors.Is(err, storepkg.ErrNotFound) {
-		log.WarnContext(ctx, "refresh token not found or already used")
-		writeOAuthError(w, "invalid_grant", "refresh token not found or already used", http.StatusBadRequest)
+		s.handleRetiredRefreshGrant(ctx, w, refreshToken, clientID)
 		return
 	}
 	if err != nil {
-		log.ErrorContext(ctx, "lookup grant by refresh token failed", slog.Any("error", err))
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "lookup grant by refresh token failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -336,23 +369,29 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			slog.String("grant_client_id", grant.ClientID),
 		}
 		warnFields = s.appendClientNames(ctx, warnFields, clientID, grant.ClientID)
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_mismatch")
+		warnFields = append(warnFields, slog.String("outcome", "failure"), slog.String("reason", "client_mismatch"))
 		log.WarnContext(ctx, "client_id mismatch on token refresh", warnFields...)
 		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
 		return
 	}
 
 	if grant.RefreshToken == "" {
-		log.WarnContext(ctx, "grant has no GitHub refresh token")
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "github_missing_refresh")
+		log.WarnContext(ctx, "grant has no GitHub refresh token", slog.String("outcome", "failure"), slog.String("reason", "github_missing_refresh"))
 		writeOAuthError(w, "invalid_grant", "grant has no GitHub refresh token", http.StatusBadRequest)
 		return
 	}
 
 	// If GitHub refresh token has already expired, drop the grant and force re-auth.
 	if !grant.RefreshTokenExpiry.IsZero() && time.Now().After(grant.RefreshTokenExpiry) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "github_expired")
 		log.WarnContext(ctx, "GitHub refresh token expired; tearing down grant",
 			slog.Time("refresh_token_expiry", grant.RefreshTokenExpiry),
+			slog.String("outcome", "failure"),
+			slog.String("reason", "github_expired"),
 		)
-		s.tearDownGrant(ctx, grant.JTI, grant.JWTExpiry)
+		s.tearDownGrant(ctx, grant, refreshToken, storepkg.RetiredRefreshTokenReasonGitHubExpired)
 		writeOAuthError(w, "invalid_grant", "GitHub refresh token has expired", http.StatusBadRequest)
 		return
 	}
@@ -369,15 +408,19 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		if errors.As(err, &retrieveErr) && retrieveErr.ErrorCode == "bad_refresh_token" {
 			// GitHub has invalidated the stored refresh token. Tear down the grant so
 			// future requests fail fast at DB lookup rather than hitting GitHub again.
+			telemetry.RecordRefreshTokenGrant(ctx, "failure", "github_invalid")
 			log.ErrorContext(ctx, "GitHub refresh token rejected; dropping grant",
 				slog.String("github_error", retrieveErr.ErrorCode),
 				slog.String("github_error_description", retrieveErr.ErrorDescription),
+				slog.String("outcome", "failure"),
+				slog.String("reason", "github_invalid"),
 			)
-			s.tearDownGrant(storeCtx, grant.JTI, grant.JWTExpiry)
+			s.tearDownGrant(storeCtx, grant, refreshToken, storepkg.RetiredRefreshTokenReasonGitHubInvalid)
 			writeOAuthError(w, "invalid_grant", "GitHub refresh token is invalid; re-authentication required", http.StatusBadRequest)
 			return
 		}
-		log.ErrorContext(ctx, "GitHub token refresh failed", slog.Any("error", err))
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "GitHub token refresh failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 		writeOAuthError(w, "server_error", "GitHub token refresh failed", http.StatusInternalServerError)
 		return
 	}
@@ -386,8 +429,9 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	// can't continue. GitHub has already invalidated our stored refresh token in
 	// rotation; tear the grant down and force re-auth.
 	if newGHToken.RefreshToken == "" {
-		log.ErrorContext(ctx, "GitHub refresh response missing refresh_token; dropping grant")
-		s.tearDownGrant(storeCtx, grant.JTI, grant.JWTExpiry)
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "github_missing_refresh")
+		log.ErrorContext(ctx, "GitHub refresh response missing refresh_token; dropping grant", slog.String("outcome", "failure"), slog.String("reason", "github_missing_refresh"))
+		s.tearDownGrant(storeCtx, grant, refreshToken, storepkg.RetiredRefreshTokenReasonGitHubMissingRefresh)
 		writeOAuthError(w, "invalid_grant", "GitHub did not return a new refresh token; re-authentication required", http.StatusBadRequest)
 		return
 	}
@@ -397,7 +441,8 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	if s.users != nil {
 		user, uErr := s.users.UpsertUser(storeCtx, identity.ID, identity.Email, identity.Login)
 		if uErr != nil {
-			log.ErrorContext(ctx, "upsert user failed", slog.Any("error", uErr))
+			telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+			log.ErrorContext(ctx, "upsert user failed", slog.Any("error", uErr), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 			writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -408,7 +453,8 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	newJTI := uuid.New().String()
 	newOurRefreshToken, err := generateOpaqueToken()
 	if err != nil {
-		log.ErrorContext(ctx, "generate refresh token failed", slog.Any("error", err))
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "generate refresh token failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 		writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
 		return
 	}
@@ -427,14 +473,21 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		RefreshTokenExpiry: newGHRefreshExpiry,
 		JWTExpiry:          newJWTExpiry,
 	}
-	if _, err := s.grants.RotateGrant(storeCtx, refreshToken, grant.JTI, grant.JWTExpiry, newGrant); err != nil {
+	var graceExpiresAt time.Time
+	if s.refreshTokenGracePeriod > 0 {
+		graceExpiresAt = time.Now().Add(s.refreshTokenGracePeriod)
+	}
+	retired := s.newRetiredRefreshToken(refreshToken, storepkg.RetiredRefreshTokenReasonRotated, grant, newJTI, graceExpiresAt)
+	if _, err := s.grants.RotateGrant(storeCtx, refreshToken, grant.JTI, grant.JWTExpiry, newGrant, retired); err != nil {
 		if errors.Is(err, storepkg.ErrNotFound) {
 			// Concurrent refresh: another request already consumed this token.
-			log.WarnContext(ctx, "concurrent token refresh: grant already rotated")
+			telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_rotated_grace_expired")
+			log.WarnContext(ctx, "concurrent token refresh: grant already rotated", slog.String("outcome", "failure"), slog.String("reason", "recently_rotated_grace_expired"))
 			writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
 			return
 		}
-		log.ErrorContext(ctx, "rotate grant failed", slog.Any("error", err))
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "rotate grant failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 		writeOAuthError(w, "server_error", "failed to rotate grant", http.StatusInternalServerError)
 		return
 	}
@@ -443,16 +496,133 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		slog.String("old_jti", grant.JTI),
 		slog.String("new_jti", newJTI),
 		logattr.ObscureString("new_refresh_token", newOurRefreshToken),
+		slog.String("outcome", "success"),
+		slog.String("reason", "rotated"),
 	)
 
 	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI, newJWTExpiry)
 	if err != nil {
-		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err))
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
 		return
 	}
 
-	writeTokenResponse(ctx, w, tokenString, grant.Scope, newOurRefreshToken, newGHRefreshExpiry)
+	telemetry.RecordRefreshTokenGrant(ctx, "success", "rotated")
+	writeTokenResponse(ctx, w, tokenString, grant.Scope, newOurRefreshToken, newGHRefreshExpiry, newJWTExpiry)
+}
+
+func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseWriter, refreshToken, clientID string) {
+	log := ctxlog.LoggerFrom(ctx)
+	retired, err := s.grants.GetRetiredRefreshToken(ctx, storepkg.HashRefreshToken(refreshToken))
+	if errors.Is(err, storepkg.ErrNotFound) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "never_seen")
+		log.WarnContext(ctx, "refresh token never seen", slog.String("outcome", "failure"), slog.String("reason", "never_seen"))
+		writeOAuthError(w, "invalid_grant", "refresh token not found or already used", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "lookup retired refresh token failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
+		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	log = log.With(
+		slog.String("retired_reason", retired.Reason),
+		slog.String("old_jti", retired.OldJTI),
+		slog.String("replacement_jti", retired.ReplacementJTI),
+	)
+	ctx = ctxlog.WithLogger(ctx, log)
+
+	if retired.ClientID != "" && retired.ClientID != clientID {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_mismatch")
+		log.WarnContext(ctx, "client_id mismatch on retired refresh token",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "client_mismatch"),
+			slog.String("grant_client_id", retired.ClientID),
+		)
+		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
+		return
+	}
+
+	if retired.Reason != storepkg.RetiredRefreshTokenReasonRotated {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_removed")
+		log.WarnContext(ctx, "refresh token was recently removed",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "recently_removed"),
+			slog.String("removed_reason", retired.Reason),
+		)
+		writeOAuthError(w, "invalid_grant", "refresh token was recently removed", http.StatusBadRequest)
+		return
+	}
+
+	if retired.GraceExpiresAt.IsZero() || time.Now().After(retired.GraceExpiresAt) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_rotated_grace_expired")
+		log.WarnContext(ctx, "refresh token grace period expired",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "recently_rotated_grace_expired"),
+			slog.Time("grace_expires_at", retired.GraceExpiresAt),
+		)
+		writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
+		return
+	}
+
+	if retired.ReplacementJTI == "" {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_removed")
+		log.WarnContext(ctx, "retired refresh token missing replacement jti", slog.String("outcome", "failure"), slog.String("reason", "recently_removed"))
+		writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
+		return
+	}
+
+	grant, err := s.grants.GetGrant(ctx, retired.ReplacementJTI)
+	if errors.Is(err, storepkg.ErrNotFound) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_removed")
+		log.WarnContext(ctx, "replacement grant not found for grace retry", slog.String("outcome", "failure"), slog.String("reason", "recently_removed"))
+		writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "lookup replacement grant failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
+		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if grant.ClientID != "" && grant.ClientID != clientID {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_mismatch")
+		log.WarnContext(ctx, "client_id mismatch on replacement grant",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "client_mismatch"),
+			slog.String("grant_client_id", grant.ClientID),
+		)
+		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
+		return
+	}
+
+	if time.Now().After(grant.JWTExpiry) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_removed")
+		log.WarnContext(ctx, "replacement grant expired for grace retry", slog.String("outcome", "failure"), slog.String("reason", "recently_removed"))
+		writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
+		return
+	}
+
+	tokenString, err := s.IssueJWT(grant.UserID.String(), "", grant.Scope, grant.JTI, grant.JWTExpiry)
+	if err != nil {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
+		log.ErrorContext(ctx, "JWT issuance failed for grace retry", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
+		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
+		return
+	}
+
+	telemetry.RecordRefreshTokenGrant(ctx, "success", "grace_retry")
+	log.InfoContext(ctx, "refresh token grace retry succeeded",
+		slog.String("outcome", "success"),
+		slog.String("reason", "grace_retry"),
+		slog.String("jti", grant.JTI),
+		slog.String("user_id", grant.UserID.String()),
+	)
+	writeTokenResponse(ctx, w, tokenString, grant.Scope, grant.OurRefreshToken, grant.RefreshTokenExpiry, grant.JWTExpiry)
 }
 
 // DCRHandler returns an HTTP handler for Dynamic Client Registration (RFC 7591).

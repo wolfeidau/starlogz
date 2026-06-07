@@ -380,6 +380,20 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 		FROM grants WHERE our_refresh_token = $1`, token))
 }
 
+// GetRetiredRefreshToken returns retained metadata for a consumed or deleted refresh token.
+func (s *Store) GetRetiredRefreshToken(ctx context.Context, tokenHash []byte) (*store.RetiredRefreshToken, error) {
+	s.logger(ctx).DebugContext(ctx, "getting retired refresh token")
+
+	if _, err := s.pool.Exec(ctx, `DELETE FROM retired_refresh_tokens WHERE retained_until < now()`); err != nil {
+		return nil, fmt.Errorf("prune retired refresh tokens: %w", err)
+	}
+	return scanRetiredRefreshToken(s.pool.QueryRow(ctx, `
+		SELECT token_hash, reason, user_id, COALESCE(client_id,''), COALESCE(old_jti,''),
+		       COALESCE(replacement_jti,''), grace_expires_at, retained_until, created_at
+		FROM retired_refresh_tokens
+		WHERE token_hash = $1 AND retained_until > now()`, tokenHash))
+}
+
 func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	var g store.Grant
 	var userIDStr string
@@ -409,10 +423,94 @@ func (s *Store) scanGrant(row pgx.Row) (*store.Grant, error) {
 	return &g, nil
 }
 
+func scanRetiredRefreshToken(row pgx.Row) (*store.RetiredRefreshToken, error) {
+	var rt store.RetiredRefreshToken
+	var userIDStr *string
+	var graceExpiresAt *time.Time
+	err := row.Scan(&rt.TokenHash, &rt.Reason, &userIDStr, &rt.ClientID, &rt.OldJTI,
+		&rt.ReplacementJTI, &graceExpiresAt, &rt.RetainedUntil, &rt.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan retired refresh token: %w", err)
+	}
+	if userIDStr != nil {
+		parsed, parseErr := uuid.Parse(*userIDStr)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse retired token user_id: %w", parseErr)
+		}
+		rt.UserID = parsed
+	}
+	if graceExpiresAt != nil {
+		rt.GraceExpiresAt = *graceExpiresAt
+	}
+	return &rt, nil
+}
+
+func (s *Store) insertRetiredRefreshTokenTx(ctx context.Context, tx pgx.Tx, rt *store.RetiredRefreshToken) error {
+	if rt == nil {
+		return nil
+	}
+	if len(rt.TokenHash) == 0 {
+		return fmt.Errorf("retired refresh token hash is required")
+	}
+	if rt.Reason == "" {
+		return fmt.Errorf("retired refresh token reason is required")
+	}
+	retainedUntil := rt.RetainedUntil
+	if retainedUntil.IsZero() {
+		retainedUntil = time.Now().Add(24 * time.Hour)
+	}
+	var userID any
+	if rt.UserID != uuid.Nil {
+		userID = rt.UserID
+	}
+	var clientID any
+	if rt.ClientID != "" {
+		clientID = rt.ClientID
+	}
+	var oldJTI any
+	if rt.OldJTI != "" {
+		oldJTI = rt.OldJTI
+	}
+	var replacementJTI any
+	if rt.ReplacementJTI != "" {
+		replacementJTI = rt.ReplacementJTI
+	}
+	var graceExpiresAt any
+	if !rt.GraceExpiresAt.IsZero() {
+		graceExpiresAt = rt.GraceExpiresAt
+	}
+
+	_, err := tx.Exec(ctx, `
+		INSERT INTO retired_refresh_tokens
+		    (token_hash, reason, user_id, client_id, old_jti, replacement_jti, grace_expires_at, retained_until)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (token_hash) DO UPDATE
+		    SET reason           = EXCLUDED.reason,
+		        user_id          = EXCLUDED.user_id,
+		        client_id        = EXCLUDED.client_id,
+		        old_jti          = EXCLUDED.old_jti,
+		        replacement_jti  = EXCLUDED.replacement_jti,
+		        grace_expires_at = EXCLUDED.grace_expires_at,
+		        retained_until   = EXCLUDED.retained_until`,
+		rt.TokenHash, rt.Reason, userID, clientID, oldJTI, replacementJTI, graceExpiresAt, retainedUntil)
+	if err != nil {
+		return fmt.Errorf("insert retired refresh token: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM retired_refresh_tokens WHERE retained_until < now()`)
+	if err != nil {
+		return fmt.Errorf("prune retired refresh tokens: %w", err)
+	}
+	return nil
+}
+
 // RotateGrant atomically replaces a grant row identified by oldToken and records
 // the old jti as revoked in the same transaction. Returns ErrNotFound if oldToken
 // does not match any row (concurrent rotation race).
-func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
+func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant, retired *store.RetiredRefreshToken) (*store.Grant, error) {
 	s.logger(ctx).DebugContext(ctx, "rotating grant",
 		logattr.ObscureString("old_token", oldToken),
 		logattr.ObscureString("new_token", g.OurRefreshToken),
@@ -494,6 +592,10 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 		}
 	}
 
+	if err := s.insertRetiredRefreshTokenTx(ctx, tx, retired); err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit rotate grant: %w", err)
 	}
@@ -510,17 +612,26 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 }
 
 // DeleteGrant removes a grant row by jti.
-func (s *Store) DeleteGrant(ctx context.Context, jti string) error {
+func (s *Store) DeleteGrant(ctx context.Context, jti string, retired *store.RetiredRefreshToken) error {
 	s.logger(ctx).DebugContext(ctx, "deleting grant by jti", slog.String("jti", jti))
 
-	ct, err := s.pool.Exec(ctx, `DELETE FROM grants WHERE jti = $1`, jti)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	ct, err := tx.Exec(ctx, `DELETE FROM grants WHERE jti = $1`, jti)
 	if err != nil {
 		return fmt.Errorf("delete grant: %w", err)
 	}
 	if ct.RowsAffected() == 0 {
 		return store.ErrNotFound
 	}
-	return nil
+	if err := s.insertRetiredRefreshTokenTx(ctx, tx, retired); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // StorePendingAuth persists an authorization state with a 10-minute TTL.
