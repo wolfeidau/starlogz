@@ -2,17 +2,15 @@ package postgres_test
 
 import (
 	"context"
-	"log/slog"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	postgrescont "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/store/postgres"
+	"github.com/wolfeidau/starlogz/internal/testutil/postgrestest"
 )
 
 // testEncKey is a fixed key used in grant tests that require encryption.
@@ -22,8 +20,14 @@ var testEncKey = func() [32]byte {
 	return k
 }()
 
-// newTestStore starts a postgres container, runs migrations, and returns a Store.
-// The container is terminated when t finishes.
+var testDB = postgrestest.New("starlogz_store_template", "starlogz_store")
+
+func TestMain(m *testing.M) {
+	os.Exit(testDB.Run(m))
+}
+
+// newTestStore clones the migrated template database and returns a Store.
+// The cloned database is dropped when t finishes.
 func newTestStore(t *testing.T) *postgres.Store {
 	t.Helper()
 	return newTestStoreWithEnc(t, nil)
@@ -34,27 +38,9 @@ func newTestStoreWithEnc(t *testing.T, enc *store.Encryptor) *postgres.Store {
 	t.Helper()
 	ctx := context.Background()
 
-	ctr, err := postgrescont.Run(ctx,
-		"postgres:18-alpine",
-		postgrescont.WithDatabase("testdb"),
-		postgrescont.WithUsername("test"),
-		postgrescont.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
-
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	st, err := postgres.New(ctx, dsn, enc)
+	st, err := postgres.New(ctx, testDB.NewDSN(t), enc)
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
-
-	require.NoError(t, st.Migrate(ctx, slog.Default()))
 
 	return st
 }

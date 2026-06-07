@@ -1,4 +1,4 @@
-package server_test
+package integration_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,14 +18,69 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	postgrescont "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/store/postgres"
+	"github.com/wolfeidau/starlogz/internal/testutil/postgrestest"
 )
+
+var testDB = postgrestest.New("starlogz_tools_template", "starlogz_tools")
+
+func TestMain(m *testing.M) {
+	os.Exit(testDB.Run(m))
+}
+
+type memAuthState struct {
+	pending map[string]store.PendingAuth
+	codes   map[string]store.AuthCode
+}
+
+func newMemAuthState() *memAuthState {
+	return &memAuthState{pending: map[string]store.PendingAuth{}, codes: map[string]store.AuthCode{}}
+}
+
+func (m *memAuthState) StorePendingAuth(_ context.Context, state string, p store.PendingAuth) error {
+	m.pending[state] = p
+	return nil
+}
+
+func (m *memAuthState) ConsumePendingAuth(_ context.Context, state string) (*store.PendingAuth, error) {
+	p, ok := m.pending[state]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(m.pending, state)
+	return &p, nil
+}
+
+func (m *memAuthState) StoreAuthCode(_ context.Context, code string, c store.AuthCode) error {
+	m.codes[code] = c
+	return nil
+}
+
+func (m *memAuthState) ConsumeAuthCode(_ context.Context, code string) (*store.AuthCode, error) {
+	c, ok := m.codes[code]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(m.codes, code)
+	return &c, nil
+}
+
+type memRevocation struct{ revoked map[string]struct{} }
+
+func newMemRevocation() *memRevocation { return &memRevocation{revoked: map[string]struct{}{}} }
+
+func (m *memRevocation) RevokeToken(_ context.Context, jti string, _ time.Time) error {
+	m.revoked[jti] = struct{}{}
+	return nil
+}
+
+func (m *memRevocation) IsTokenRevoked(_ context.Context, jti string) (bool, error) {
+	_, ok := m.revoked[jti]
+	return ok, nil
+}
 
 // toolFixture wires a real Postgres-backed server so MCP tool calls can be
 // invoked end-to-end via the streamable HTTP transport with bearer auth.
@@ -34,33 +90,15 @@ type toolFixture struct {
 	store   *postgres.Store
 }
 
-// newToolFixture spins up a postgres testcontainer, builds the server with a
-// shared signing key, and returns a fixture ready for tool calls. The
-// container, server, and DB pool are torn down on test cleanup.
+// newToolFixture clones a migrated Postgres template database, builds the
+// server with a shared signing key, and returns a fixture ready for tool calls.
 func newToolFixture(t *testing.T) *toolFixture {
 	t.Helper()
 	ctx := context.Background()
 
-	ctr, err := postgrescont.Run(ctx,
-		"postgres:18-alpine",
-		postgrescont.WithDatabase("testdb"),
-		postgrescont.WithUsername("test"),
-		postgrescont.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
-
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	st, err := postgres.New(ctx, dsn, nil)
+	st, err := postgres.New(ctx, testDB.NewDSN(t), nil)
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
-	require.NoError(t, st.Migrate(ctx, slog.Default()))
 
 	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
