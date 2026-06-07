@@ -384,9 +384,6 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 func (s *Store) GetRetiredRefreshToken(ctx context.Context, tokenHash []byte) (*store.RetiredRefreshToken, error) {
 	s.logger(ctx).DebugContext(ctx, "getting retired refresh token")
 
-	if _, err := s.pool.Exec(ctx, `DELETE FROM retired_refresh_tokens WHERE retained_until < now()`); err != nil {
-		return nil, fmt.Errorf("prune retired refresh tokens: %w", err)
-	}
 	return scanRetiredRefreshToken(s.pool.QueryRow(ctx, `
 		SELECT token_hash, reason, user_id, COALESCE(client_id,''), COALESCE(old_jti,''),
 		       COALESCE(replacement_jti,''), grace_expires_at, retained_until, created_at

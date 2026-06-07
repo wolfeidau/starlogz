@@ -1064,7 +1064,7 @@ func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestGetRetiredRefreshToken_PrunesExpiredRetention(t *testing.T) {
+func TestGetRetiredRefreshToken_IgnoresExpiredRetention(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := context.Background()
 
