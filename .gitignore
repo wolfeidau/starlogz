@@ -5,3 +5,6 @@ dist/
 key.jwk
 .envrc
 logs/
+/coverage.out
+/json.log
+/junit.xml

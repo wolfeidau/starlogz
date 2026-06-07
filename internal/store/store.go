@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"log/slog"
 	"time"
@@ -31,8 +32,9 @@ type Store interface {
 	UpsertGrant(ctx context.Context, g Grant) error
 	GetGrant(ctx context.Context, jti string) (*Grant, error)
 	GetGrantByRefreshToken(ctx context.Context, token string) (*Grant, error)
-	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g Grant) (*Grant, error)
-	DeleteGrant(ctx context.Context, jti string) error
+	GetRetiredRefreshToken(ctx context.Context, tokenHash []byte) (*RetiredRefreshToken, error)
+	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g Grant, retired *RetiredRefreshToken) (*Grant, error)
+	DeleteGrant(ctx context.Context, jti string, retired *RetiredRefreshToken) error
 
 	StorePendingAuth(ctx context.Context, state string, p PendingAuth) error
 	ConsumePendingAuth(ctx context.Context, state string) (*PendingAuth, error)
@@ -138,6 +140,32 @@ type Grant struct {
 	RefreshTokenExpiry time.Time
 	JWTExpiry          time.Time
 	UpdatedAt          time.Time
+}
+
+const (
+	RetiredRefreshTokenReasonRotated              = "rotated"
+	RetiredRefreshTokenReasonGitHubExpired        = "github_expired"
+	RetiredRefreshTokenReasonGitHubInvalid        = "github_invalid"
+	RetiredRefreshTokenReasonGitHubMissingRefresh = "github_missing_refresh" //nolint:gosec // reason label, not a credential
+	RetiredRefreshTokenReasonGrantDeleted         = "grant_deleted"
+)
+
+// RetiredRefreshToken records hashed refresh tokens after rotation or teardown.
+type RetiredRefreshToken struct {
+	TokenHash      []byte
+	Reason         string
+	UserID         uuid.UUID
+	ClientID       string
+	OldJTI         string
+	ReplacementJTI string
+	GraceExpiresAt time.Time
+	RetainedUntil  time.Time
+	CreatedAt      time.Time
+}
+
+func HashRefreshToken(token string) []byte {
+	sum := sha256.Sum256([]byte(token))
+	return sum[:]
 }
 
 // OAuthClient is a registered OAuth2 client stored in the database.

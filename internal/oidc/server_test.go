@@ -107,10 +107,7 @@ func (r *inMemRevocation) IsTokenRevoked(_ context.Context, jti string) (bool, e
 
 func newTestOIDCServer(t *testing.T) *Server {
 	t.Helper()
-	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
-	require.NoError(t, err)
+	raw := newTestJWK(t)
 	srv, err := NewServer(Config{
 		BaseURL:    "http://example.com",
 		AuthState:  newInMemAuthState(),
@@ -120,9 +117,75 @@ func newTestOIDCServer(t *testing.T) *Server {
 	return srv
 }
 
+func newTestJWK(t *testing.T) jwk.Key {
+	t.Helper()
+	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	raw, err := jwk.Import(privkey)
+	require.NoError(t, err)
+	return raw
+}
+
 func pkceChallenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+func TestDurationOrDefault(t *testing.T) {
+	def := 30 * time.Second
+	require.Equal(t, def, durationOrDefault(nil, def))
+	require.Equal(t, time.Duration(0), durationOrDefault(durationPtr(0), def))
+	require.Equal(t, 2*time.Hour, durationOrDefault(durationPtr(2*time.Hour), def))
+}
+
+func TestNewServer_RefreshTokenDurationDefaults(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	require.Equal(t, DefaultRefreshTokenGracePeriod, srv.refreshTokenGracePeriod)
+	require.Equal(t, DefaultRetiredRefreshTokenRetention, srv.retiredRefreshTokenRetention)
+}
+
+func TestNewServer_RefreshTokenDurationOverrides(t *testing.T) {
+	grace := time.Duration(0)
+	retention := 2 * time.Hour
+	srv, err := NewServer(Config{
+		BaseURL:                      "http://example.com",
+		AuthState:                    newInMemAuthState(),
+		Revocation:                   newInMemRevocation(),
+		RefreshTokenGracePeriod:      &grace,
+		RetiredRefreshTokenRetention: &retention,
+	}, newTestJWK(t))
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(0), srv.refreshTokenGracePeriod)
+	require.Equal(t, 2*time.Hour, srv.retiredRefreshTokenRetention)
+}
+
+func TestNewServer_RefreshTokenDurationValidation(t *testing.T) {
+	cases := []struct {
+		name      string
+		grace     *time.Duration
+		retention *time.Duration
+	}{
+		{name: "negative grace", grace: durationPtr(-time.Second)},
+		{name: "grace too high", grace: durationPtr(61 * time.Second)},
+		{name: "zero retention", retention: durationPtr(0)},
+		{name: "retention less than grace", grace: durationPtr(10 * time.Second), retention: durationPtr(5 * time.Second)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewServer(Config{
+				BaseURL:                      "http://example.com",
+				AuthState:                    newInMemAuthState(),
+				Revocation:                   newInMemRevocation(),
+				RefreshTokenGracePeriod:      tc.grace,
+				RetiredRefreshTokenRetention: tc.retention,
+			}, newTestJWK(t))
+			require.Error(t, err)
+		})
+	}
+}
+
+func durationPtr(d time.Duration) *time.Duration {
+	return &d
 }
 
 // --- Discovery ---
@@ -278,7 +341,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	jwksKid := keySet.Keys[0].Kid
 	require.NotEmpty(t, jwksKid)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	parts := strings.SplitN(tokenString, ".", 3)
@@ -1048,8 +1111,13 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 	require.Equal(t, oldJTI, gs.rotateCalls[0].oldJTI, "old jti must be passed to RotateGrant for atomic revocation")
 	require.Equal(t, "gha_new_access", gs.rotateCalls[0].grant.AccessToken)
 	require.Equal(t, "ghr_new_refresh", gs.rotateCalls[0].grant.RefreshToken)
+	require.NotNil(t, gs.rotateCalls[0].retired)
+	require.Equal(t, store.RetiredRefreshTokenReasonRotated, gs.rotateCalls[0].retired.Reason)
+	require.Equal(t, store.HashRefreshToken(oldRefresh), gs.rotateCalls[0].retired.TokenHash)
 	rotatedJTI := gs.rotateCalls[0].grant.JTI
 	require.NotEqual(t, oldJTI, rotatedJTI, "jti must rotate")
+	require.Equal(t, rotatedJTI, gs.rotateCalls[0].retired.ReplacementJTI)
+	require.WithinDuration(t, time.Now().Add(DefaultRefreshTokenGracePeriod), gs.rotateCalls[0].retired.GraceExpiresAt, 5*time.Second)
 
 	// refresh_token_expires_in is recomputed from the fresh GitHub refresh token —
 	// extractRefreshExpiry falls back to ~6 months when the upstream response doesn't
@@ -1205,6 +1273,150 @@ func TestTokenHandler_RefreshGrant_UnknownToken(t *testing.T) {
 	require.Equal(t, "invalid_grant", errResp["error"])
 }
 
+func TestTokenHandler_RefreshGrant_GraceRetry(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	userID := uuid.New()
+	replacement := store.Grant{
+		JTI:                uuid.New().String(),
+		UserID:             userID,
+		OurRefreshToken:    "current-refresh-token",
+		ClientID:           "test-client",
+		Scope:              "insights:read insights:write",
+		RefreshToken:       "ghr-current",
+		RefreshTokenExpiry: time.Now().Add(180 * 24 * time.Hour),
+		JWTExpiry:          time.Now().Add(15 * time.Minute),
+	}
+	gs.seed(replacement)
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("old-refresh-token"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		UserID:         userID,
+		ClientID:       "test-client",
+		OldJTI:         uuid.New().String(),
+		ReplacementJTI: replacement.JTI,
+		GraceExpiresAt: time.Now().Add(DefaultRefreshTokenGracePeriod),
+		RetainedUntil:  time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"old-refresh-token"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Empty(t, gh.refreshCalls, "grace retry must not call GitHub")
+	require.Empty(t, gs.rotateCalls, "grace retry must not rotate again")
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, replacement.OurRefreshToken, resp["refresh_token"])
+	tokenString, _ := resp["access_token"].(string)
+	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	require.NoError(t, err)
+	require.Equal(t, userID.String(), info.UserID)
+}
+
+func TestTokenHandler_RefreshGrant_GraceExpired(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("old-refresh-token"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		ClientID:       "test-client",
+		ReplacementJTI: uuid.New().String(),
+		GraceExpiresAt: time.Now().Add(-time.Second),
+		RetainedUntil:  time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"old-refresh-token"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Empty(t, gh.refreshCalls)
+	require.Empty(t, gs.rotateCalls)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_RefreshGrant_GraceDisabled(t *testing.T) {
+	gs := &testGrantStore{}
+	gh := &mockGitHubConnector{}
+	srv := newRefreshTestServer(t, gs, gh)
+	srv.refreshTokenGracePeriod = 0
+
+	oldRefresh := "old-refresh-token"
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken(oldRefresh),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		ClientID:       "test-client",
+		ReplacementJTI: uuid.New().String(),
+		RetainedUntil:  time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {oldRefresh},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Empty(t, gh.refreshCalls)
+	require.Empty(t, gs.rotateCalls)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandler_RefreshGrant_RecentlyRemoved(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:     store.HashRefreshToken("removed-refresh-token"),
+		Reason:        store.RetiredRefreshTokenReasonGitHubExpired,
+		ClientID:      "test-client",
+		OldJTI:        uuid.New().String(),
+		RetainedUntil: time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"removed-refresh-token"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
 func TestTokenHandler_RefreshGrant_ClientIDMismatch(t *testing.T) {
 	gs := &testGrantStore{}
 	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
@@ -1267,6 +1479,9 @@ func TestTokenHandler_RefreshGrant_GitHubRefreshExpired(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, revoked, "expired-grant jti must be revoked")
 	require.Equal(t, []string{jti}, gs.deleteCalls, "expired grant row must be deleted")
+	require.Len(t, gs.retired, 1)
+	require.Equal(t, store.RetiredRefreshTokenReasonGitHubExpired, gs.retired[0].Reason)
+	require.Equal(t, store.HashRefreshToken("rt-expired"), gs.retired[0].TokenHash)
 }
 
 func TestTokenHandler_RefreshGrant_MissingParams(t *testing.T) {
@@ -1499,7 +1714,7 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -1545,7 +1760,7 @@ func TestLogoutHandler_WrongMethod(t *testing.T) {
 func TestVerifyJWT_ValidToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -1566,7 +1781,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	a := newTestOIDCServer(t)
 	b := newTestOIDCServer(t)
 
-	tokenString, err := b.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := b.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = a.VerifyJWT(context.Background(), tokenString, nil)
@@ -1576,7 +1791,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 func TestVerifyJWT_RevokedToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -1592,7 +1807,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
@@ -1712,6 +1927,7 @@ type testGrantStore struct {
 	byRefresh   map[string]store.Grant
 	rotateCalls []rotateCall
 	deleteCalls []string
+	retired     []store.RetiredRefreshToken
 	rotateErr   error
 	// revocation, when set, receives the old jti atomically with the rotation —
 	// mirrors the postgres tx-based rotate+revoke.
@@ -1723,6 +1939,7 @@ type rotateCall struct {
 	oldJTI       string
 	oldJWTExpiry time.Time
 	grant        store.Grant
+	retired      *store.RetiredRefreshToken
 }
 
 func (s *testGrantStore) seed(g store.Grant) {
@@ -1757,9 +1974,32 @@ func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, token string)
 	return &g, nil
 }
 
-func (s *testGrantStore) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant) (*store.Grant, error) {
+func (s *testGrantStore) GetGrant(_ context.Context, jti string) (*store.Grant, error) {
 	s.mu.Lock()
-	s.rotateCalls = append(s.rotateCalls, rotateCall{oldToken, oldJTI, oldJWTExpiry, g})
+	defer s.mu.Unlock()
+	for _, g := range s.byRefresh {
+		if g.JTI == jti {
+			return &g, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (s *testGrantStore) GetRetiredRefreshToken(_ context.Context, tokenHash []byte) (*store.RetiredRefreshToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, rt := range s.retired {
+		if string(rt.TokenHash) == string(tokenHash) {
+			cp := rt
+			return &cp, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (s *testGrantStore) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant, retired *store.RetiredRefreshToken) (*store.Grant, error) {
+	s.mu.Lock()
+	s.rotateCalls = append(s.rotateCalls, rotateCall{oldToken, oldJTI, oldJWTExpiry, g, retired})
 	if s.rotateErr != nil {
 		s.mu.Unlock()
 		return nil, s.rotateErr
@@ -1772,6 +2012,9 @@ func (s *testGrantStore) RotateGrant(ctx context.Context, oldToken, oldJTI strin
 	if g.OurRefreshToken != "" {
 		s.byRefresh[g.OurRefreshToken] = g
 	}
+	if retired != nil {
+		s.retired = append(s.retired, *retired)
+	}
 	rev := s.revocation
 	s.mu.Unlock()
 	if rev != nil && oldJTI != "" {
@@ -1782,10 +2025,13 @@ func (s *testGrantStore) RotateGrant(ctx context.Context, oldToken, oldJTI strin
 	return &g, nil
 }
 
-func (s *testGrantStore) DeleteGrant(_ context.Context, jti string) error {
+func (s *testGrantStore) DeleteGrant(_ context.Context, jti string, retired *store.RetiredRefreshToken) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deleteCalls = append(s.deleteCalls, jti)
+	if retired != nil {
+		s.retired = append(s.retired, *retired)
+	}
 	return nil
 }
 

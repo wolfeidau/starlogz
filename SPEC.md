@@ -196,7 +196,6 @@ Claims:
 | `iss`   | Server base URL                                                   |
 | `sub`   | Internal `users.id` (UUID). v0.1 used the GitHub numeric ID; v0.2 switches to the internal UUID now that personal orgs need a stable identifier. |
 | `aud`   | `["<base-url>/mcp"]` — RFC 8707 audience-bound                    |
-| `email` | User's primary GitHub email                                       |
 | `scope` | Space-delimited scope list                                        |
 | `jti`   | Unique JWT ID, checked against `revoked_tokens` on every request  |
 | `exp`   | 7-day expiry                                                      |

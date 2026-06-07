@@ -293,7 +293,6 @@ Claims:
 | `iss` | string | Issuer — the server's base URL |
 | `sub` | string | GitHub user ID as decimal string; will become the internal `users.id` UUID in v0.2 |
 | `aud` | string[] | Audience — `["<base-url>/mcp"]`; required by MCP spec (RFC 8707) |
-| `email` | string | User's primary email |
 | `scope` | string | Space-delimited list of granted scopes |
 | `jti` | string | Unique token ID (UUID v4) — required for revocation |
 | `exp` | int | Unix timestamp — expiry |
@@ -306,7 +305,6 @@ Example payload:
   "iss": "https://starlogz.example.com",
   "sub": "12345678",
   "aud": ["https://starlogz.example.com/mcp"],
-  "email": "user@example.com",
   "scope": "insights:read insights:write",
   "jti": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "exp": 1745604800,

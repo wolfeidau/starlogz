@@ -98,6 +98,8 @@ All configuration is via environment variables.
 | `GITHUB_CLIENT_ID` | (none) | Yes | GitHub app client ID |
 | `GITHUB_CLIENT_SECRET` | (none) | Yes | GitHub app client secret |
 | `DATABASE_URL` | (none) | Yes | PostgreSQL connection string (pgx DSN) |
+| `REFRESH_TOKEN_GRACE_PERIOD` | `30s` | No | How long a rotated refresh token remains accepted for retry. Set to `0s` to disable grace retries. Values above `60s` are rejected. |
+| `RETIRED_REFRESH_TOKEN_RETENTION` | `24h` | No | How long hashed retired refresh tokens are retained for refresh diagnostics. Must be at least the grace period. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | No | OTLP collector endpoint. Omit to disable telemetry entirely. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | (none) | No | e.g. `x-honeycomb-team=<key>` |
 | `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
@@ -179,6 +181,23 @@ Store tests spin up a real PostgreSQL container via `testcontainers-go`. Docker 
 ## Observability
 
 Traces and metrics are exported via OTLP gRPC when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. All HTTP handlers are wrapped with `otelhttp`. Omitting the endpoint disables telemetry with no overhead.
+
+Refresh-token grants emit the `starlogz.oauth.refresh_token_grants` counter with low-cardinality `outcome` and `reason` labels. The same reason values are present in structured logs. These labels are operator diagnostics, not a client API contract; OAuth clients should continue to rely on standard token endpoint errors such as `invalid_grant`, `invalid_client`, and `server_error`.
+
+Refresh-token reason values:
+
+| Reason | Meaning |
+|--------|---------|
+| `rotated` | Normal successful refresh; the Starlogz and GitHub refresh tokens were rotated. |
+| `grace_retry` | A previous Starlogz refresh token was accepted inside the configured grace window, default `30s`. |
+| `recently_rotated_grace_expired` | A previously rotated token was presented after the grace window. |
+| `recently_removed` | The token was known in the retired-token retention window, default `24h`, but the grant was torn down. |
+| `github_expired` | The stored GitHub refresh token expired, so the grant was removed. |
+| `github_invalid` | GitHub rejected the stored refresh token as invalid, so the grant was removed. |
+| `github_missing_refresh` | GitHub did not provide a refresh token when one was required to continue the chain. |
+| `client_mismatch` | The refresh token was presented by a different OAuth client. |
+| `never_seen` | No active or retained record exists for the submitted refresh token. |
+| `server_error` | Internal or upstream transient failure prevented refresh completion. |
 
 Error events are forwarded to Sentry when `SENTRY_DSN` is set. Only `Error`-level log records are captured; `Info` and `Warn` are not forwarded. The HTTP middleware also captures panics and associates them with the triggering request. Omitting `SENTRY_DSN` disables Sentry entirely with no overhead.
 

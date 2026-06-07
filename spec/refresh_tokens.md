@@ -172,6 +172,15 @@ A race condition where two requests simultaneously use the same refresh token
 is handled by the UNIQUE constraint on `our_refresh_token` — the second UPDATE
 will find no matching row and returns `invalid_grant`.
 
+The rotated token is retained as a SHA-256 hash for diagnostics and can be
+accepted for a short grace retry window. The default grace period is 30 seconds
+and can be overridden with `REFRESH_TOKEN_GRACE_PERIOD` / `--refresh-token-grace-period`.
+Set it to `0s` to disable accepted grace retries. Values above 60 seconds are
+rejected.
+
+On a grace retry the server re-issues the replacement grant's existing JWT (same
+`jti`, scope, and expiry) without calling GitHub or rotating again.
+
 ---
 
 ## GitHub token rotation
@@ -222,6 +231,11 @@ Grants whose `jwt_expiry` is in the past are pruned from the database when a
 new grant is inserted for the same `github_id` (existing behaviour). This
 removes rows for sessions where the user never used their refresh token.
 
+Retired refresh token hashes are retained for refresh diagnostics for 24 hours
+by default. Operators can override this with
+`RETIRED_REFRESH_TOKEN_RETENTION` / `--retired-refresh-token-retention`. The
+retention value must be positive and at least as long as the grace period.
+
 ---
 
 ## Error reference
@@ -242,6 +256,13 @@ All errors use the standard OAuth2 error response format:
 | `invalid_grant` | 400 | Refresh token not found, already used, or GitHub refresh token expired |
 | `invalid_client` | 400 | `client_id` does not match the grant |
 | `server_error` | 500 | GitHub token refresh API call failed (transient) |
+
+The public token endpoint intentionally keeps this standard OAuth2 error shape.
+Server logs and the `starlogz.oauth.refresh_token_grants` metric expose more
+specific operator-facing reason labels: `rotated`, `grace_retry`,
+`recently_rotated_grace_expired`, `recently_removed`, `github_expired`,
+`github_invalid`, `github_missing_refresh`, `client_mismatch`, `never_seen`, and
+`server_error`. Clients must not depend on these internal reason labels.
 
 ---
 

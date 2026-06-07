@@ -15,14 +15,16 @@ import (
 )
 
 type HTTPCmd struct {
-	ListenAddr         string        `help:"The address to listen on." default:"localhost:8088" env:"HTTP_LISTEN_ADDR"`
-	BaseServerURL      string        `help:"The base URL of this server." default:"http://localhost:8088" env:"SERVER_URL"`
-	JWKPath            string        `help:"Path to the JSON web key used to sign auth tokens." required:""`
-	GitHubClientID     string        `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
-	GitHubClientSecret string        `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
-	DatabaseURL        string        `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
-	TokenEncryptionKey string        `help:"Base64-encoded 32-byte key for encrypting stored GitHub tokens." env:"TOKEN_ENCRYPTION_KEY" required:""`
-	ShutdownTimeout    time.Duration `help:"Maximum time to wait for in-flight requests before exiting." default:"30s" env:"SHUTDOWN_TIMEOUT"`
+	ListenAddr                   string        `help:"The address to listen on." default:"localhost:8088" env:"HTTP_LISTEN_ADDR"`
+	BaseServerURL                string        `help:"The base URL of this server." default:"http://localhost:8088" env:"SERVER_URL"`
+	JWKPath                      string        `help:"Path to the JSON web key used to sign auth tokens." required:""`
+	GitHubClientID               string        `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
+	GitHubClientSecret           string        `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
+	DatabaseURL                  string        `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
+	TokenEncryptionKey           string        `help:"Base64-encoded 32-byte key for encrypting stored GitHub tokens." env:"TOKEN_ENCRYPTION_KEY" required:""`
+	ShutdownTimeout              time.Duration `help:"Maximum time to wait for in-flight requests before exiting." default:"30s" env:"SHUTDOWN_TIMEOUT"`
+	RefreshTokenGracePeriod      time.Duration `help:"How long a rotated refresh token remains accepted for retry; use 0s to disable." default:"30s" env:"REFRESH_TOKEN_GRACE_PERIOD"`
+	RetiredRefreshTokenRetention time.Duration `help:"How long hashed retired refresh tokens are retained for refresh diagnostics." default:"24h" env:"RETIRED_REFRESH_TOKEN_RETENTION"`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -54,14 +56,16 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	srv, err := server.New(server.Config{
-		BaseURL:            c.BaseServerURL,
-		GitHubClientID:     c.GitHubClientID,
-		GitHubClientSecret: c.GitHubClientSecret,
-		PrivKey:            privkey,
-		Logger:             globals.Logger,
-		Store:              st,
-		ShutdownTimeout:    c.ShutdownTimeout,
-		SentryHandler:      globals.SentryHandler,
+		BaseURL:                      c.BaseServerURL,
+		GitHubClientID:               c.GitHubClientID,
+		GitHubClientSecret:           c.GitHubClientSecret,
+		PrivKey:                      privkey,
+		Logger:                       globals.Logger,
+		Store:                        st,
+		ShutdownTimeout:              c.ShutdownTimeout,
+		RefreshTokenGracePeriod:      &c.RefreshTokenGracePeriod,
+		RetiredRefreshTokenRetention: &c.RetiredRefreshTokenRetention,
+		SentryHandler:                globals.SentryHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
