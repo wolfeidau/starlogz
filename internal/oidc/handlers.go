@@ -261,7 +261,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	)
 	ctx := ctxlog.WithLogger(r.Context(), log)
 
-	tokenString, err := s.IssueJWT(pc.Sub, pc.Email, pc.Scope, jti, jwtExpiry)
+	tokenString, err := s.IssueJWT(pc.Sub, pc.Scope, jti, jwtExpiry)
 	if err != nil {
 		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
@@ -500,7 +500,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		slog.String("reason", "rotated"),
 	)
 
-	tokenString, err := s.IssueJWT(sub, identity.Email, grant.Scope, newJTI, newJWTExpiry)
+	tokenString, err := s.IssueJWT(sub, grant.Scope, newJTI, newJWTExpiry)
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
@@ -607,7 +607,7 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 		return
 	}
 
-	tokenString, err := s.IssueJWT(grant.UserID.String(), "", grant.Scope, grant.JTI, grant.JWTExpiry)
+	tokenString, err := s.IssueJWT(grant.UserID.String(), grant.Scope, grant.JTI, grant.JWTExpiry)
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "JWT issuance failed for grace retry", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))

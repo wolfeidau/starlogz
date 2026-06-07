@@ -341,7 +341,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	jwksKid := keySet.Keys[0].Kid
 	require.NotEmpty(t, jwksKid)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	parts := strings.SplitN(tokenString, ".", 3)
@@ -1714,7 +1714,7 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -1760,7 +1760,7 @@ func TestLogoutHandler_WrongMethod(t *testing.T) {
 func TestVerifyJWT_ValidToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
@@ -1781,7 +1781,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	a := newTestOIDCServer(t)
 	b := newTestOIDCServer(t)
 
-	tokenString, err := b.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := b.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = a.VerifyJWT(context.Background(), tokenString, nil)
@@ -1791,7 +1791,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 func TestVerifyJWT_RevokedToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -1807,7 +1807,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "user@example.com", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))

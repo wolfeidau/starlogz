@@ -178,6 +178,9 @@ and can be overridden with `REFRESH_TOKEN_GRACE_PERIOD` / `--refresh-token-grace
 Set it to `0s` to disable accepted grace retries. Values above 60 seconds are
 rejected.
 
+On a grace retry the server re-issues the replacement grant's existing JWT (same
+`jti`, scope, and expiry) without calling GitHub or rotating again.
+
 ---
 
 ## GitHub token rotation
