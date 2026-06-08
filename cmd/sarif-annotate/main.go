@@ -141,47 +141,65 @@ func parseSARIF(path string) ([]finding, error) {
 }
 
 func buildMarkdown(findings []finding) string {
-	var b strings.Builder
-
-	tool := findings[0].tool
-	counts := map[string]int{}
+	// group by tool so multi-run SARIF files get one section per tool
+	type group struct {
+		tool    string
+		toolURI string
+		items   []finding
+	}
+	var groups []group
+	idx := map[string]int{}
 	for _, f := range findings {
-		counts[f.level]++
-	}
-
-	toolLabel := tool
-	if findings[0].toolURI != "" {
-		toolLabel = fmt.Sprintf("[%s](%s)", tool, findings[0].toolURI)
-	}
-	fmt.Fprintf(&b, "### %s\n\n", toolLabel)
-
-	var pills []string
-	for _, lvl := range []string{"error", "warning", "note"} {
-		if n := counts[lvl]; n > 0 {
-			pills = append(pills, fmt.Sprintf("%s %d %s", levelIcon(lvl), n, pluralise(lvl, n)))
+		i, ok := idx[f.tool]
+		if !ok {
+			i = len(groups)
+			idx[f.tool] = i
+			groups = append(groups, group{tool: f.tool, toolURI: f.toolURI})
 		}
+		groups[i].items = append(groups[i].items, f)
 	}
-	fmt.Fprintf(&b, "%s\n\n", strings.Join(pills, " · "))
 
-	fmt.Fprintf(&b, "| Severity | Rule | Location | Message |\n")
-	fmt.Fprintf(&b, "|----------|------|----------|---------|\n")
+	var b strings.Builder
+	for _, g := range groups {
+		toolLabel := g.tool
+		if g.toolURI != "" {
+			toolLabel = fmt.Sprintf("[%s](%s)", g.tool, g.toolURI)
+		}
+		fmt.Fprintf(&b, "### %s\n\n", toolLabel)
 
-	for _, f := range findings {
-		icon := levelIcon(f.level)
-		loc := ""
-		if f.path != "" {
-			if f.line > 0 {
-				loc = fmt.Sprintf("`%s:%d`", f.path, f.line)
-			} else {
-				loc = fmt.Sprintf("`%s`", f.path)
+		counts := map[string]int{}
+		for _, f := range g.items {
+			counts[f.level]++
+		}
+		var pills []string
+		for _, lvl := range []string{"error", "warning", "note"} {
+			if n := counts[lvl]; n > 0 {
+				pills = append(pills, fmt.Sprintf("%s %d %s", levelIcon(lvl), n, pluralise(lvl, n)))
 			}
 		}
-		rule := f.ruleID
-		if f.ruleURI != "" {
-			rule = fmt.Sprintf("[%s](%s)", f.ruleID, f.ruleURI)
+		fmt.Fprintf(&b, "%s\n\n", strings.Join(pills, " · "))
+
+		fmt.Fprintf(&b, "| Severity | Rule | Location | Message |\n")
+		fmt.Fprintf(&b, "|----------|------|----------|---------|\n")
+
+		for _, f := range g.items {
+			icon := levelIcon(f.level)
+			loc := ""
+			if f.path != "" {
+				if f.line > 0 {
+					loc = fmt.Sprintf("`%s:%d`", f.path, f.line)
+				} else {
+					loc = fmt.Sprintf("`%s`", f.path)
+				}
+			}
+			rule := f.ruleID
+			if f.ruleURI != "" {
+				rule = fmt.Sprintf("[%s](%s)", f.ruleID, f.ruleURI)
+			}
+			msg := strings.ReplaceAll(f.message, "|", "\\|")
+			fmt.Fprintf(&b, "| %s %s | %s | %s | %s |\n", icon, f.level, rule, loc, msg)
 		}
-		msg := strings.ReplaceAll(f.message, "|", "\\|")
-		fmt.Fprintf(&b, "| %s %s | %s | %s | %s |\n", icon, f.level, rule, loc, msg)
+		fmt.Fprintf(&b, "\n")
 	}
 
 	return b.String()
