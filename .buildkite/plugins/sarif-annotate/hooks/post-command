@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+FILE="${BUILDKITE_PLUGIN_SARIF_ANNOTATE_FILE}"
+STYLE="${BUILDKITE_PLUGIN_SARIF_ANNOTATE_STYLE:-warning}"
+CONTEXT="${BUILDKITE_PLUGIN_SARIF_ANNOTATE_CONTEXT:-$(basename "$FILE" .sarif)}"
+
+if [[ "${BUILDKITE_COMMAND_EXIT_STATUS:-0}" != "0" ]]; then
+  STYLE="error"
+fi
+
+if [[ ! -f "$FILE" ]]; then
+  echo "sarif-annotate: $FILE not found, skipping"
+  exit 0
+fi
+
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+
+go run ./cmd/sarif-annotate "$FILE" > "$TMPFILE" || exit 0
+
+if [[ ! -s "$TMPFILE" ]]; then
+  exit 0
+fi
+
+buildkite-agent annotate --style "$STYLE" --context "$CONTEXT" < "$TMPFILE"

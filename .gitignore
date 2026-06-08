@@ -4,7 +4,18 @@ dist/
 # used for local development
 key.jwk
 .envrc
+
+# terraform
+infra/terraform/terraform.tfvars
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/output.tfplan
+infra/terraform/terraform.tfstate
+infra/terraform/terraform.tfstate.backup
 logs/
 /coverage.out
 /json.log
 /junit.xml
+/starlogz-server
+/sarif-annotate
+/tflint.sarif

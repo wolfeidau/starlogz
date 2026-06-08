@@ -235,31 +235,38 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 
 	revoked, err := s.revocation.IsTokenRevoked(ctx, jti)
 	if err != nil {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: revocation check failed", slog.Any("error", err))
 		return nil, fmt.Errorf("%w: revocation check failed: %v", auth.ErrInvalidToken, err)
 	}
 	if revoked {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: revoked")
 		return nil, fmt.Errorf("%w: token has been revoked", auth.ErrInvalidToken)
 	}
 
 	var scope string
 	if err := verifiedToken.Get("scope", &scope); err != nil {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: missing scope claim")
 		return nil, fmt.Errorf("%w: invalid token claims", auth.ErrInvalidToken)
 	}
 
 	if scope == "" {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: empty scope claim")
 		return nil, fmt.Errorf("%w: missing scope claim", auth.ErrInvalidToken)
 	}
 
 	expiresAt, ok := verifiedToken.Expiration()
 	if !ok {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: missing expiration claim")
 		return nil, fmt.Errorf("%w: missing expiration claim", auth.ErrInvalidToken)
 	}
 
 	sub, ok := verifiedToken.Subject()
 	if !ok || sub == "" {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: missing sub claim")
 		return nil, fmt.Errorf("%w: missing sub claim", auth.ErrInvalidToken)
 	}
 
+	ctxlog.LoggerFrom(ctx).DebugContext(ctx, "token verified", slog.String("scope", scope))
 	return &auth.TokenInfo{
 		UserID:     sub,
 		Scopes:     strings.Fields(scope),

@@ -20,8 +20,9 @@ import (
 var (
 	version = "devel"
 	cli     struct {
-		HTTP        commands.HTTPCmd   `cmd:"" help:"http mcp server using streamable HTTP transport."`
-		Keygen      commands.KeyGenCmd `cmd:"" help:"generate json web key to sign auth tokens."`
+		HTTP        commands.HTTPCmd    `cmd:"" help:"http mcp server using streamable HTTP transport."`
+		Migrate     commands.MigrateCmd `cmd:"" help:"run database migrations and exit."`
+		Keygen      commands.KeyGenCmd  `cmd:"" help:"generate json web key to sign auth tokens."`
 		Development bool
 		Version     kong.VersionFlag
 	}

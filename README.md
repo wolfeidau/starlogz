@@ -105,6 +105,51 @@ All configuration is via environment variables.
 | `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
 | `SENTRY_ENVIRONMENT` | (none) | No | Sentry environment tag, e.g. `production`, `staging`. |
 
+## Deploy to AWS
+
+The server runs as an AWS Lambda function fronted by API Gateway HTTP API, using the [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) layer. Infrastructure is managed by Terraform.
+
+### Prerequisites
+
+- [goreleaser](https://goreleaser.com) — builds the Lambda binary
+- AWS CLI — authenticated to the target account
+- Terraform >= 1.5.7
+- A [PlanetScale Postgres database cluster](https://planetscale.com/postgres)
+- `infra/terraform/terraform.tfvars` populated with all required variables (see `variables.tf`; sensitive values go here and are gitignored)
+
+### First deploy
+
+The deployment S3 bucket is created by Terraform, so bootstrap in two steps:
+
+```bash
+# 1. Create the S3 bucket only
+terraform -chdir=infra/terraform apply -target=aws_s3_bucket.deploy
+
+# 2. Build, package, and upload the function
+./bin/deploy
+
+# 3. Apply the rest (update function_s3_key and function_version in terraform.tfvars first)
+terraform -chdir=infra/terraform plan -out output.tfplan
+terraform -chdir=infra/terraform apply "output.tfplan"
+```
+
+### Subsequent deploys
+
+```bash
+./bin/deploy          # deploys to dev
+./bin/deploy prod     # deploys to a different env
+```
+
+The script builds with goreleaser, reads the version from `dist/metadata.json`, packages the zip, and prompts for confirmation before each of the three destructive steps: S3 upload, terraform plan, and terraform apply. `function_s3_key` and `function_version` are passed as `-var` flags so `terraform.tfvars` does not need to be edited between deploys.
+
+### Importing existing resources
+
+If AWS auto-created resources before Terraform managed them (e.g. the Lambda log group), import them before applying:
+
+```bash
+terraform -chdir=infra/terraform import aws_cloudwatch_log_group.lambda /aws/lambda/starlogz-dev
+```
+
 ## Commands
 
 ```

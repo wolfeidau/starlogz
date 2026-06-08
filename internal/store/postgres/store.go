@@ -811,8 +811,6 @@ func (s *Store) RevokeToken(ctx context.Context, jti string, expiresAt time.Time
 
 // IsTokenRevoked returns true if the jti is present and not yet expired.
 func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
-	s.logger(ctx).DebugContext(ctx, "checking if token is revoked")
-
 	var exists bool
 	err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM revoked_tokens WHERE jti = $1 AND expires_at > now())`,
@@ -820,6 +818,7 @@ func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("check revocation: %w", err)
 	}
+	s.logger(ctx).DebugContext(ctx, "token revocation check", slog.Bool("revoked", exists))
 	return exists, nil
 }
 

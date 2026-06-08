@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euo pipefail
+printf '%s' "$JWK_CONTENT" > /tmp/key.jwk
+exec /var/task/starlogz-server http --jwk-path /tmp/key.jwk
