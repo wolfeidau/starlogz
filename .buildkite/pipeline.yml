@@ -12,14 +12,27 @@ steps:
     key: quality_checks
     steps:
       - label: ":golangci-lint: lint"
-        command: golangci-lint run --output.checkstyle.path checkstyle.xml --verbose --timeout 3m
+        command: golangci-lint run --output.sarif.path golangci-lint.sarif --verbose --timeout 3m
         artifact_paths:
-          - checkstyle.xml
+          - golangci-lint.sarif
         env:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
           - mise#v1.1.1: ~
+          - ./.buildkite/plugins/sarif-annotate:
+              file: golangci-lint.sarif
+
+      - label: ":terraform: lint"
+        command: tflint --chdir=infra/terraform -f sarif > tflint.sarif
+        artifact_paths:
+          - tflint.sarif
+        env:
+          TFLINT_LOG: debug
+        plugins:
+          - mise#v1.1.1: ~
+          - ./.buildkite/plugins/sarif-annotate:
+              file: tflint.sarif
 
       - label: ":go: test"
         artifact_paths:

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+ENV=${1:-dev}
+BUCKET="starlogz-deploy-${ENV}"
+TF_DIR="infra/terraform"
+
+confirm() {
+  local msg=$1
+  echo ""
+  echo "${msg}"
+  read -rp "Continue? [y/N] " ans
+  [[ "${ans}" == [yY] ]] || { echo "aborted."; exit 1; }
+}
+
+# Build
+echo "==> building"
+goreleaser build --clean --snapshot
+VERSION=$(jq -r .version dist/metadata.json)
+echo "    version: ${VERSION}"
+
+# Package
+echo "==> packaging"
+cp dist/starlogz_linux_amd64_v1/starlogz-server .
+zip -j dist/function.zip infra/lambda/bootstrap starlogz-server
+
+S3_KEY="${VERSION}/function.zip"
+
+confirm "Upload dist/function.zip → s3://${BUCKET}/${S3_KEY}"
+echo "==> uploading"
+aws s3 cp dist/function.zip "s3://${BUCKET}/${S3_KEY}"
+
+confirm "Run terraform plan (env=${ENV}, version=${VERSION})"
+echo "==> planning"
+terraform -chdir="${TF_DIR}" plan \
+  -var "function_s3_key=${S3_KEY}" \
+  -var "function_version=${VERSION}" \
+  -out output.tfplan
+
+confirm "Apply the plan?"
+echo "==> applying"
+terraform -chdir="${TF_DIR}" apply "output.tfplan"
+
+echo ""
+echo "==> deployed ${VERSION} to ${ENV}"

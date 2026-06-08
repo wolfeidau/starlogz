@@ -1,0 +1,19 @@
+name: SARIF Annotate
+description: Converts a SARIF report into a Buildkite annotation.
+author: github.com/wolfeidau
+requirements: []
+configuration:
+  properties:
+    file:
+      type: string
+      description: Path to the SARIF file to annotate.
+    style:
+      type: string
+      enum: [success, info, warning, error]
+      description: Buildkite annotation style. Defaults to "warning".
+    context:
+      type: string
+      description: Buildkite annotation context. Defaults to the SARIF file basename without extension.
+  required:
+    - file
+  additionalProperties: false

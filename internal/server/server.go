@@ -87,7 +87,10 @@ func New(cfg Config) (*Server, error) {
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return mcpSrv.server
-	}, &mcp.StreamableHTTPOptions{Stateless: true})
+	}, &mcp.StreamableHTTPOptions{
+		Stateless:                  true,
+		DisableLocalhostProtection: true,
+	})
 
 	authenticatedHandler := jwtAuth(mcpHandler)
 	metadata := oidcServer.ProtectedResourceMeta()

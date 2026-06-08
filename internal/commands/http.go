@@ -51,10 +51,6 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 	defer st.Close()
 
-	if err := st.Migrate(ctx, globals.Logger); err != nil {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
 	srv, err := server.New(server.Config{
 		BaseURL:                      c.BaseServerURL,
 		GitHubClientID:               c.GitHubClientID,
