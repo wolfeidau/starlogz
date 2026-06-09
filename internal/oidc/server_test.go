@@ -500,7 +500,7 @@ func TestAuthorizeHandler_DefaultsScope(t *testing.T) {
 	require.Equal(t, http.StatusFound, w.Code)
 	location, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
-	pending, err := srv.authState.ConsumePendingAuth(context.Background(), location.Query().Get("state"))
+	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
 	require.NoError(t, err)
 	require.Equal(t, defaultAuthorizeScope, pending.Scope)
 }
@@ -529,7 +529,7 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	require.Equal(t, http.StatusFound, w.Code)
 	location, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
-	pending, err := srv.authState.ConsumePendingAuth(context.Background(), location.Query().Get("state"))
+	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
 }
@@ -673,7 +673,7 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "test-auth-code-abc123"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -706,7 +706,7 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 
 	tokenString, ok := resp["access_token"].(string)
 	require.True(t, ok)
-	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
 }
@@ -716,7 +716,7 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "one-time-code-xyz"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -775,7 +775,7 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
 	code := "pkce-mismatch-code"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -807,7 +807,7 @@ func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "redirect-mismatch-code"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -839,7 +839,7 @@ func TestTokenHandler_MissingRedirectURI(t *testing.T) {
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "missing-redirect-code"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -913,7 +913,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	code := "grant-seam-code"
 	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
 	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
-	require.NoError(t, authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:                userID.String(),
 		GitHubID:           99887766,
 		Email:              "user@example.com",
@@ -980,7 +980,7 @@ func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
 	userID := uuid.New()
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "auth-code-with-refresh"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:                userID.String(),
 		GitHubID:           12345678,
 		Email:              "user@example.com",
@@ -1023,7 +1023,7 @@ func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
 	userID := uuid.New()
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "auth-code-no-refresh"
-	require.NoError(t, srv.authState.StoreAuthCode(context.Background(), code, store.AuthCode{
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
 		Sub:           userID.String(),
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -1128,13 +1128,13 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 		"refresh_token_expires_in must reflect the fresh GitHub refresh window")
 
 	// Old JTI must be on the revocation list (atomic with rotation).
-	revoked, err := srv.revocation.IsTokenRevoked(context.Background(), oldJTI)
+	revoked, err := srv.revocation.IsTokenRevoked(t.Context(), oldJTI)
 	require.NoError(t, err)
 	require.True(t, revoked, "previous JWT jti must be revoked after rotation")
 
 	// New JWT must verify and carry the rotated jti, not the old one.
 	tokenString, _ := resp["access_token"].(string)
-	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
 
@@ -1319,7 +1319,7 @@ func TestTokenHandler_RefreshGrant_GraceRetry(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, replacement.OurRefreshToken, resp["refresh_token"])
 	tokenString, _ := resp["access_token"].(string)
-	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, userID.String(), info.UserID)
 }
@@ -1475,7 +1475,7 @@ func TestTokenHandler_RefreshGrant_GitHubRefreshExpired(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	require.Equal(t, "invalid_grant", errResp["error"])
 
-	revoked, err := srv.revocation.IsTokenRevoked(context.Background(), jti)
+	revoked, err := srv.revocation.IsTokenRevoked(t.Context(), jti)
 	require.NoError(t, err)
 	require.True(t, revoked, "expired-grant jti must be revoked")
 	require.Equal(t, []string{jti}, gs.deleteCalls, "expired grant row must be deleted")
@@ -1574,7 +1574,7 @@ func TestTokenHandler_RefreshGrant_GitHubReturnsNoRefreshToken(t *testing.T) {
 	// Grant must be torn down so future requests with the same opaque token also fail fast.
 	require.Equal(t, []string{jti}, gs.deleteCalls, "broken grant must be deleted")
 	require.Empty(t, gs.rotateCalls, "must not rotate when GitHub did not return a refresh token")
-	revoked, err := srv.revocation.IsTokenRevoked(context.Background(), jti)
+	revoked, err := srv.revocation.IsTokenRevoked(t.Context(), jti)
 	require.NoError(t, err)
 	require.True(t, revoked, "old jti must be revoked when grant is torn down")
 }
@@ -1664,7 +1664,7 @@ func TestGitHubCallbackHandler_ExchangeError(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	srv.github = &mockGitHubConnector{err: fmt.Errorf("GitHub is down")}
 
-	require.NoError(t, srv.authState.StorePendingAuth(context.Background(), "valid-state", store.PendingAuth{
+	require.NoError(t, srv.authState.StorePendingAuth(t.Context(), "valid-state", store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
 		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge("verifier"),
@@ -1689,7 +1689,7 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, srv.authState.StorePendingAuth(context.Background(), "cb-state", store.PendingAuth{
+	require.NoError(t, srv.authState.StorePendingAuth(t.Context(), "cb-state", store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
 		Scope:         "insights:read",
 		CodeChallenge: pkceChallenge("verifier"),
@@ -1717,7 +1717,7 @@ func TestLogoutHandler_RevokesToken(t *testing.T) {
 	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
+	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -1726,7 +1726,7 @@ func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv.LogoutHandler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
 
-	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
+	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.Error(t, err)
 }
 
@@ -1763,7 +1763,7 @@ func TestVerifyJWT_ValidToken(t *testing.T) {
 	tokenString, err := srv.IssueJWT("12345678", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	info, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
 	require.Contains(t, info.Scopes, "insights:read")
@@ -1773,7 +1773,7 @@ func TestVerifyJWT_ValidToken(t *testing.T) {
 
 func TestVerifyJWT_Garbage(t *testing.T) {
 	srv := newTestOIDCServer(t)
-	_, err := srv.VerifyJWT(context.Background(), "not-a-jwt", nil)
+	_, err := srv.VerifyJWT(t.Context(), "not-a-jwt", nil)
 	require.Error(t, err)
 }
 
@@ -1784,7 +1784,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	tokenString, err := b.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	_, err = a.VerifyJWT(context.Background(), tokenString, nil)
+	_, err = a.VerifyJWT(t.Context(), tokenString, nil)
 	require.Error(t, err)
 }
 
@@ -1798,7 +1798,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+tokenString)
 	srv.LogoutHandler().ServeHTTP(httptest.NewRecorder(), req)
 
-	_, err = srv.VerifyJWT(context.Background(), tokenString, nil)
+	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.Error(t, err)
 }
 
@@ -1855,7 +1855,7 @@ func TestVerifyJWT_MissingAud(t *testing.T) {
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES384(), srv.privkey))
 	require.NoError(t, err)
 
-	_, err = srv.VerifyJWT(context.Background(), string(signed), nil)
+	_, err = srv.VerifyJWT(t.Context(), string(signed), nil)
 	require.Error(t, err)
 }
 
@@ -1866,7 +1866,7 @@ func TestVerifyJWT_WrongAud(t *testing.T) {
 		b.Audience([]string{"https://different-resource.example.com/mcp"})
 	})
 
-	_, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	_, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.Error(t, err)
 }
 
@@ -1877,7 +1877,7 @@ func TestVerifyJWT_WrongIssuer(t *testing.T) {
 		b.Issuer("https://evil.example.com")
 	})
 
-	_, err := srv.VerifyJWT(context.Background(), tokenString, nil)
+	_, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.Error(t, err)
 }
 
