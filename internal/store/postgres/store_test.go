@@ -1,7 +1,6 @@
 package postgres_test
 
 import (
-	"context"
 	"os"
 	"testing"
 	"time"
@@ -36,7 +35,7 @@ func newTestStore(t *testing.T) *postgres.Store {
 // newTestStoreWithEnc is like newTestStore but configures an encryptor at construction time.
 func newTestStoreWithEnc(t *testing.T, enc *store.Encryptor) *postgres.Store {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	st, err := postgres.New(ctx, testDB.NewDSN(t), enc)
 	require.NoError(t, err)
@@ -47,12 +46,12 @@ func newTestStoreWithEnc(t *testing.T, enc *store.Encryptor) *postgres.Store {
 
 func TestPing(t *testing.T) {
 	st := newTestStore(t)
-	require.NoError(t, st.Ping(context.Background()))
+	require.NoError(t, st.Ping(t.Context()))
 }
 
 func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := st.UpsertUser(ctx, 12345, "alice@example.com", "alice")
 	require.NoError(t, err)
@@ -76,13 +75,13 @@ func TestUpsertUser_NewAndUpdate(t *testing.T) {
 
 func TestGetUserByGitHubID_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	_, err := st.GetUserByGitHubID(context.Background(), 999999)
+	_, err := st.GetUserByGitHubID(t.Context(), 999999)
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestEnsureProject_CreateAndIdempotent(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := st.UpsertUser(ctx, 1, "bob@example.com", "bob")
 	require.NoError(t, err)
@@ -106,7 +105,7 @@ func TestEnsureProject_CreateAndIdempotent(t *testing.T) {
 
 func TestGetProjectBySlug_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := st.UpsertUser(ctx, 2, "c@example.com", "c")
 	require.NoError(t, err)
@@ -121,7 +120,7 @@ func TestGetProjectBySlug_NotFound(t *testing.T) {
 
 func testUserAndProject(t *testing.T, st *postgres.Store, githubID int64) (*store.User, *store.Project) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	u, err := st.UpsertUser(ctx, githubID, "u@example.com", "u")
 	require.NoError(t, err)
 	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
@@ -133,7 +132,7 @@ func testUserAndProject(t *testing.T, st *postgres.Store, githubID int64) (*stor
 
 func TestWriteInsight_InsertAndUpsertByKey(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 10)
 
 	// Insert a keyed insight.
@@ -168,7 +167,7 @@ func TestWriteInsight_InsertAndUpsertByKey(t *testing.T) {
 
 func TestWriteInsight_InsertWithoutKey(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 20)
 
 	f1, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "first", Tags: []string{}, CreatedBy: u.ID})
@@ -184,7 +183,7 @@ func TestWriteInsight_InsertWithoutKey(t *testing.T) {
 
 func TestSearchInsights(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 30)
 
 	_, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "PostgreSQL is a relational database", Tags: []string{"db"}, CreatedBy: u.ID})
@@ -211,7 +210,7 @@ func TestSearchInsights(t *testing.T) {
 
 func TestListInsights(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 40)
 
 	for _, content := range []string{"insight one", "insight two", "insight three"} {
@@ -234,7 +233,7 @@ func TestListInsights(t *testing.T) {
 
 func TestDeleteInsight(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 50)
 
 	f, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "to delete", Tags: []string{}, CreatedBy: u.ID})
@@ -253,13 +252,13 @@ func TestDeleteInsight(t *testing.T) {
 
 func TestDeleteInsight_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	err := st.DeleteInsight(context.Background(), uuid.New(), uuid.New())
+	err := st.DeleteInsight(t.Context(), uuid.New(), uuid.New())
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestListProjects(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := st.UpsertUser(ctx, 60, "d@example.com", "d")
 	require.NoError(t, err)
@@ -288,7 +287,7 @@ func TestListProjects(t *testing.T) {
 
 func TestListTags(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 70)
 
 	write := func(tags []string) {
@@ -320,7 +319,7 @@ func TestListTags(t *testing.T) {
 
 func TestUpdateInsight(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 80)
 
 	f, err := st.WriteInsight(ctx, store.WriteInsightParams{
@@ -364,7 +363,7 @@ func TestUpdateInsight(t *testing.T) {
 
 func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser")
 	require.NoError(t, err)
@@ -394,7 +393,7 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 
 func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser")
 	require.NoError(t, err)
@@ -458,13 +457,13 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 func TestGetGrant_NotFound(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 
-	_, err := st.GetGrant(context.Background(), "no-such-jti")
+	_, err := st.GetGrant(t.Context(), "no-such-jti")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 400, "rotate@example.com", "rotateuser")
 	require.NoError(t, err)
@@ -533,7 +532,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 
 func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 300, "nokey@example.com", "nokey")
 	require.NoError(t, err)
@@ -549,7 +548,7 @@ func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 
 func TestSaveClient(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	now := time.Now().UTC().Truncate(time.Second)
 	c := store.OAuthClient{
@@ -581,7 +580,7 @@ func TestSaveClient(t *testing.T) {
 
 func TestSaveClient_DuplicateClientID(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	now := time.Now().UTC()
 	c := store.OAuthClient{
@@ -606,7 +605,7 @@ func TestSaveClient_DuplicateClientID(t *testing.T) {
 
 func TestGetUserByID_Success(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	upserted, err := st.UpsertUser(ctx, 900, "id@example.com", "iduser")
 	require.NoError(t, err)
@@ -620,7 +619,7 @@ func TestGetUserByID_Success(t *testing.T) {
 
 func TestGetUserByID_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	_, err := st.GetUserByID(context.Background(), uuid.New())
+	_, err := st.GetUserByID(t.Context(), uuid.New())
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
@@ -628,7 +627,7 @@ func TestGetUserByID_NotFound(t *testing.T) {
 
 func TestGetPersonalOrgByUserID_CreatedOnFirstLogin(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 910, "org@example.com", "orguser")
 	require.NoError(t, err)
@@ -642,7 +641,7 @@ func TestGetPersonalOrgByUserID_CreatedOnFirstLogin(t *testing.T) {
 
 func TestGetPersonalOrgByUserID_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	_, err := st.GetPersonalOrgByUserID(context.Background(), uuid.New())
+	_, err := st.GetPersonalOrgByUserID(t.Context(), uuid.New())
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
@@ -652,7 +651,7 @@ func TestUpsertUser_SameLoginSlugAllowedForMultiplePersonalOrgs(t *testing.T) {
 	// Personal org slugs are display-only; two users with the same GitHub login
 	// (possible after a username transfer) can both hold that slug without conflict.
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u1, err := st.UpsertUser(ctx, 920, "first@example.com", "sharedlogin")
 	require.NoError(t, err)
@@ -675,7 +674,7 @@ func TestUpsertUser_SameLoginSlugAllowedForMultiplePersonalOrgs(t *testing.T) {
 
 func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	p := store.PendingAuth{
 		ClientID:      "client-abc",
@@ -697,13 +696,13 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 
 func TestConsumePendingAuth_NotFound(t *testing.T) {
 	st := newTestStore(t)
-	_, err := st.ConsumePendingAuth(context.Background(), "no-such-state")
+	_, err := st.ConsumePendingAuth(t.Context(), "no-such-state")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestConsumePendingAuth_SingleUse(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.NoError(t, st.StorePendingAuth(ctx, "single-use-state", store.PendingAuth{
 		RedirectURI:   "https://client.example.com/callback",
@@ -720,7 +719,7 @@ func TestConsumePendingAuth_SingleUse(t *testing.T) {
 
 func TestStorePendingAuth_EmptyOptionalFields(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// client_id and client_state are optional — empty string stored as NULL.
 	p := store.PendingAuth{
@@ -740,7 +739,7 @@ func TestStorePendingAuth_EmptyOptionalFields(t *testing.T) {
 
 func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	now := time.Now().UTC().Truncate(time.Second)
 	c := store.AuthCode{
@@ -776,7 +775,7 @@ func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
 func TestStoreAuthCode_ConsumeWithoutTokens(t *testing.T) {
 	// Verifies that empty tokens are stored as zero bytes (not NULL) and read back as empty strings.
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	c := store.AuthCode{
 		Sub:           "user-uuid-notokens",
@@ -798,13 +797,13 @@ func TestStoreAuthCode_ConsumeWithoutTokens(t *testing.T) {
 
 func TestConsumeAuthCode_NotFound(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	_, err := st.ConsumeAuthCode(context.Background(), "no-such-code")
+	_, err := st.ConsumeAuthCode(t.Context(), "no-such-code")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestConsumeAuthCode_SingleUse(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.NoError(t, st.StoreAuthCode(ctx, "single-use-code", store.AuthCode{
 		Sub:           "user-uuid",
@@ -826,7 +825,7 @@ func TestConsumeAuthCode_SingleUse(t *testing.T) {
 
 func TestRevokeToken_RevokedTokenIsDetected(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	jti := uuid.New().String()
 	exp := time.Now().Add(time.Hour)
@@ -844,7 +843,7 @@ func TestRevokeToken_RevokedTokenIsDetected(t *testing.T) {
 
 func TestRevokeToken_Idempotent(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	jti := uuid.New().String()
 	exp := time.Now().Add(time.Hour)
@@ -859,7 +858,7 @@ func TestRevokeToken_Idempotent(t *testing.T) {
 
 func TestIsTokenRevoked_ExpiredEntryReturnsFalse(t *testing.T) {
 	st := newTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	jti := uuid.New().String()
 	// expires_at in the past — token would have expired naturally, not considered revoked.
@@ -876,7 +875,7 @@ func TestIsTokenRevoked_ExpiredEntryReturnsFalse(t *testing.T) {
 
 func TestGetGrantByRefreshToken_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1100, "rftoken@example.com", "rfuser")
 	require.NoError(t, err)
@@ -907,13 +906,13 @@ func TestGetGrantByRefreshToken_Success(t *testing.T) {
 
 func TestGetGrantByRefreshToken_NotFound(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	_, err := st.GetGrantByRefreshToken(context.Background(), "no-such-token")
+	_, err := st.GetGrantByRefreshToken(t.Context(), "no-such-token")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestRotateGrant_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1200, "rotate@example.com", "rotateuser")
 	require.NoError(t, err)
@@ -963,7 +962,7 @@ func TestRotateGrant_Success(t *testing.T) {
 
 func TestRotateGrant_RecordsRetiredRefreshToken(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1250, "retired@example.com", "retireduser")
 	require.NoError(t, err)
@@ -1020,7 +1019,7 @@ func TestRotateGrant_RecordsRetiredRefreshToken(t *testing.T) {
 
 func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1260, "rollback@example.com", "rollbackuser")
 	require.NoError(t, err)
@@ -1066,7 +1065,7 @@ func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
 
 func TestGetRetiredRefreshToken_IgnoresExpiredRetention(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1270, "pruneretired@example.com", "pruneretired")
 	require.NoError(t, err)
@@ -1112,7 +1111,7 @@ func TestGetRetiredRefreshToken_IgnoresExpiredRetention(t *testing.T) {
 
 func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1300, "race@example.com", "raceuser")
 	require.NoError(t, err)
@@ -1154,7 +1153,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 
 func TestDeleteGrant_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, 1400, "del@example.com", "deluser")
 	require.NoError(t, err)
@@ -1189,6 +1188,6 @@ func TestDeleteGrant_Success(t *testing.T) {
 
 func TestDeleteGrant_NotFound(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
-	err := st.DeleteGrant(context.Background(), "no-such-jti", nil)
+	err := st.DeleteGrant(t.Context(), "no-such-jti", nil)
 	require.ErrorIs(t, err, store.ErrNotFound)
 }

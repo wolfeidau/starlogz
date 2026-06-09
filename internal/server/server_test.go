@@ -73,6 +73,7 @@ func (m *memRevocation) IsTokenRevoked(_ context.Context, jti string) (bool, err
 // testFixture returns a running httptest.Server and an oidc.Server that shares the same
 // signing key, so tests can issue valid JWTs for authenticated requests.
 func testFixture(t *testing.T) (*httptest.Server, *oidc.Server) {
+	t.Helper()
 	return testFixtureWithConfig(t, nil)
 }
 

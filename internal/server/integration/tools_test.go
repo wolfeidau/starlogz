@@ -94,7 +94,7 @@ type toolFixture struct {
 // server with a shared signing key, and returns a fixture ready for tool calls.
 func newToolFixture(t *testing.T) *toolFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	st, err := postgres.New(ctx, testDB.NewDSN(t), nil)
 	require.NoError(t, err)
@@ -274,7 +274,7 @@ func requireSchemaNumber(t *testing.T, expected float64, actual any) {
 // session cannot be deleted by user B's session, even with a valid JWT and the
 // insights:write scope. Regression for the v0.1 leak called out in tools_review.md.
 func TestInsightDelete_CrossOrg_Forbidden(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	alice := f.makeUser(t, ctx, "alice")
@@ -305,7 +305,7 @@ func TestInsightDelete_CrossOrg_Forbidden(t *testing.T) {
 // --- whoami ---
 
 func TestWhoami_ReturnsIdentityAndScopes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -324,7 +324,7 @@ func TestWhoami_ReturnsIdentityAndScopes(t *testing.T) {
 }
 
 func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -377,7 +377,7 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 // --- project_ensure ---
 
 func TestProjectEnsure_CreatesUnderPersonalOrg(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -402,7 +402,7 @@ func TestProjectEnsure_CreatesUnderPersonalOrg(t *testing.T) {
 }
 
 func TestProjectEnsure_IdempotentOnDuplicateSlug(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -426,7 +426,7 @@ func TestProjectEnsure_IdempotentOnDuplicateSlug(t *testing.T) {
 }
 
 func TestProjectEnsure_DefaultsNameToSlug(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -446,7 +446,7 @@ func TestProjectEnsure_DefaultsNameToSlug(t *testing.T) {
 // --- insight_write ---
 
 func TestInsightWrite_AutoCreatesProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -461,7 +461,7 @@ func TestInsightWrite_AutoCreatesProject(t *testing.T) {
 }
 
 func TestInsightWrite_RequiresWriteScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -473,7 +473,7 @@ func TestInsightWrite_RequiresWriteScope(t *testing.T) {
 }
 
 func TestInsightWrite_RejectsInvalidCategory(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -493,7 +493,7 @@ func TestInsightWrite_RejectsInvalidCategory(t *testing.T) {
 }
 
 func TestInsightWrite_RejectsInvalidSource(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -504,7 +504,7 @@ func TestInsightWrite_RejectsInvalidSource(t *testing.T) {
 }
 
 func TestInsightWrite_RejectsEmptyContent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -515,7 +515,7 @@ func TestInsightWrite_RejectsEmptyContent(t *testing.T) {
 }
 
 func TestInsightWrite_RejectsEmptyProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -526,7 +526,7 @@ func TestInsightWrite_RejectsEmptyProject(t *testing.T) {
 }
 
 func TestInsightWrite_NormalisesTags(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -553,7 +553,7 @@ func TestInsightWrite_NormalisesTags(t *testing.T) {
 }
 
 func TestInsightSearch_RejectsEmptyQuery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -564,7 +564,7 @@ func TestInsightSearch_RejectsEmptyQuery(t *testing.T) {
 }
 
 func TestInsightWrite_UpsertsByKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -590,7 +590,7 @@ func TestInsightWrite_UpsertsByKey(t *testing.T) {
 // --- insight_list / insight_search / insight_list_tags org scoping ---
 
 func TestInsightList_ScopedToCallerOrg(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	alice := f.makeUser(t, ctx, "alice")
@@ -613,7 +613,7 @@ func TestInsightList_ScopedToCallerOrg(t *testing.T) {
 }
 
 func TestInsightSearch_ScopedToCallerOrg(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	alice := f.makeUser(t, ctx, "alice")
@@ -637,7 +637,7 @@ func TestInsightSearch_ScopedToCallerOrg(t *testing.T) {
 }
 
 func TestInsightSearch_ReturnsMatchingInsights(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -661,7 +661,7 @@ func TestInsightSearch_ReturnsMatchingInsights(t *testing.T) {
 }
 
 func TestInsightListTags_ScopedToCallerOrg(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	alice := f.makeUser(t, ctx, "alice")
@@ -683,7 +683,7 @@ func TestInsightListTags_ScopedToCallerOrg(t *testing.T) {
 }
 
 func TestInsightListTags_ReturnsByFrequency(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -714,7 +714,7 @@ func TestInsightListTags_ReturnsByFrequency(t *testing.T) {
 }
 
 func TestInsightList_RespectsTagFilter(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -747,7 +747,7 @@ func TestInsightList_RespectsTagFilter(t *testing.T) {
 // --- insight_delete / insight_update: scope enforcement and error surfaces ---
 
 func TestInsightDelete_RequiresWriteScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -759,7 +759,7 @@ func TestInsightDelete_RequiresWriteScope(t *testing.T) {
 }
 
 func TestInsightUpdate_RequiresWriteScope(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -775,7 +775,7 @@ func TestInsightUpdate_RequiresWriteScope(t *testing.T) {
 }
 
 func TestInsightDelete_UnknownID_NotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -787,7 +787,7 @@ func TestInsightDelete_UnknownID_NotFound(t *testing.T) {
 }
 
 func TestInsightUpdate_UnknownID_NotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -803,7 +803,7 @@ func TestInsightUpdate_UnknownID_NotFound(t *testing.T) {
 }
 
 func TestInsightDelete_InvalidUUID_StructuredError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -815,7 +815,7 @@ func TestInsightDelete_InvalidUUID_StructuredError(t *testing.T) {
 }
 
 func TestInsightDelete_RemovesInsight(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -843,7 +843,7 @@ func TestInsightDelete_RemovesInsight(t *testing.T) {
 // --- project_list ---
 
 func TestProjectList_EmptyForFreshUser(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")
@@ -860,7 +860,7 @@ func TestProjectList_EmptyForFreshUser(t *testing.T) {
 }
 
 func TestProjectList_ReturnsOnlyOwnOrg(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	alice := f.makeUser(t, ctx, "alice")
@@ -885,7 +885,7 @@ func TestProjectList_ReturnsOnlyOwnOrg(t *testing.T) {
 // --- resolveUserAndOrg ---
 
 func TestResolveUser_UnknownSub_CleanError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	// JWT sub is a valid UUID but has no corresponding user row in the database.
@@ -899,7 +899,7 @@ func TestResolveUser_UnknownSub_CleanError(t *testing.T) {
 
 // TestFactUpdate_CrossOrg_Forbidden is the analogous regression for insight_update.
 func TestInsightUpdate_CrossOrg_Forbidden(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	alice := f.makeUser(t, ctx, "alice")
@@ -933,7 +933,7 @@ func TestInsightUpdate_CrossOrg_Forbidden(t *testing.T) {
 }
 
 func TestInsightUpdate_ChangesContentAndTags(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newToolFixture(t)
 
 	user := f.makeUser(t, ctx, "alice")

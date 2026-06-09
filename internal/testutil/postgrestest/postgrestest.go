@@ -73,10 +73,10 @@ func (p *Template) Run(m *testing.M) int {
 // The cloned database is dropped when t finishes.
 func (p *Template) NewDSN(t *testing.T) string {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dbName := p.createTestDB(t, ctx)
-	t.Cleanup(func() { p.dropTestDB(t, ctx, dbName) })
+	t.Cleanup(func() { p.dropTestDB(t, context.Background(), dbName) }) //nolint:usetesting // t.Context() is cancelled before cleanup runs
 	return p.dsnForDB(dbName)
 }
 

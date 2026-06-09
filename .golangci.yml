@@ -8,7 +8,15 @@ linters:
     - unused
     - gosec
     - gocritic
+    - usetesting
+    - usestdlibvars
     - testifylint
+    - sloglint
+    - thelper
+  settings:
+    usetesting:
+      context-background: true
+      context-todo: true
   exclusions:
     generated: lax
     presets:
