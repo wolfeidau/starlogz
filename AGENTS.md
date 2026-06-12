@@ -16,7 +16,7 @@ internal/oidc/                    OAuth2/OIDC server — JWKS, discovery, DCR, J
 internal/server/                  HTTP mux, MCP tool handlers, health endpoint
 internal/store/                   store interface + types (Insight, WriteInsightParams, …)
 internal/store/postgres/          PostgreSQL implementation + migration runner
-internal/store/postgres/migrations/  embedded SQL migration files (1–12)
+internal/store/postgres/migrations/  embedded SQL migration files (1–13)
 internal/telemetry/               OTel init (traces + metrics via OTLP gRPC)
 spec/                             design specs (auth.md, persistence.md, refresh_tokens.md)
 ```
@@ -87,8 +87,14 @@ go test ./...
 # Generate a signing key (once)
 go run ./cmd/starlogz-server keygen --output key.jwk
 
+# Run database migrations only (then exit)
+go run ./cmd/starlogz-server migrate
+
 # Start the server
 go run ./cmd/starlogz-server http --jwk-path key.jwk
+
+# Start the server with coloured debug logging (development mode)
+go run ./cmd/starlogz-server --development http --jwk-path key.jwk
 
 # Query the local Postgres instance (runs psql inside the docker compose container)
 bin/psql
@@ -105,10 +111,15 @@ Key env vars:
 | `GITHUB_CLIENT_ID` | _(required)_ | GitHub App client ID |
 | `GITHUB_CLIENT_SECRET` | _(required)_ | GitHub App client secret |
 | `DATABASE_URL` | _(required)_ | PostgreSQL connection string (pgx DSN) |
+| `TOKEN_ENCRYPTION_KEY` | _(required)_ | Base64-encoded 32-byte key for encrypting stored GitHub tokens (`openssl rand -base64 32`) |
+| `REFRESH_TOKEN_GRACE_PERIOD` | `30s` | How long a rotated refresh token remains accepted for retry; `0s` to disable |
+| `RETIRED_REFRESH_TOKEN_RETENTION` | `24h` | How long hashed retired refresh tokens are retained for refresh diagnostics |
+| `SENTRY_DSN` | _(unset = disabled)_ | Sentry DSN; enables error reporting and structured log capture |
+| `SENTRY_ENVIRONMENT` | — | Sentry environment tag (e.g. `production`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = disabled)_ | OTLP collector endpoint |
 | `OTEL_EXPORTER_OTLP_HEADERS` | — | e.g. Honeycomb API key |
 
-Telemetry is opt-in: if `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, no exporters are created and no connection is attempted.
+Telemetry is opt-in: if `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, no exporters are created and no connection is attempted. Sentry is likewise opt-in: omitting `SENTRY_DSN` disables it entirely.
 
 ---
 
