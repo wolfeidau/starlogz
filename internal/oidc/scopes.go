@@ -9,14 +9,18 @@ import (
 )
 
 const (
-	defaultAuthorizeScope        = "insights:read"
-	defaultRegisteredClientScope = "insights:read insights:write"
+	scopeInsightsRead  = "insights:read"
+	scopeInsightsWrite = "insights:write"
+	scopeOrgAdmin      = "org:admin"
+
+	defaultAuthorizeScope        = scopeInsightsRead
+	defaultRegisteredClientScope = scopeInsightsRead + " " + scopeInsightsWrite
 )
 
 var supportedScopes = map[string]bool{
-	"insights:read":  true,
-	"insights:write": true,
-	"org:admin":      true,
+	scopeInsightsRead:  true,
+	scopeInsightsWrite: true,
+	scopeOrgAdmin:      true,
 }
 
 func normalizeScope(scope, fallback string) string {

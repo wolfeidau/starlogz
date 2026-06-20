@@ -140,9 +140,9 @@ func (s *Server) Run(ctx context.Context, l net.Listener) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	go func() { //nolint:gosec // context.Background() is intentional: ctx is already cancelled at this point
+	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdownCtx)
 	}()

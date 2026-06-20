@@ -50,14 +50,14 @@ func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, 
 		expiresIn = 0
 	}
 	resp := map[string]any{
-		"access_token": jwt,
-		"token_type":   "Bearer",
-		"expires_in":   expiresIn,
-		"scope":        scope,
+		tokenResponseFieldAccess:    jwt,
+		tokenResponseFieldTokenType: "Bearer",
+		tokenResponseFieldExpiresIn: expiresIn,
+		tokenResponseFieldScope:     scope,
 	}
 	if refreshToken != "" {
-		resp["refresh_token"] = refreshToken
-		resp["refresh_token_expires_in"] = int(time.Until(refreshExpiry) / time.Second)
+		resp[tokenResponseFieldRefresh] = refreshToken
+		resp[tokenResponseFieldRefreshTTL] = int(time.Until(refreshExpiry) / time.Second)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -198,9 +198,9 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 
 		switch r.PostForm.Get("grant_type") {
-		case "authorization_code":
+		case oauthGrantAuthorizationCode:
 			s.handleAuthCodeGrant(w, r, r.PostForm)
-		case "refresh_token":
+		case oauthGrantRefreshToken:
 			s.handleRefreshGrant(w, r, r.PostForm)
 		default:
 			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: unsupported grant_type",
@@ -663,7 +663,7 @@ func (s *Server) DCRHandler() http.Handler {
 			return
 		}
 
-		if req.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != "none" {
+		if req.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != tokenEndpointAuthMethodNone {
 			log.WarnContext(r.Context(), "DCR: unsupported token_endpoint_auth_method",
 				slog.String("method", req.TokenEndpointAuthMethod),
 			)
@@ -671,12 +671,12 @@ func (s *Server) DCRHandler() http.Handler {
 			return
 		}
 
-		req.GrantTypes = []string{"authorization_code"}
+		req.GrantTypes = []string{oauthGrantAuthorizationCode}
 		if len(req.ResponseTypes) == 0 {
-			req.ResponseTypes = []string{"code"}
+			req.ResponseTypes = []string{oauthCode}
 		}
 		if req.TokenEndpointAuthMethod == "" {
-			req.TokenEndpointAuthMethod = "none"
+			req.TokenEndpointAuthMethod = tokenEndpointAuthMethodNone
 		}
 		req.Scope = normalizeScope(req.Scope, defaultRegisteredClientScope)
 		if err := validateSupportedScope(req.Scope); err != nil {
@@ -828,7 +828,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		log := ctxlog.LoggerFrom(ctx)
 		q := r.URL.Query()
 
-		if q.Get("response_type") != "code" {
+		if q.Get("response_type") != oauthCode {
 			log.WarnContext(ctx, "authorize: unsupported response_type", slog.String("response_type", q.Get("response_type")))
 			writeOAuthError(w, "unsupported_response_type", "only response_type=code is supported", http.StatusBadRequest)
 			return
@@ -859,7 +859,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
-		if q.Get("code_challenge_method") != "S256" {
+		if q.Get("code_challenge_method") != pkceMethodS256 {
 			log.WarnContext(ctx, "authorize: unsupported code_challenge_method",
 				slog.String("method", q.Get("code_challenge_method")),
 			)

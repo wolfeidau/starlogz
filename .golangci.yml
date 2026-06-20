@@ -2,21 +2,31 @@ version: "2"
 linters:
   enable:
     - errcheck
+    - bodyclose
     - govet
     - ineffassign
+    - intrange
     - staticcheck
     - unused
     - gosec
     - gocritic
+    - goconst
     - usetesting
     - usestdlibvars
     - testifylint
     - sloglint
     - thelper
+    - contextcheck
   settings:
     usetesting:
       context-background: true
       context-todo: true
+    testifylint:
+      disable-all: true
+      enable:
+        - require-error
+        - useless-assert
+        - len
   exclusions:
     generated: lax
     presets:
@@ -26,6 +36,7 @@ linters:
     rules:
       - path: "_test\\.go"
         linters:
+          - goconst
           - gosec
     paths:
       - third_party$
@@ -46,12 +57,6 @@ formatters:
           replacement: "any"
         - pattern: "a[b:len(a)]"
           replacement: "a[b:]"
-    testifylint:
-      disable-all: true
-      enable:
-        - require-error
-        - useless-assert
-        - len
   exclusions:
     generated: lax
     paths:

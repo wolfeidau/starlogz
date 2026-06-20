@@ -88,7 +88,7 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 	}
 
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := sentryShutdown(shutdownCtx); err != nil {
 			child.Error("sentry shutdown error", slog.Any("error", err))
@@ -100,7 +100,7 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		return fmt.Errorf("failed to initialize telemetry: %w", err)
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := telShutdown(shutdownCtx); err != nil {
 			child.Error("telemetry shutdown error", slog.Any("error", err))
