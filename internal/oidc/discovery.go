@@ -6,6 +6,20 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 )
 
+const (
+	oauthCode                    = "code"
+	oauthGrantAuthorizationCode  = "authorization_code"
+	oauthGrantRefreshToken       = "refresh_token"
+	pkceMethodS256               = "S256"
+	tokenEndpointAuthMethodNone  = "none"
+	tokenResponseFieldAccess     = "access_token"
+	tokenResponseFieldExpiresIn  = "expires_in"
+	tokenResponseFieldRefresh    = "refresh_token"
+	tokenResponseFieldRefreshTTL = "refresh_token_expires_in"
+	tokenResponseFieldScope      = "scope"
+	tokenResponseFieldTokenType  = "token_type"
+)
+
 func buildAuthServerMeta(base *url.URL) *oauthex.AuthServerMeta {
 	return &oauthex.AuthServerMeta{
 		Issuer:                            base.String(),
@@ -13,11 +27,11 @@ func buildAuthServerMeta(base *url.URL) *oauthex.AuthServerMeta {
 		TokenEndpoint:                     base.JoinPath("/oauth2/token").String(),
 		JWKSURI:                           base.JoinPath("/.well-known/jwks").String(),
 		RegistrationEndpoint:              base.JoinPath("/oauth2/register").String(),
-		ResponseTypesSupported:            []string{"code"},
-		GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
-		ScopesSupported:                   []string{"insights:read", "insights:write", "org:admin"},
-		CodeChallengeMethodsSupported:     []string{"S256"},
-		TokenEndpointAuthMethodsSupported: []string{"none"},
+		ResponseTypesSupported:            []string{oauthCode},
+		GrantTypesSupported:               []string{oauthGrantAuthorizationCode, oauthGrantRefreshToken},
+		ScopesSupported:                   []string{scopeInsightsRead, scopeInsightsWrite, scopeOrgAdmin},
+		CodeChallengeMethodsSupported:     []string{pkceMethodS256},
+		TokenEndpointAuthMethodsSupported: []string{tokenEndpointAuthMethodNone},
 	}
 }
 
@@ -26,7 +40,7 @@ func buildProtectedResourceMeta(base *url.URL) *oauthex.ProtectedResourceMetadat
 		Resource:               base.JoinPath("/mcp").String(),
 		ResourceName:           "Starlogz MCP Server",
 		AuthorizationServers:   []string{base.String()},
-		ScopesSupported:        []string{"insights:read", "insights:write", "org:admin"},
+		ScopesSupported:        []string{scopeInsightsRead, scopeInsightsWrite, scopeOrgAdmin},
 		BearerMethodsSupported: []string{"header"},
 	}
 }

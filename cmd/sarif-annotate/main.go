@@ -10,6 +10,12 @@ import (
 	"text/template"
 )
 
+const (
+	levelError   = "error"
+	levelWarning = "warning"
+	levelNote    = "note"
+)
+
 type sarifReport struct {
 	Runs []sarifRun `json:"runs"`
 }
@@ -153,7 +159,7 @@ func (r sarifReport) findings() []finding {
 		for _, res := range run.Results {
 			level := res.Level
 			if level == "" {
-				level = "warning"
+				level = levelWarning
 			}
 			f := finding{
 				tool:    tool,
@@ -239,7 +245,7 @@ func buildPills(items []finding) string {
 		counts[f.level]++
 	}
 	var pills []string
-	for _, lvl := range []string{"error", "warning", "note"} {
+	for _, lvl := range []string{levelError, levelWarning, levelNote} {
 		if n := counts[lvl]; n > 0 {
 			pills = append(pills, fmt.Sprintf("%s %d %s", levelIcon(lvl), n, pluralise(lvl, n)))
 		}
@@ -266,9 +272,9 @@ func ruleLink(ruleID, ruleURI string) string {
 
 func levelIcon(level string) string {
 	switch level {
-	case "error":
+	case levelError:
 		return ":no_entry:"
-	case "warning":
+	case levelWarning:
 		return ":warning:"
 	default:
 		return ":information_source:"

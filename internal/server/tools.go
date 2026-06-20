@@ -143,6 +143,8 @@ func inputSchemaFor[T any]() *jsonschema.Schema {
 	return s
 }
 
+const projectSchemaProperty = "project"
+
 var (
 	projectEnsureSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[projectEnsureInput]()
@@ -153,30 +155,30 @@ var (
 
 	insightWriteSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightWriteInput]()
-		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["content"].MinLength = jsonschema.Ptr(1)
 		s.Properties["category"].Enum = []any{"fact", "decision", "insight", "preference", "context", "general"}
 		s.Properties["source"].Enum = []any{"user", "repo", "agent", "command"}
-		s.Required = []string{"project", "content", "category", "source"}
+		s.Required = []string{projectSchemaProperty, "content", "category", "source"}
 		return s
 	}()
 
 	insightSearchSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightSearchInput]()
-		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["query"].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
-		s.Required = []string{"project", "query"}
+		s.Required = []string{projectSchemaProperty, "query"}
 		return s
 	}()
 
 	insightListSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightListInput]()
-		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
-		s.Required = []string{"project"}
+		s.Required = []string{projectSchemaProperty}
 		return s
 	}()
 
@@ -190,10 +192,10 @@ var (
 
 	insightListTagsSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightListTagsInput]()
-		s.Properties["project"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
-		s.Required = []string{"project"}
+		s.Required = []string{projectSchemaProperty}
 		return s
 	}()
 
