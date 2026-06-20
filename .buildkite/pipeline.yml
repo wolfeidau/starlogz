@@ -19,7 +19,8 @@ steps:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.3:
+              install_args: -q
           - ./.buildkite/plugins/sarif-annotate:
               file: golangci-lint.sarif
 
@@ -30,7 +31,8 @@ steps:
         env:
           TFLINT_LOG: debug
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.3:
+              install_args: -q
           - ./.buildkite/plugins/sarif-annotate:
               file: tflint.sarif
 
@@ -47,4 +49,5 @@ steps:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.3:
+              install_args: -q
