@@ -49,9 +49,6 @@ func (c *ImportCmd) Run(ctx context.Context, globals *Globals) error {
 	if doc.Project != nil {
 		projects = append(projects, *doc.Project)
 	}
-	// A file exported with --all fans every org's projects into the single
-	// target org given by --org-id; the source org boundaries are not preserved,
-	// so a project slug shared by two source orgs merges into one project below.
 	slugSourceOrgs := map[string][]string{}
 	for _, o := range doc.Orgs {
 		projects = append(projects, o.Projects...)
@@ -61,10 +58,7 @@ func (c *ImportCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 	for slug, orgSlugs := range slugSourceOrgs {
 		if len(orgSlugs) > 1 {
-			globals.Logger.WarnContext(ctx, "project slug present in multiple source orgs; their insights will be merged into one project in the target org",
-				slog.String("project_slug", slug),
-				slog.Any("source_orgs", orgSlugs),
-			)
+			return fmt.Errorf("project slug %q appears in multiple source orgs: %v; refusing to merge", slug, orgSlugs)
 		}
 	}
 	if len(projects) == 0 {

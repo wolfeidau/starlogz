@@ -1,9 +1,7 @@
 package commands
 
 import (
-	"bytes"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -164,7 +162,7 @@ func TestImportCmd_AllOrgsShapeFlattensIntoTargetOrg(t *testing.T) {
 	require.Equal(t, "from b", insightsB[0].Content)
 }
 
-func TestImportCmd_WarnsOnDuplicateSlugAcrossOrgs(t *testing.T) {
+func TestImportCmd_RejectsDuplicateSlugAcrossOrgs(t *testing.T) {
 	st, dsn := newTestStoreAndDSN(t)
 	dstUser, dstOrg, _ := seedUserOrgProject(t, st, 2007, "import-collide", "unrelated")
 
@@ -175,7 +173,7 @@ func TestImportCmd_WarnsOnDuplicateSlugAcrossOrgs(t *testing.T) {
 				Slug: "org-a", Name: "Org A", Kind: "shared",
 				Projects: []exportProject{
 					{Slug: "shared-slug", Name: "From A", Insights: []exportInsight{
-						{Content: "from a", Category: "fact", Source: "user"},
+						{Key: "same-key", Content: "from a", Category: "fact", Source: "user"},
 					}},
 				},
 			},
@@ -183,7 +181,7 @@ func TestImportCmd_WarnsOnDuplicateSlugAcrossOrgs(t *testing.T) {
 				Slug: "org-b", Name: "Org B", Kind: "shared",
 				Projects: []exportProject{
 					{Slug: "shared-slug", Name: "From B", Insights: []exportInsight{
-						{Content: "from b", Category: "fact", Source: "user"},
+						{Key: "same-key", Content: "from b", Category: "fact", Source: "user"},
 					}},
 				},
 			},
@@ -192,19 +190,11 @@ func TestImportCmd_WarnsOnDuplicateSlugAcrossOrgs(t *testing.T) {
 	input := filepath.Join(t.TempDir(), "in.json")
 	writeJSON(t, input, doc)
 
-	var logBuf bytes.Buffer
-	globals := &Globals{Logger: slog.New(slog.NewTextHandler(&logBuf, nil))}
-
 	importCmd := &ImportCmd{DatabaseURL: dsn, Input: input, OrgID: dstOrg.ID.String(), CreatedBy: dstUser.ID.String()}
-	require.NoError(t, importCmd.Run(t.Context(), globals))
+	require.ErrorContains(t, importCmd.Run(t.Context(), testGlobals()), "refusing to merge")
 
-	require.Contains(t, logBuf.String(), "multiple source orgs", "must warn when a project slug collides across source orgs")
-
-	project, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "shared-slug")
-	require.NoError(t, err)
-	insights, err := st.ListInsights(t.Context(), project.ID, "", 100)
-	require.NoError(t, err)
-	require.Len(t, insights, 2, "colliding source projects merge their insights into one target project")
+	_, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "shared-slug")
+	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestImportCmd_AtomicOnFailure(t *testing.T) {
