@@ -285,6 +285,39 @@ func TestListProjects(t *testing.T) {
 	require.Equal(t, "beta", projects[1].Slug)
 }
 
+func TestListOrgs(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+
+	_, err := st.UpsertUser(ctx, 61, "zed@example.com", "zed")
+	require.NoError(t, err)
+	_, err = st.UpsertUser(ctx, 62, "amy@example.com", "amy")
+	require.NoError(t, err)
+
+	orgs, err := st.ListOrgs(ctx)
+	require.NoError(t, err)
+
+	var slugs []string
+	for _, o := range orgs {
+		require.Equal(t, "personal", o.Kind)
+		slugs = append(slugs, o.Slug)
+	}
+	require.Contains(t, slugs, "zed")
+	require.Contains(t, slugs, "amy")
+
+	// Ordered by kind then name: amy's personal org must sort before zed's.
+	amyIdx, zedIdx := -1, -1
+	for i, s := range slugs {
+		switch s {
+		case "amy":
+			amyIdx = i
+		case "zed":
+			zedIdx = i
+		}
+	}
+	require.Less(t, amyIdx, zedIdx)
+}
+
 func TestListTags(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()

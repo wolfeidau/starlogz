@@ -24,6 +24,7 @@ type Store interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 
 	GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*Org, error)
+	ListOrgs(ctx context.Context) ([]*Org, error)
 
 	EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*Project, error)
 	ListProjects(ctx context.Context, orgID uuid.UUID) ([]*Project, error)

@@ -192,6 +192,34 @@ func (s *Store) GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*
 	return o, nil
 }
 
+// ListOrgs returns every org, ordered by kind then name.
+func (s *Store) ListOrgs(ctx context.Context) ([]*store.Org, error) {
+	s.logger(ctx).DebugContext(ctx, "listing orgs")
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, slug, name, kind, created_at
+		FROM orgs
+		ORDER BY kind, name`)
+	if err != nil {
+		return nil, fmt.Errorf("list orgs: %w", err)
+	}
+	defer rows.Close()
+	var orgs []*store.Org
+	for rows.Next() {
+		o := &store.Org{}
+		var idStr string
+		if err := rows.Scan(&idStr, &o.Slug, &o.Name, &o.Kind, &o.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan org: %w", err)
+		}
+		var parseErr error
+		if o.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+			return nil, fmt.Errorf("parse org id: %w", parseErr)
+		}
+		orgs = append(orgs, o)
+	}
+	return orgs, rows.Err()
+}
+
 // EnsureProject creates the project if it does not exist and returns it.
 // If it already exists the name is updated to match the provided value.
 func (s *Store) EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*store.Project, error) {
@@ -840,6 +868,10 @@ func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*
 }
 
 func (s *Store) updateInsightByKey(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
+	tags := p.Tags
+	if tags == nil {
+		tags = []string{}
+	}
 	category := p.Category
 	if category == "" {
 		category = "general"
@@ -853,7 +885,7 @@ func (s *Store) updateInsightByKey(ctx context.Context, p store.WriteInsightPara
 		SET content = $3, tags = $4, category = $5, source = $6, updated_at = now()
 		WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, p.Tags, category, source)
+		p.ProjectID, p.Key, p.Content, tags, category, source)
 	return scanInsight(row)
 }
 
