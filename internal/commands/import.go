@@ -50,9 +50,22 @@ func (c *ImportCmd) Run(ctx context.Context, globals *Globals) error {
 		projects = append(projects, *doc.Project)
 	}
 	// A file exported with --all fans every org's projects into the single
-	// target org given by --org-id; the source org boundaries are not preserved.
+	// target org given by --org-id; the source org boundaries are not preserved,
+	// so a project slug shared by two source orgs merges into one project below.
+	slugSourceOrgs := map[string][]string{}
 	for _, o := range doc.Orgs {
 		projects = append(projects, o.Projects...)
+		for _, p := range o.Projects {
+			slugSourceOrgs[p.Slug] = append(slugSourceOrgs[p.Slug], o.Slug)
+		}
+	}
+	for slug, orgSlugs := range slugSourceOrgs {
+		if len(orgSlugs) > 1 {
+			globals.Logger.WarnContext(ctx, "project slug present in multiple source orgs; their insights will be merged into one project in the target org",
+				slog.String("project_slug", slug),
+				slog.Any("source_orgs", orgSlugs),
+			)
+		}
 	}
 	if len(projects) == 0 {
 		return fmt.Errorf("import file contains no projects")
@@ -63,11 +76,13 @@ func (c *ImportCmd) Run(ctx context.Context, globals *Globals) error {
 		insights := make([]store.ImportInsight, len(p.Insights))
 		for j, in := range p.Insights {
 			insights[j] = store.ImportInsight{
-				Key:      in.Key,
-				Content:  in.Content,
-				Tags:     in.Tags,
-				Category: in.Category,
-				Source:   in.Source,
+				Key:       in.Key,
+				Content:   in.Content,
+				Tags:      in.Tags,
+				Category:  in.Category,
+				Source:    in.Source,
+				CreatedAt: in.CreatedAt,
+				UpdatedAt: in.UpdatedAt,
 			}
 		}
 		importProjects[i] = store.ImportProject{Slug: p.Slug, Name: p.Name, Insights: insights}

@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,6 +56,37 @@ func TestImportCmd_SingleProjectRoundTrip(t *testing.T) {
 	require.Equal(t, "preferred-language", insights[0].Key)
 	require.Equal(t, "Go", insights[0].Content)
 	require.Equal(t, dstUser.ID, insights[0].CreatedBy, "imported rows must be attributed to the target user, not the source user")
+}
+
+func TestImportCmd_PreservesInsightTimestamps(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	dstUser, dstOrg, _ := seedUserOrgProject(t, st, 2006, "import-timestamps", "unrelated")
+
+	sourceCreated := time.Date(2020, 1, 15, 10, 0, 0, 0, time.UTC)
+	sourceUpdated := time.Date(2021, 6, 1, 8, 30, 0, 0, time.UTC)
+	doc := singleProjectDocument{
+		ExportedAt: time.Now().UTC(),
+		Project: exportProject{
+			Slug: "proj",
+			Name: "Project",
+			Insights: []exportInsight{
+				{Content: "old news", Category: "fact", Source: "user", CreatedAt: sourceCreated, UpdatedAt: sourceUpdated},
+			},
+		},
+	}
+	input := filepath.Join(t.TempDir(), "in.json")
+	writeJSON(t, input, doc)
+
+	importCmd := &ImportCmd{DatabaseURL: dsn, Input: input, OrgID: dstOrg.ID.String(), CreatedBy: dstUser.ID.String()}
+	require.NoError(t, importCmd.Run(t.Context(), testGlobals()))
+
+	project, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "proj")
+	require.NoError(t, err)
+	insights, err := st.ListInsights(t.Context(), project.ID, "", 100)
+	require.NoError(t, err)
+	require.Len(t, insights, 1)
+	require.True(t, sourceCreated.Equal(insights[0].CreatedAt), "created_at must be preserved from the export, not reset to now")
+	require.True(t, sourceUpdated.Equal(insights[0].UpdatedAt), "updated_at must be preserved from the export, not reset to now")
 }
 
 func TestImportCmd_KeyedInsightsUpsertOnRerun(t *testing.T) {
@@ -129,6 +162,49 @@ func TestImportCmd_AllOrgsShapeFlattensIntoTargetOrg(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, insightsB, 1)
 	require.Equal(t, "from b", insightsB[0].Content)
+}
+
+func TestImportCmd_WarnsOnDuplicateSlugAcrossOrgs(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	dstUser, dstOrg, _ := seedUserOrgProject(t, st, 2007, "import-collide", "unrelated")
+
+	doc := allOrgsDocument{
+		ExportedAt: time.Now().UTC(),
+		Orgs: []exportOrg{
+			{
+				Slug: "org-a", Name: "Org A", Kind: "shared",
+				Projects: []exportProject{
+					{Slug: "shared-slug", Name: "From A", Insights: []exportInsight{
+						{Content: "from a", Category: "fact", Source: "user"},
+					}},
+				},
+			},
+			{
+				Slug: "org-b", Name: "Org B", Kind: "shared",
+				Projects: []exportProject{
+					{Slug: "shared-slug", Name: "From B", Insights: []exportInsight{
+						{Content: "from b", Category: "fact", Source: "user"},
+					}},
+				},
+			},
+		},
+	}
+	input := filepath.Join(t.TempDir(), "in.json")
+	writeJSON(t, input, doc)
+
+	var logBuf bytes.Buffer
+	globals := &Globals{Logger: slog.New(slog.NewTextHandler(&logBuf, nil))}
+
+	importCmd := &ImportCmd{DatabaseURL: dsn, Input: input, OrgID: dstOrg.ID.String(), CreatedBy: dstUser.ID.String()}
+	require.NoError(t, importCmd.Run(t.Context(), globals))
+
+	require.Contains(t, logBuf.String(), "multiple source orgs", "must warn when a project slug collides across source orgs")
+
+	project, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "shared-slug")
+	require.NoError(t, err)
+	insights, err := st.ListInsights(t.Context(), project.ID, "", 100)
+	require.NoError(t, err)
+	require.Len(t, insights, 2, "colliding source projects merge their insights into one target project")
 }
 
 func TestImportCmd_AtomicOnFailure(t *testing.T) {

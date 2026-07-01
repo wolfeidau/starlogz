@@ -111,16 +111,23 @@ type WriteInsightParams struct {
 	Category  string
 	Source    string
 	CreatedBy uuid.UUID
+	// CreatedAt and UpdatedAt let a caller preserve timestamps from another
+	// source (e.g. Store.ImportProjects). Zero value = use the DB default (now()).
+	// Only honoured on insert; an update-by-key write always sets updated_at to now().
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ImportInsight is a single insight to import into a project, scoped to that
 // project and attributed to the importing user by Store.ImportProjects.
 type ImportInsight struct {
-	Key      string
-	Content  string
-	Tags     []string
-	Category string
-	Source   string
+	Key       string
+	Content   string
+	Tags      []string
+	Category  string
+	Source    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ImportProject is a project plus its insights to import as a unit via Store.ImportProjects.

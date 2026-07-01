@@ -917,11 +917,18 @@ func insertInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (
 	if source == "" {
 		source = "user"
 	}
+	var createdAt, updatedAt *time.Time
+	if !p.CreatedAt.IsZero() {
+		createdAt = &p.CreatedAt
+	}
+	if !p.UpdatedAt.IsZero() {
+		updatedAt = &p.UpdatedAt
+	}
 	row := db.QueryRow(ctx, `
-		INSERT INTO insights (project_id, key, content, tags, category, source, created_by)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7)
+		INSERT INTO insights (project_id, key, content, tags, category, source, created_by, created_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, COALESCE($8, now()), COALESCE($9, now()))
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy)
+		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy, createdAt, updatedAt)
 	return scanInsight(row)
 }
 
@@ -952,6 +959,8 @@ func (s *Store) ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, 
 				Category:  ii.Category,
 				Source:    ii.Source,
 				CreatedBy: createdBy,
+				CreatedAt: ii.CreatedAt,
+				UpdatedAt: ii.UpdatedAt,
 			})
 			if err != nil {
 				return 0, 0, fmt.Errorf("write insight in project %q: %w", ip.Slug, err)

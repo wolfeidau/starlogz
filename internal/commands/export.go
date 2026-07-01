@@ -25,8 +25,10 @@ type ExportCmd struct {
 }
 
 // exportOrg, exportProject and exportInsight deliberately omit every
-// auth-related field (org/project/user IDs, created_by) so the file can be
-// handed to an unrelated system without leaking user or tenant identifiers.
+// auth-related field (org/project/user IDs, created_by) so the file carries
+// no UUIDs tying it back to this instance's tenants or users. Note this is
+// not full anonymization: a personal org's slug is the owning user's GitHub
+// login, so a --all export still names every user on the instance.
 type exportOrg struct {
 	Slug     string          `json:"slug"`
 	Name     string          `json:"name"`
