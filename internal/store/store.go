@@ -46,6 +46,7 @@ type Store interface {
 	IsTokenRevoked(ctx context.Context, jti string) (bool, error)
 
 	WriteInsight(ctx context.Context, p WriteInsightParams) (*Insight, error)
+	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
 	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Insight, error)
@@ -110,6 +111,23 @@ type WriteInsightParams struct {
 	Category  string
 	Source    string
 	CreatedBy uuid.UUID
+}
+
+// ImportInsight is a single insight to import into a project, scoped to that
+// project and attributed to the importing user by Store.ImportProjects.
+type ImportInsight struct {
+	Key      string
+	Content  string
+	Tags     []string
+	Category string
+	Source   string
+}
+
+// ImportProject is a project plus its insights to import as a unit via Store.ImportProjects.
+type ImportProject struct {
+	Slug     string
+	Name     string
+	Insights []ImportInsight
 }
 
 // UpdateInsightParams holds the inputs for Store.UpdateInsight.

@@ -131,6 +131,45 @@ func TestImportCmd_AllOrgsShapeFlattensIntoTargetOrg(t *testing.T) {
 	require.Equal(t, "from b", insightsB[0].Content)
 }
 
+func TestImportCmd_AtomicOnFailure(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	dstUser, dstOrg, _ := seedUserOrgProject(t, st, 2005, "import-atomic", "unrelated")
+
+	doc := allOrgsDocument{
+		ExportedAt: time.Now().UTC(),
+		Orgs: []exportOrg{
+			{
+				Slug: "org-a", Name: "Org A", Kind: "shared",
+				Projects: []exportProject{
+					{Slug: "proj-ok", Name: "Project OK", Insights: []exportInsight{
+						{Content: "should not survive", Category: "fact", Source: "user"},
+					}},
+				},
+			},
+			{
+				Slug: "org-b", Name: "Org B", Kind: "shared",
+				Projects: []exportProject{
+					// invalid category violates the DB check constraint, failing partway through the import.
+					{Slug: "proj-bad", Name: "Project Bad", Insights: []exportInsight{
+						{Content: "bad insight", Category: "not-a-real-category", Source: "user"},
+					}},
+				},
+			},
+		},
+	}
+	input := filepath.Join(t.TempDir(), "in.json")
+	writeJSON(t, input, doc)
+
+	importCmd := &ImportCmd{DatabaseURL: dsn, Input: input, OrgID: dstOrg.ID.String(), CreatedBy: dstUser.ID.String()}
+	require.Error(t, importCmd.Run(t.Context(), testGlobals()))
+
+	_, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "proj-ok")
+	require.ErrorIs(t, err, store.ErrNotFound, "a project processed before the failing one must not survive a rolled-back import")
+
+	_, err = st.GetProjectBySlug(t.Context(), dstOrg.ID, "proj-bad")
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
 func TestImportCmd_NoProjects(t *testing.T) {
 	_, dsn := newTestStoreAndDSN(t)
 

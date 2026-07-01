@@ -58,38 +58,36 @@ func (c *ImportCmd) Run(ctx context.Context, globals *Globals) error {
 		return fmt.Errorf("import file contains no projects")
 	}
 
+	importProjects := make([]store.ImportProject, len(projects))
+	for i, p := range projects {
+		insights := make([]store.ImportInsight, len(p.Insights))
+		for j, in := range p.Insights {
+			insights[j] = store.ImportInsight{
+				Key:      in.Key,
+				Content:  in.Content,
+				Tags:     in.Tags,
+				Category: in.Category,
+				Source:   in.Source,
+			}
+		}
+		importProjects[i] = store.ImportProject{Slug: p.Slug, Name: p.Name, Insights: insights}
+	}
+
 	st, err := postgres.New(ctx, c.DatabaseURL, store.NewEncryptor([32]byte{}))
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer st.Close()
 
-	insightCount := 0
-	for _, p := range projects {
-		project, err := st.EnsureProject(ctx, orgID, createdBy, p.Slug, p.Name)
-		if err != nil {
-			return fmt.Errorf("failed to ensure project %q: %w", p.Slug, err)
-		}
-
-		for _, in := range p.Insights {
-			_, err := st.WriteInsight(ctx, store.WriteInsightParams{
-				ProjectID: project.ID,
-				Key:       in.Key,
-				Content:   in.Content,
-				Tags:      in.Tags,
-				Category:  in.Category,
-				Source:    in.Source,
-				CreatedBy: createdBy,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to write insight in project %q: %w", p.Slug, err)
-			}
-			insightCount++
-		}
+	// A single transaction covers every project and insight so a failure partway
+	// through (e.g. an invalid category) leaves no partial data behind.
+	projectCount, insightCount, err := st.ImportProjects(ctx, orgID, createdBy, importProjects)
+	if err != nil {
+		return fmt.Errorf("failed to import projects: %w", err)
 	}
 
 	globals.Logger.InfoContext(ctx, "imported data",
-		slog.Int("project_count", len(projects)),
+		slog.Int("project_count", projectCount),
 		slog.Int("insight_count", insightCount),
 		slog.String("input", c.Input),
 	)
