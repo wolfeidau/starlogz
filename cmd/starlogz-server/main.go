@@ -23,6 +23,8 @@ var (
 		HTTP        commands.HTTPCmd    `cmd:"" help:"http mcp server using streamable HTTP transport."`
 		Migrate     commands.MigrateCmd `cmd:"" help:"run database migrations and exit."`
 		Keygen      commands.KeyGenCmd  `cmd:"" help:"generate json web key to sign auth tokens."`
+		Export      commands.ExportCmd  `cmd:"" help:"export a project's insights to a portable JSON file, without auth-related data."`
+		Import      commands.ImportCmd  `cmd:"" help:"import a JSON file produced by the export command into an existing org."`
 		Development bool
 		Version     kong.VersionFlag
 	}

@@ -24,6 +24,7 @@ type Store interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 
 	GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*Org, error)
+	ListOrgs(ctx context.Context) ([]*Org, error)
 
 	EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*Project, error)
 	ListProjects(ctx context.Context, orgID uuid.UUID) ([]*Project, error)
@@ -45,6 +46,7 @@ type Store interface {
 	IsTokenRevoked(ctx context.Context, jti string) (bool, error)
 
 	WriteInsight(ctx context.Context, p WriteInsightParams) (*Insight, error)
+	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
 	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Insight, error)
@@ -109,6 +111,30 @@ type WriteInsightParams struct {
 	Category  string
 	Source    string
 	CreatedBy uuid.UUID
+	// CreatedAt and UpdatedAt let a caller preserve timestamps from another
+	// source (e.g. Store.ImportProjects). Zero value = use the DB default (now()).
+	// Only honoured on insert; an update-by-key write always sets updated_at to now().
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ImportInsight is a single insight to import into a project, scoped to that
+// project and attributed to the importing user by Store.ImportProjects.
+type ImportInsight struct {
+	Key       string
+	Content   string
+	Tags      []string
+	Category  string
+	Source    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ImportProject is a project plus its insights to import as a unit via Store.ImportProjects.
+type ImportProject struct {
+	Slug     string
+	Name     string
+	Insights []ImportInsight
 }
 
 // UpdateInsightParams holds the inputs for Store.UpdateInsight.

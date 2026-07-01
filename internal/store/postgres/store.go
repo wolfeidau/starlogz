@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/logattr"
@@ -17,6 +18,14 @@ import (
 )
 
 var _ store.Store = (*Store)(nil)
+
+// dbtx is satisfied by both *pgxpool.Pool and pgx.Tx, letting query helpers
+// run either directly against the pool or within an explicit transaction.
+type dbtx interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // Store wraps a pgxpool and exposes domain-level query methods.
 type Store struct {
@@ -192,14 +201,45 @@ func (s *Store) GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*
 	return o, nil
 }
 
+// ListOrgs returns every org, ordered by kind then name.
+func (s *Store) ListOrgs(ctx context.Context) ([]*store.Org, error) {
+	s.logger(ctx).DebugContext(ctx, "listing orgs")
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, slug, name, kind, created_at
+		FROM orgs
+		ORDER BY kind, name`)
+	if err != nil {
+		return nil, fmt.Errorf("list orgs: %w", err)
+	}
+	defer rows.Close()
+	var orgs []*store.Org
+	for rows.Next() {
+		o := &store.Org{}
+		var idStr string
+		if err := rows.Scan(&idStr, &o.Slug, &o.Name, &o.Kind, &o.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan org: %w", err)
+		}
+		var parseErr error
+		if o.ID, parseErr = uuid.Parse(idStr); parseErr != nil {
+			return nil, fmt.Errorf("parse org id: %w", parseErr)
+		}
+		orgs = append(orgs, o)
+	}
+	return orgs, rows.Err()
+}
+
 // EnsureProject creates the project if it does not exist and returns it.
 // If it already exists the name is updated to match the provided value.
 func (s *Store) EnsureProject(ctx context.Context, orgID, createdBy uuid.UUID, slug, name string) (*store.Project, error) {
 	s.logger(ctx).DebugContext(ctx, "ensuring project", slog.String("org_id", orgID.String()), slog.String("created_by", createdBy.String()), slog.String("slug", slug), slog.String("name", name))
+	return ensureProjectTx(ctx, s.pool, orgID, createdBy, slug, name)
+}
 
+func ensureProjectTx(ctx context.Context, db dbtx, orgID, createdBy uuid.UUID, slug, name string) (*store.Project, error) {
 	p := &store.Project{}
 	var idStr, orgIDStr, createdByStr string
-	err := s.pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		INSERT INTO projects (org_id, created_by, slug, name)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (org_id, slug) DO UPDATE SET name = EXCLUDED.name
@@ -826,9 +866,12 @@ func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 // project it is updated in place; otherwise a new row is inserted.
 func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
 	s.logger(ctx).DebugContext(ctx, "writing insight", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("category", p.Category), slog.String("source", p.Source), slog.String("created_by", p.CreatedBy.String()))
+	return writeInsightTx(ctx, s.pool, p)
+}
 
+func writeInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
 	if p.Key != "" {
-		f, err := s.updateInsightByKey(ctx, p)
+		f, err := updateInsightByKeyTx(ctx, db, p)
 		if err == nil {
 			return f, nil
 		}
@@ -836,28 +879,10 @@ func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*
 			return nil, err
 		}
 	}
-	return s.insertInsight(ctx, p)
+	return insertInsightTx(ctx, db, p)
 }
 
-func (s *Store) updateInsightByKey(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
-	category := p.Category
-	if category == "" {
-		category = "general"
-	}
-	source := p.Source
-	if source == "" {
-		source = "user"
-	}
-	row := s.pool.QueryRow(ctx, `
-		UPDATE insights
-		SET content = $3, tags = $4, category = $5, source = $6, updated_at = now()
-		WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, p.Tags, category, source)
-	return scanInsight(row)
-}
-
-func (s *Store) insertInsight(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
+func updateInsightByKeyTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
@@ -870,12 +895,85 @@ func (s *Store) insertInsight(ctx context.Context, p store.WriteInsightParams) (
 	if source == "" {
 		source = "user"
 	}
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO insights (project_id, key, content, tags, category, source, created_by)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7)
+	row := db.QueryRow(ctx, `
+		UPDATE insights
+		SET content = $3, tags = $4, category = $5, source = $6, updated_at = now()
+		WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy)
+		p.ProjectID, p.Key, p.Content, tags, category, source)
 	return scanInsight(row)
+}
+
+func insertInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
+	tags := p.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	category := p.Category
+	if category == "" {
+		category = "general"
+	}
+	source := p.Source
+	if source == "" {
+		source = "user"
+	}
+	var createdAt, updatedAt *time.Time
+	if !p.CreatedAt.IsZero() {
+		createdAt = &p.CreatedAt
+	}
+	if !p.UpdatedAt.IsZero() {
+		updatedAt = &p.UpdatedAt
+	}
+	row := db.QueryRow(ctx, `
+		INSERT INTO insights (project_id, key, content, tags, category, source, created_by, created_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, COALESCE($8, now()), COALESCE($9, now()))
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
+		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy, createdAt, updatedAt)
+	return scanInsight(row)
+}
+
+// ImportProjects ensures each project (by slug) exists under orgID and writes its insights,
+// attributing everything to createdBy, all within a single transaction so a failure partway
+// through — e.g. an invalid category on one insight — leaves no partial data behind.
+func (s *Store) ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []store.ImportProject) (projectCount, insightCount int, err error) {
+	s.logger(ctx).DebugContext(ctx, "importing projects", slog.String("org_id", orgID.String()), slog.String("created_by", createdBy.String()), slog.Int("project_count", len(projects)))
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, ip := range projects {
+		project, err := ensureProjectTx(ctx, tx, orgID, createdBy, ip.Slug, ip.Name)
+		if err != nil {
+			return 0, 0, fmt.Errorf("ensure project %q: %w", ip.Slug, err)
+		}
+
+		for _, ii := range ip.Insights {
+			_, err := writeInsightTx(ctx, tx, store.WriteInsightParams{
+				ProjectID: project.ID,
+				Key:       ii.Key,
+				Content:   ii.Content,
+				Tags:      ii.Tags,
+				Category:  ii.Category,
+				Source:    ii.Source,
+				CreatedBy: createdBy,
+				CreatedAt: ii.CreatedAt,
+				UpdatedAt: ii.UpdatedAt,
+			})
+			if err != nil {
+				return 0, 0, fmt.Errorf("write insight in project %q: %w", ip.Slug, err)
+			}
+			insightCount++
+		}
+		projectCount++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit tx: %w", err)
+	}
+	return projectCount, insightCount, nil
 }
 
 // SearchInsights runs a full-text search over live insights in a project.
