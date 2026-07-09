@@ -31,8 +31,9 @@ provider "aws" {
 }
 
 locals {
-  name_prefix       = "starlogz-${var.env}"
-  deploy_bucket     = "starlogz-deploy-${var.env}"
-  service_hostname  = "starlogz.${var.domain}"
-  server_url        = "https://starlogz.${var.domain}"
+  name_prefix      = "starlogz-${var.env}"
+  deploy_bucket    = "starlogz-deploy-${var.env}"
+  hostname_prefix  = var.env == "prod" ? "starlogz" : "starlogz-${var.env}"
+  service_hostname = "${local.hostname_prefix}.${var.domain}"
+  server_url       = "https://${local.service_hostname}"
 }

@@ -1,6 +1,11 @@
 locals {
   apigw_routes = toset([
+    "GET /",
+    "GET /dashboard",
     "GET /health",
+    "GET /login",
+    "GET /logout",
+    "GET /public/{proxy+}",
     "GET /.well-known/oauth-authorization-server",
     "GET /.well-known/openid-configuration",
     "GET /.well-known/jwks",
@@ -9,7 +14,10 @@ locals {
     "GET /oauth2/authorize",
     "POST /oauth2/token",
     "GET /auth/github/callback",
+    "GET /ui/auth/callback",
     "POST /auth/logout",
+    "GET /starlogz.v1.UIService/{method}",
+    "POST /starlogz.v1.UIService/{method}",
     "POST /mcp",
     "DELETE /mcp",
   ])

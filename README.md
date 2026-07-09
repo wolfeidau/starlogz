@@ -133,6 +133,21 @@ terraform -chdir=infra/terraform plan -out output.tfplan
 terraform -chdir=infra/terraform apply "output.tfplan"
 ```
 
+Terraform publishes prod at `https://starlogz.{domain}` and non-prod
+environments at `https://starlogz-{env}.{domain}`. Configure the GitHub App
+with the upstream callback URL printed by Terraform:
+
+```bash
+terraform -chdir=infra/terraform output github_oauth_callback_url
+```
+
+The first-party browser UI uses this same service host as its own OAuth
+redirect URI:
+
+```bash
+terraform -chdir=infra/terraform output ui_oauth_callback_url
+```
+
 ### Subsequent deploys
 
 ```bash

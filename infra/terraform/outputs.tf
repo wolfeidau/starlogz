@@ -1,6 +1,16 @@
 output "service_url" {
-  description = "Service base URL. Use this as SERVER_URL and as the base for the GitHub App callback URL ({service_url}/auth/github/callback)."
+  description = "Service base URL. Use this as SERVER_URL."
   value       = local.server_url
+}
+
+output "github_oauth_callback_url" {
+  description = "GitHub App callback URL for MCP/OAuth clients."
+  value       = "${local.server_url}/auth/github/callback"
+}
+
+output "ui_oauth_callback_url" {
+  description = "First-party UI OAuth redirect URI."
+  value       = "${local.server_url}/ui/auth/callback"
 }
 
 output "function_name" {
