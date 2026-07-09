@@ -27,7 +27,7 @@ variable "zone_id" {
 }
 
 variable "domain" {
-  description = "Base domain name. Service is deployed at starlogz.{domain}."
+  description = "Base domain name. Prod is deployed at starlogz.{domain}; other envs use starlogz-{env}.{domain}."
   type        = string
 }
 
