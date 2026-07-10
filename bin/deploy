@@ -17,6 +17,9 @@ confirm() {
 
 # Build
 echo "==> building"
+bun install --frozen-lockfile
+bun run proto:generate
+bun run build
 goreleaser build --clean --snapshot
 VERSION=$(jq -r .version dist/metadata.json)
 echo "    version: ${VERSION}"

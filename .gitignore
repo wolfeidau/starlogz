@@ -18,4 +18,8 @@ logs/
 /junit.xml
 /starlogz-server
 /sarif-annotate
+/golangci-lint.sarif
 /tflint.sarif
+
+# generated frontend bundle embedded by the Go server
+/internal/server/public/

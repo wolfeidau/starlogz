@@ -1068,6 +1068,112 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 	return tags, rows.Err()
 }
 
+// GetProjectDashboard returns aggregate read models for the project dashboard.
+func (s *Store) GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*store.ProjectDashboard, error) {
+	s.logger(ctx).DebugContext(ctx, "loading project dashboard", slog.String("project_id", projectID.String()))
+
+	out := &store.ProjectDashboard{}
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM insights
+		WHERE project_id = $1 AND deleted_at IS NULL`,
+		projectID).Scan(&out.TotalInsights); err != nil {
+		return nil, fmt.Errorf("count insights: %w", err)
+	}
+
+	var err error
+	out.CategoryCounts, err = s.countBuckets(ctx, `
+		SELECT category, count(*)
+		FROM insights
+		WHERE project_id = $1 AND deleted_at IS NULL
+		GROUP BY category
+		ORDER BY count(*) DESC, category`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("category counts: %w", err)
+	}
+
+	out.SourceCounts, err = s.countBuckets(ctx, `
+		SELECT source, count(*)
+		FROM insights
+		WHERE project_id = $1 AND deleted_at IS NULL
+		GROUP BY source
+		ORDER BY count(*) DESC, source`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("source counts: %w", err)
+	}
+
+	out.TopTags, err = s.countBuckets(ctx, `
+		SELECT unnest(tags) AS tag, count(*) AS cnt
+		FROM insights
+		WHERE project_id = $1 AND deleted_at IS NULL
+		GROUP BY tag
+		ORDER BY cnt DESC, tag
+		LIMIT 12`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("top tags: %w", err)
+	}
+
+	out.RecentActivity, err = s.activityBuckets(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("recent activity: %w", err)
+	}
+
+	out.RecentInsights, err = s.ListInsights(ctx, projectID, "", 12)
+	if err != nil {
+		return nil, fmt.Errorf("recent insights: %w", err)
+	}
+
+	return out, nil
+}
+
+func (s *Store) countBuckets(ctx context.Context, query string, projectID uuid.UUID) ([]store.CountBucket, error) {
+	rows, err := s.pool.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []store.CountBucket
+	for rows.Next() {
+		var b store.CountBucket
+		if err := rows.Scan(&b.Name, &b.Count); err != nil {
+			return nil, fmt.Errorf("scan count bucket: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID) ([]store.ActivityBucket, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT to_char(days.day::date, 'YYYY-MM-DD') AS day, COALESCE(counts.cnt, 0)::int
+		FROM generate_series(current_date - interval '13 days', current_date, interval '1 day') AS days(day)
+		LEFT JOIN (
+		  SELECT date_trunc('day', updated_at)::date AS day, count(*) AS cnt
+		  FROM insights
+		  WHERE project_id = $1
+		    AND deleted_at IS NULL
+		    AND updated_at >= current_date - interval '13 days'
+		  GROUP BY date_trunc('day', updated_at)::date
+		) counts ON counts.day = days.day::date
+		ORDER BY days.day`,
+		projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []store.ActivityBucket
+	for rows.Next() {
+		var b store.ActivityBucket
+		if err := rows.Scan(&b.Date, &b.Count); err != nil {
+			return nil, fmt.Errorf("scan activity bucket: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // UpdateInsight patches content and/or tags on an existing live insight, scoped to orgID.
 func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) (*store.Insight, error) {
 	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
@@ -1188,6 +1294,31 @@ func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 		c.TokenEndpointAuthMethod, c.Scope, c.IssuedAt, c.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("save oauth client: %w", err)
+	}
+	return nil
+}
+
+// UpsertClient stores or refreshes a first-party OAuth2 client registration.
+func (s *Store) UpsertClient(ctx context.Context, c store.OAuthClient) error {
+	s.logger(ctx).DebugContext(ctx, "upserting oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("scope", c.Scope), slog.Time("expires_at", c.ExpiresAt))
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_clients
+			(client_id, client_name, redirect_uris, grant_types, response_types,
+			 token_endpoint_auth_method, scope, issued_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (client_id) DO UPDATE SET
+			client_name = EXCLUDED.client_name,
+			redirect_uris = EXCLUDED.redirect_uris,
+			grant_types = EXCLUDED.grant_types,
+			response_types = EXCLUDED.response_types,
+			token_endpoint_auth_method = EXCLUDED.token_endpoint_auth_method,
+			scope = EXCLUDED.scope,
+			expires_at = EXCLUDED.expires_at`,
+		c.ClientID, c.ClientName, c.RedirectURIs, c.GrantTypes, c.ResponseTypes,
+		c.TokenEndpointAuthMethod, c.Scope, c.IssuedAt, c.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("upsert oauth client: %w", err)
 	}
 	return nil
 }
