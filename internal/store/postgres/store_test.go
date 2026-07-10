@@ -350,6 +350,70 @@ func TestListTags(t *testing.T) {
 	}
 }
 
+func TestGetProjectDashboard(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 75)
+
+	_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Content:   "Postgres stores facts",
+		Tags:      []string{"db", "backend"},
+		Category:  "fact",
+		Source:    "agent",
+		CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Content:   "Prefer Connect RPC for UI APIs",
+		Tags:      []string{"api"},
+		Category:  "preference",
+		Source:    "user",
+		CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	deleted, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Content:   "deleted insight",
+		Tags:      []string{"deleted"},
+		Category:  "fact",
+		Source:    "agent",
+		CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, deleted.ID))
+
+	dashboard, err := st.GetProjectDashboard(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, dashboard.TotalInsights)
+	require.Len(t, dashboard.RecentActivity, 14)
+	require.Len(t, dashboard.RecentInsights, 2)
+
+	categoryCounts := map[string]int{}
+	for _, bucket := range dashboard.CategoryCounts {
+		categoryCounts[bucket.Name] = bucket.Count
+	}
+	require.Equal(t, 1, categoryCounts["fact"])
+	require.Equal(t, 1, categoryCounts["preference"])
+
+	sourceCounts := map[string]int{}
+	for _, bucket := range dashboard.SourceCounts {
+		sourceCounts[bucket.Name] = bucket.Count
+	}
+	require.Equal(t, 1, sourceCounts["agent"])
+	require.Equal(t, 1, sourceCounts["user"])
+
+	tagCounts := map[string]int{}
+	for _, bucket := range dashboard.TopTags {
+		tagCounts[bucket.Name] = bucket.Count
+	}
+	require.Equal(t, 1, tagCounts["db"])
+	require.Equal(t, 1, tagCounts["backend"])
+	require.Equal(t, 1, tagCounts["api"])
+	require.Zero(t, tagCounts["deleted"])
+}
+
 func TestUpdateInsight(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
@@ -632,6 +696,37 @@ func TestSaveClient_DuplicateClientID(t *testing.T) {
 	c.ClientName = "Second"
 	err := st.SaveClient(ctx, c)
 	require.Error(t, err, "saving a duplicate client_id must return an error")
+}
+
+func TestUpsertClient_UpdatesExistingClient(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+
+	now := time.Now().UTC()
+	c := store.OAuthClient{
+		ClientID:                "ui-client",
+		ClientName:              "First",
+		RedirectURIs:            []string{"https://a.example.com/cb"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		Scope:                   "insights:read",
+		IssuedAt:                now,
+		ExpiresAt:               now.Add(90 * 24 * time.Hour),
+	}
+
+	require.NoError(t, st.UpsertClient(ctx, c))
+
+	c.ClientName = "Second"
+	c.RedirectURIs = []string{"https://b.example.com/cb"}
+	c.Scope = "insights:read insights:write"
+	require.NoError(t, st.UpsertClient(ctx, c))
+
+	got, err := st.GetClient(ctx, c.ClientID)
+	require.NoError(t, err)
+	require.Equal(t, "Second", got.ClientName)
+	require.Equal(t, []string{"https://b.example.com/cb"}, got.RedirectURIs)
+	require.Equal(t, "insights:read insights:write", got.Scope)
 }
 
 // --- GetUserByID ---

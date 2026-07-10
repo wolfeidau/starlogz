@@ -1,0 +1,27 @@
+{
+  "name": "starlogz",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build ./ui/pages/dashboard.tsx --outdir ./internal/server/public --target browser --format esm",
+    "lint": "biome lint ui api/gen/proto/es",
+    "format": "biome format --write ui api/gen/proto/es",
+    "proto:generate": "cd api && go tool buf generate"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.10.2",
+    "@connectrpc/connect-query": "^2.2.0",
+    "@connectrpc/connect-web": "^2.1.1",
+    "@tanstack/react-query": "^5.90.14",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.10",
+    "@bufbuild/protoc-gen-es": "^2.10.2",
+    "@connectrpc/protoc-gen-connect-query": "^2.2.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3"
+  }
+}

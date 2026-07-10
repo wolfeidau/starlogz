@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package starlogz.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service UIService {
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc GetProjectDashboard(GetProjectDashboardRequest) returns (GetProjectDashboardResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc ListInsights(ListInsightsRequest) returns (ListInsightsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc SearchInsights(SearchInsightsRequest) returns (SearchInsightsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message GetSessionRequest {}
+
+message GetSessionResponse {
+  string user_id = 1;
+  string login = 2;
+  string email = 3;
+  repeated string scopes = 4;
+}
+
+message ListProjectsRequest {}
+
+message Project {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message GetProjectDashboardRequest {
+  string project = 1;
+}
+
+message CountBucket {
+  string name = 1;
+  int32 count = 2;
+}
+
+message ActivityBucket {
+  string date = 1;
+  int32 count = 2;
+}
+
+message GetProjectDashboardResponse {
+  Project project = 1;
+  int32 total_insights = 2;
+  repeated CountBucket category_counts = 3;
+  repeated CountBucket source_counts = 4;
+  repeated CountBucket top_tags = 5;
+  repeated ActivityBucket recent_activity = 6;
+  repeated Insight recent_insights = 7;
+}
+
+message Insight {
+  string id = 1;
+  string key = 2;
+  string content = 3;
+  repeated string tags = 4;
+  string category = 5;
+  string source = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message ListInsightsRequest {
+  string project = 1;
+  string tag = 2;
+  int32 limit = 3;
+}
+
+message ListInsightsResponse {
+  repeated Insight insights = 1;
+}
+
+message SearchInsightsRequest {
+  string project = 1;
+  string query = 2;
+  repeated string tags = 3;
+  int32 limit = 4;
+}
+
+message SearchInsightsResponse {
+  repeated Insight insights = 1;
+}
+
+message ListTagsRequest {
+  string project = 1;
+  int32 limit = 2;
+}
+
+message ListTagsResponse {
+  repeated CountBucket tags = 1;
+}

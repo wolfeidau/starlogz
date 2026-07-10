@@ -161,6 +161,38 @@ func TestHealth_WrongMethod(t *testing.T) {
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
+func TestDashboard_Route(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := http.Get(ts.URL + "/dashboard")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+}
+
+func TestPublicAsset_Route(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := http.Get(ts.URL + "/public/dashboard.js")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "javascript")
+}
+
+func TestUIRPC_MissingSession(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := http.Post(ts.URL+"/starlogz.v1.UIService/GetSession", "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
 // --- Discovery routing ---
 
 func TestDiscovery_RFC8414(t *testing.T) {

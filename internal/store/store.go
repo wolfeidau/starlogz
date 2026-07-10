@@ -52,8 +52,10 @@ type Store interface {
 	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Insight, error)
 	ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Insight, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
+	GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*ProjectDashboard, error)
 
 	SaveClient(ctx context.Context, c OAuthClient) error
+	UpsertClient(ctx context.Context, c OAuthClient) error
 	GetClient(ctx context.Context, clientID string) (*OAuthClient, error)
 
 	ListAuditLog(ctx context.Context, filter AuditLogFilter) ([]*AuditLogEntry, error)
@@ -150,6 +152,28 @@ type UpdateInsightParams struct {
 type TagCount struct {
 	Name  string
 	Count int
+}
+
+// CountBucket holds a named aggregate count.
+type CountBucket struct {
+	Name  string
+	Count int
+}
+
+// ActivityBucket holds a single day's insight update count.
+type ActivityBucket struct {
+	Date  string
+	Count int
+}
+
+// ProjectDashboard holds read-optimized aggregate data for the project dashboard.
+type ProjectDashboard struct {
+	TotalInsights  int
+	CategoryCounts []CountBucket
+	SourceCounts   []CountBucket
+	TopTags        []CountBucket
+	RecentActivity []ActivityBucket
+	RecentInsights []*Insight
 }
 
 // Grant holds a single authorization grant with the associated GitHub App tokens.

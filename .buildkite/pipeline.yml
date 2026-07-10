@@ -12,7 +12,10 @@ steps:
     key: quality_checks
     steps:
       - label: ":golangci-lint: lint"
-        command: golangci-lint run --output.sarif.path golangci-lint.sarif --verbose --timeout 3m
+        commands:
+          - bun install --frozen-lockfile
+          - bun run build
+          - golangci-lint run --output.sarif.path golangci-lint.sarif --verbose --timeout 3m
         artifact_paths:
           - golangci-lint.sarif
         env:
@@ -40,11 +43,20 @@ steps:
           - coverage.out
           - junit.xml
         commands:
+          - bun install --frozen-lockfile
+          - bun run build
           - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=coverage.out ./...
           - go run github.com/nikolaydubina/go-cover-treemap -coverprofile coverage.out > cover-tree.svg
           - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
         env:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
+        plugins:
+          - mise#v1.1.1: ~
+
+      - label: ":bun: lint"
+        command:
+          - bun install
+          - bun run lint
         plugins:
           - mise#v1.1.1: ~

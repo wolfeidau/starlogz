@@ -13,6 +13,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	starlogzv1connect "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1/starlogzv1connect"
 	"github.com/wolfeidau/starlogz/internal/middleware"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -96,6 +97,14 @@ func New(cfg Config) (*Server, error) {
 	metadata := oidcServer.ProtectedResourceMeta()
 
 	mux := http.NewServeMux()
+	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(newUIService(cfg.Store))
+	mux.Handle(uiPath, srv.uiAuthMiddleware(oidcServer, uiHandler))
+	mux.Handle("/public/", publicHandler())
+	mux.HandleFunc("/", redirectIfSession(pageHandler("starlogz")).ServeHTTP)
+	mux.HandleFunc("/dashboard", pageHandler("starlogz dashboard"))
+	mux.HandleFunc("/login", srv.loginHandler(cfg.BaseURL))
+	mux.HandleFunc("/logout", srv.uiLogoutHandler(oidcServer))
+	mux.HandleFunc("/ui/auth/callback", srv.uiCallbackHandler(oidcServer, cfg.BaseURL))
 	mux.Handle("/.well-known/oauth-authorization-server", oidcServer.DiscoveryHandler())
 	mux.Handle("/.well-known/openid-configuration", oidcServer.DiscoveryHandler())
 	mux.Handle("/.well-known/jwks", oidcServer.JWKSHandler())
