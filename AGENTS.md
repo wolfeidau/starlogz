@@ -14,11 +14,13 @@ internal/commands/                kong command structs (HTTPCmd, KeyGenCmd)
 internal/middleware/              HTTP middleware (access log, CORS)
 internal/oidc/                    OAuth2/OIDC server — JWKS, discovery, DCR, JWT verify, logout
 internal/server/                  HTTP mux, MCP tool handlers, health endpoint
+internal/server/public/           generated dashboard assets embedded in the server binary
 internal/store/                   store interface + types (Insight, WriteInsightParams, …)
 internal/store/postgres/          PostgreSQL implementation + migration runner
-internal/store/postgres/migrations/  embedded SQL migration files (1–13)
+internal/store/postgres/migrations/  embedded SQL migration files (1–16)
 internal/telemetry/               OTel init (traces + metrics via OTLP gRPC)
 spec/                             design specs (auth.md, persistence.md, refresh_tokens.md)
+ui/                               React dashboard source and generated Connect clients
 ```
 
 
@@ -77,30 +79,38 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 
 ## Build and test
 
+Run project commands through `mise exec --` so the repository's configured tool versions are used. Build the dashboard assets before Go package loading; `internal/server/web.go` embeds `internal/server/public/*`.
+
 ```bash
+# Install UI dependencies and generate embedded dashboard assets
+mise exec -- bun install --frozen-lockfile
+mise exec -- bun run build
+
 # Build
-go build ./...
+mise exec -- go build ./...
 
 # Run all tests (store tests spin up a real PostgreSQL container via testcontainers-go)
-go test ./...
+mise exec -- go test ./...
 
 # Generate a signing key (once)
-go run ./cmd/starlogz-server keygen --output key.jwk
+mise exec -- go run ./cmd/starlogz-server keygen --output key.jwk
 
 # Run database migrations only (then exit)
-go run ./cmd/starlogz-server migrate
+mise exec -- go run ./cmd/starlogz-server migrate
 
 # Start the server
-go run ./cmd/starlogz-server http --jwk-path key.jwk
+mise exec -- go run ./cmd/starlogz-server http --jwk-path key.jwk
 
 # Start the server with coloured debug logging (development mode)
-go run ./cmd/starlogz-server --development http --jwk-path key.jwk
+mise exec -- go run ./cmd/starlogz-server --development http --jwk-path key.jwk
 
 # Query the local Postgres instance (runs psql inside the docker compose container)
 bin/psql
 ```
 
 Docker must be running for store integration tests.
+
+Deploy Lambda changes with `mise exec -- bin/deploy`; Terraform consumes the artifact uploaded by that script and does not build or upload application code itself.
 
 Key env vars:
 
@@ -169,11 +179,11 @@ Middleware chain order: `otelhttp → AccessLog → mux`
 
 ### OAuth2 / OIDC
 
-All OAuth2 logic lives in `internal/oidc/`. Do not add OAuth2 logic to `internal/commands/http.go`.
+OAuth2/OIDC protocol logic lives in `internal/oidc/`. Dashboard client and opaque web-session handling lives in `internal/server/ui_auth.go`. Do not add OAuth2 logic to `internal/commands/http.go`.
 
-Tokens are ES384-signed JWTs. Every issued token must include a `jti` (UUID v4). `VerifyJWT` checks the `jti` against the in-memory revocation blocklist before accepting a token.
+Tokens are ES384-signed JWTs. Every issued token must include a `jti` (UUID v4). `VerifyJWT` checks the `jti` through the persistent `RevocationStore` before accepting a token.
 
-The blocklist (`Server.revoked`) is protected by `sync.RWMutex`. Write lock on `RevokeToken` (which also prunes expired entries); read lock on `VerifyJWT`.
+The first-party dashboard OAuth client registers the `authorization_code` grant only. It exchanges the code for an access token, then creates an opaque database-backed web session; it does not retain an OAuth refresh grant.
 
 ---
 
