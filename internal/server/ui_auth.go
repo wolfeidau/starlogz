@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,18 +15,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
 const (
-	uiClientID       = "starlogz-ui"
-	uiSessionCookie  = "starlogz_session"
-	uiStateCookie    = "starlogz_ui_state"
-	uiVerifierCookie = "starlogz_ui_verifier"
-	uiScope          = "insights:read insights:write"
-	oauthCodeValue   = "code"
+	uiClientID              = "starlogz-ui"
+	uiSessionCookie         = "starlogz_session"
+	uiStateCookie           = "starlogz_ui_state"
+	uiVerifierCookie        = "starlogz_ui_verifier"
+	uiScope                 = "insights:read insights:write"
+	oauthCodeValue          = "code"
+	defaultUISessionIdleTTL = 7 * 24 * time.Hour
+	defaultUISessionTTL     = 30 * 24 * time.Hour
+	uiSessionTouchInterval  = time.Hour
 )
 
 func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
@@ -112,27 +117,47 @@ func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http
 			return
 		}
 
-		session := cookieSettings(r, time.Duration(tokenResp.ExpiresIn)*time.Second)
-		http.SetCookie(w, namedCookie(uiSessionCookie, tokenResp.AccessToken, session))
+		info, err := oidcServer.VerifyJWT(r.Context(), tokenResp.AccessToken, r)
+		if err != nil {
+			http.Error(w, "invalid token exchange response", http.StatusBadRequest)
+			return
+		}
+		userID, err := uuid.Parse(info.UserID)
+		if err != nil {
+			http.Error(w, "invalid token subject", http.StatusBadRequest)
+			return
+		}
+		rawSession, err := randomBase64(32)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		now := time.Now()
+		if _, err := s.store.CreateWebSession(r.Context(), store.WebSession{
+			TokenHash: store.HashSessionToken(rawSession), UserID: userID,
+			IdleExpiresAt: now.Add(s.uiSessionIdleTTL), ExpiresAt: now.Add(s.uiSessionTTL),
+		}); err != nil {
+			ctxlog.LoggerFrom(r.Context()).ErrorContext(r.Context(), "create UI session failed", slog.Any("error", err))
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, namedCookie(uiSessionCookie, rawSession, cookieSettings(r, s.uiSessionTTL)))
 		clearCookie(w, r, uiStateCookie)
 		clearCookie(w, r, uiVerifierCookie)
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 	}
 }
 
-func (s *Server) uiLogoutHandler(oidcServer *oidc.Server) http.HandlerFunc {
+func (s *Server) uiLogoutHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		if c, err := r.Cookie(uiSessionCookie); err == nil && c.Value != "" {
-			req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil).WithContext(r.Context())
-			req.Header.Set("Authorization", "Bearer "+c.Value)
-			rr := httptest.NewRecorder()
-			oidcServer.LogoutHandler().ServeHTTP(rr, req)
-			if rr.Code >= 500 {
-				ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "UI logout revoke failed", slog.Int("status", rr.Code))
+			if err := s.store.RevokeWebSessionByTokenHash(r.Context(), store.HashSessionToken(c.Value)); err != nil && !errors.Is(err, store.ErrNotFound) {
+				ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "UI session revoke failed", slog.Any("error", err))
 			}
 		}
 		clearCookie(w, r, uiSessionCookie)
@@ -140,19 +165,43 @@ func (s *Server) uiLogoutHandler(oidcServer *oidc.Server) http.HandlerFunc {
 	}
 }
 
-func (s *Server) uiAuthMiddleware(oidcServer *oidc.Server, next http.Handler) http.Handler {
+func (s *Server) uiAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.store == nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		c, err := r.Cookie(uiSessionCookie)
 		if err != nil || c.Value == "" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		info, err := oidcServer.VerifyJWT(r.Context(), c.Value, r)
-		if err != nil {
+		session, err := s.store.GetWebSessionByTokenHash(r.Context(), store.HashSessionToken(c.Value))
+		if errors.Is(err, store.ErrNotFound) {
+			clearCookie(w, r, uiSessionCookie)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(contextWithTokenInfo(r.Context(), info)))
+		if err != nil {
+			ctxlog.LoggerFrom(r.Context()).ErrorContext(r.Context(), "load UI session failed", slog.Any("error", err))
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		now := time.Now()
+		if now.Sub(session.LastSeenAt) >= uiSessionTouchInterval {
+			err := s.store.TouchWebSession(r.Context(), session.ID, now, now.Add(s.uiSessionIdleTTL))
+			if errors.Is(err, store.ErrNotFound) {
+				clearCookie(w, r, uiSessionCookie)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if err != nil {
+				ctxlog.LoggerFrom(r.Context()).ErrorContext(r.Context(), "touch UI session failed", slog.Any("error", err))
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+		}
+		next.ServeHTTP(w, r.WithContext(contextWithWebSession(r.Context(), session)))
 	})
 }
 
@@ -161,7 +210,7 @@ func (s *Server) ensureUIClient(ctx context.Context, redirectURI string, now tim
 		ClientID:                uiClientID,
 		ClientName:              "starlogz UI",
 		RedirectURIs:            []string{redirectURI},
-		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		GrantTypes:              []string{"authorization_code"},
 		ResponseTypes:           []string{oauthCodeValue},
 		TokenEndpointAuthMethod: "none",
 		Scope:                   uiScope,
@@ -242,12 +291,14 @@ func pkceChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func redirectIfSession(next http.Handler) http.Handler {
+func (s *Server) redirectIfSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			if c, err := r.Cookie(uiSessionCookie); err == nil && c.Value != "" {
-				http.Redirect(w, r, "/dashboard", http.StatusFound)
-				return
+			if c, err := r.Cookie(uiSessionCookie); err == nil && c.Value != "" && s.store != nil {
+				if _, err := s.store.GetWebSessionByTokenHash(r.Context(), store.HashSessionToken(c.Value)); err == nil {
+					http.Redirect(w, r, "/dashboard", http.StatusFound)
+					return
+				}
 			}
 		}
 		next.ServeHTTP(w, r)

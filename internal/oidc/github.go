@@ -12,9 +12,13 @@ import (
 )
 
 type githubUser struct {
-	ID    int64  `json:"id"`
-	Login string `json:"login"`
-	Email string `json:"email"`
+	ID        int64  `json:"id"`
+	Login     string `json:"login"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
+	HTMLURL   string `json:"html_url"`
+	Bio       string `json:"bio"`
 }
 
 type githubEmail struct {
@@ -83,9 +87,13 @@ func (c *oauthGitHubConnector) RefreshToken(ctx context.Context, refreshToken st
 
 // githubIdentity is the resolved identity returned by fetchGitHubIdentity.
 type githubIdentity struct {
-	ID    int64
-	Email string
-	Login string
+	ID          int64
+	Email       string
+	Login       string
+	DisplayName string
+	AvatarURL   string
+	ProfileURL  string
+	Bio         string
 }
 
 // fetchGitHubIdentity returns the resolved GitHub identity for the authenticated user.
@@ -96,8 +104,12 @@ func fetchGitHubIdentity(ctx context.Context, client *http.Client) (*githubIdent
 		return nil, fmt.Errorf("fetch GitHub user: %w", err)
 	}
 
+	identity := &githubIdentity{
+		ID: user.ID, Email: user.Email, Login: user.Login, DisplayName: user.Name,
+		AvatarURL: user.AvatarURL, ProfileURL: user.HTMLURL, Bio: user.Bio,
+	}
 	if user.Email != "" {
-		return &githubIdentity{ID: user.ID, Email: user.Email, Login: user.Login}, nil
+		return identity, nil
 	}
 
 	var emails []githubEmail
@@ -107,7 +119,8 @@ func fetchGitHubIdentity(ctx context.Context, client *http.Client) (*githubIdent
 
 	for _, e := range emails {
 		if e.Primary && e.Verified {
-			return &githubIdentity{ID: user.ID, Email: e.Email, Login: user.Login}, nil
+			identity.Email = e.Email
+			return identity, nil
 		}
 	}
 

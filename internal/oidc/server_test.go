@@ -1214,6 +1214,40 @@ func TestTokenHandler_AuthCodeIssuesRefreshToken(t *testing.T) {
 	require.Equal(t, "insights:read insights:write", gs.calls[0].Scope)
 }
 
+func TestTokenHandler_AuthCodeClientWithoutRefreshGrantSkipsGrantPersistence(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, nil)
+	srv.clients = &testClientStore{records: []store.OAuthClient{{
+		ClientID: "web-client", GrantTypes: []string{"authorization_code"},
+	}}}
+
+	verifier := "web-client-verifier"
+	code := "web-client-auth-code"
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		Sub: uuid.New().String(), Scope: "insights:read", CodeChallenge: pkceChallenge(verifier),
+		RedirectURI: "https://client.example.com/callback", ClientID: "web-client",
+		AccessToken: "gha_access", RefreshToken: "ghr_refresh",
+		AccessTokenExpiry: time.Now().Add(8 * time.Hour), RefreshTokenExpiry: time.Now().Add(180 * 24 * time.Hour),
+	}))
+
+	form := url.Values{
+		"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {verifier},
+		"client_id": {"web-client"}, "redirect_uri": {"https://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp["access_token"])
+	_, hasRefresh := resp["refresh_token"]
+	require.False(t, hasRefresh)
+	require.Empty(t, gs.calls)
+}
+
 func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
 	gs := &testGrantStore{}
 	srv := newRefreshTestServer(t, gs, nil)
@@ -1881,9 +1915,8 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 	srv.github = &mockGitHubConnector{
 		token: &oauth2.Token{AccessToken: "gha_test", RefreshToken: "ghr_test"},
 		identity: &githubIdentity{
-			ID:    42,
-			Email: "dev@example.com",
-			Login: "devuser",
+			ID: 42, Email: "dev@example.com", Login: "devuser", DisplayName: "Dev User",
+			AvatarURL: "https://avatars.example/dev", ProfileURL: "https://example/dev", Bio: "Developer",
 		},
 	}
 
@@ -1899,9 +1932,11 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 
 	require.Equal(t, http.StatusFound, w.Code)
 	require.Len(t, us.calls, 1)
-	require.Equal(t, int64(42), us.calls[0].githubID)
-	require.Equal(t, "dev@example.com", us.calls[0].email)
-	require.Equal(t, "devuser", us.calls[0].login)
+	require.Equal(t, int64(42), us.calls[0].profile.GitHubID)
+	require.Equal(t, "dev@example.com", us.calls[0].profile.Email)
+	require.Equal(t, "devuser", us.calls[0].profile.Login)
+	require.Equal(t, "Dev User", us.calls[0].profile.DisplayName)
+	require.Equal(t, "https://avatars.example/dev", us.calls[0].profile.AvatarURL)
 
 	loc := w.Header().Get("Location")
 	require.Contains(t, loc, "code=")
@@ -2250,9 +2285,7 @@ func (s *testGrantStore) DeleteGrant(_ context.Context, jti string, retired *sto
 }
 
 type upsertCall struct {
-	githubID int64
-	email    string
-	login    string
+	profile store.GitHubProfile
 }
 
 type testUserUpserter struct {
@@ -2260,12 +2293,12 @@ type testUserUpserter struct {
 	err   error
 }
 
-func (u *testUserUpserter) UpsertUser(_ context.Context, githubID int64, email, login string) (*store.User, error) {
-	u.calls = append(u.calls, upsertCall{githubID, email, login})
+func (u *testUserUpserter) UpsertUser(_ context.Context, profile store.GitHubProfile) (*store.User, error) {
+	u.calls = append(u.calls, upsertCall{profile: profile})
 	if u.err != nil {
 		return nil, u.err
 	}
-	return &store.User{ID: uuid.New(), GitHubID: githubID, Email: email, Login: login}, nil
+	return &store.User{ID: uuid.New(), GitHubID: profile.GitHubID, Email: profile.Email, Login: profile.Login}, nil
 }
 
 type mockGitHubConnector struct {

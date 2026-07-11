@@ -25,6 +25,8 @@ type HTTPCmd struct {
 	ShutdownTimeout              time.Duration `help:"Maximum time to wait for in-flight requests before exiting." default:"30s" env:"SHUTDOWN_TIMEOUT"`
 	RefreshTokenGracePeriod      time.Duration `help:"How long a rotated refresh token remains accepted for retry; use 0s to disable." default:"30s" env:"REFRESH_TOKEN_GRACE_PERIOD"`
 	RetiredRefreshTokenRetention time.Duration `help:"How long hashed retired refresh tokens are retained for refresh diagnostics." default:"24h" env:"RETIRED_REFRESH_TOKEN_RETENTION"`
+	UISessionIdleTTL             time.Duration `help:"How long an inactive web UI session remains valid." default:"168h" env:"UI_SESSION_IDLE_TTL"`
+	UISessionTTL                 time.Duration `help:"Maximum lifetime of a web UI session." default:"720h" env:"UI_SESSION_TTL"`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -66,6 +68,8 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		ShutdownTimeout:              c.ShutdownTimeout,
 		RefreshTokenGracePeriod:      &c.RefreshTokenGracePeriod,
 		RetiredRefreshTokenRetention: &c.RetiredRefreshTokenRetention,
+		UISessionIdleTTL:             c.UISessionIdleTTL,
+		UISessionTTL:                 c.UISessionTTL,
 		SentryHandler:                globals.SentryHandler,
 	})
 	if err != nil {

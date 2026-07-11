@@ -5,25 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/modelcontextprotocol/go-sdk/auth"
 	starlogzv1 "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type tokenInfoContextKey struct{}
+type webSessionContextKey struct{}
 
-func contextWithTokenInfo(ctx context.Context, info *auth.TokenInfo) context.Context {
-	return context.WithValue(ctx, tokenInfoContextKey{}, info)
+func contextWithWebSession(ctx context.Context, session *store.WebSession) context.Context {
+	return context.WithValue(ctx, webSessionContextKey{}, session)
 }
 
-func tokenInfoFromContext(ctx context.Context) (*auth.TokenInfo, bool) {
-	info, ok := ctx.Value(tokenInfoContextKey{}).(*auth.TokenInfo)
-	return info, ok && info != nil
+func webSessionFromContext(ctx context.Context) (*store.WebSession, bool) {
+	session, ok := ctx.Value(webSessionContextKey{}).(*store.WebSession)
+	return session, ok && session != nil
 }
 
 type uiService struct {
@@ -35,15 +33,17 @@ func newUIService(st store.Store) *uiService {
 }
 
 func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv1.GetSessionRequest]) (*connect.Response[starlogzv1.GetSessionResponse], error) {
-	info, user, _, err := s.resolve(ctx)
+	_, user, _, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&starlogzv1.GetSessionResponse{
-		UserId: user.ID.String(),
-		Login:  user.Login,
-		Email:  user.Email,
-		Scopes: info.Scopes,
+		UserId:      user.ID.String(),
+		Login:       user.Login,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		AvatarUrl:   user.AvatarURL,
+		ProfileUrl:  user.ProfileURL,
 	}), nil
 }
 
@@ -146,22 +146,15 @@ func (s *uiService) ListTags(ctx context.Context, req *connect.Request[starlogzv
 	return connect.NewResponse(&starlogzv1.ListTagsResponse{Tags: toProtoTagCounts(tags)}), nil
 }
 
-func (s *uiService) resolve(ctx context.Context) (*auth.TokenInfo, *store.User, *store.Org, error) {
+func (s *uiService) resolve(ctx context.Context) (*store.WebSession, *store.User, *store.Org, error) {
 	if s.store == nil {
 		return nil, nil, nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("database not configured"))
 	}
-	info, ok := tokenInfoFromContext(ctx)
+	session, ok := webSessionFromContext(ctx)
 	if !ok {
 		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, errors.New("missing session"))
 	}
-	if !slices.Contains(info.Scopes, "insights:read") {
-		return nil, nil, nil, connect.NewError(connect.CodePermissionDenied, errors.New("token missing insights:read scope"))
-	}
-	userID, err := uuid.Parse(info.UserID)
-	if err != nil {
-		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid user id: %w", err))
-	}
-	user, err := s.store.GetUserByID(ctx, userID)
+	user, err := s.store.GetUserByID(ctx, session.UserID)
 	if err != nil {
 		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user not found: %w", err))
 	}
@@ -169,7 +162,7 @@ func (s *uiService) resolve(ctx context.Context) (*auth.TokenInfo, *store.User, 
 	if err != nil {
 		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("personal org not found: %w", err))
 	}
-	return info, user, org, nil
+	return session, user, org, nil
 }
 
 func (s *uiService) projectBySlug(ctx context.Context, orgID uuid.UUID, slug string) (*store.Project, error) {

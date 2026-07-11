@@ -279,7 +279,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 
 	// Issue an opaque refresh token only when we have a GitHub refresh token to back it.
 	var ourRefreshToken string
-	if s.grants != nil && pc.AccessToken != "" {
+	if s.grants != nil && pc.AccessToken != "" && s.clientSupportsGrant(ctx, pc.ClientID, oauthGrantRefreshToken) {
 		if pc.RefreshToken != "" {
 			ourRefreshToken, err = generateOpaqueToken()
 			if err != nil {
@@ -449,7 +449,11 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	sub := strconv.FormatInt(identity.ID, 10)
 	userID := grant.UserID
 	if s.users != nil {
-		user, uErr := s.users.UpsertUser(storeCtx, identity.ID, identity.Email, identity.Login)
+		user, uErr := s.users.UpsertUser(storeCtx, storepkg.GitHubProfile{
+			GitHubID: identity.ID, Email: identity.Email, Login: identity.Login,
+			DisplayName: identity.DisplayName, AvatarURL: identity.AvatarURL,
+			ProfileURL: identity.ProfileURL, Bio: identity.Bio,
+		})
 		if uErr != nil {
 			telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 			log.ErrorContext(ctx, "upsert user failed", slog.Any("error", uErr), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
@@ -756,7 +760,11 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		// sub is the internal user UUID; fall back to GitHub numeric ID only when no user store is wired (tests).
 		sub := strconv.FormatInt(identity.ID, 10)
 		if s.users != nil {
-			user, uErr := s.users.UpsertUser(ctx, identity.ID, identity.Email, identity.Login)
+			user, uErr := s.users.UpsertUser(ctx, storepkg.GitHubProfile{
+				GitHubID: identity.ID, Email: identity.Email, Login: identity.Login,
+				DisplayName: identity.DisplayName, AvatarURL: identity.AvatarURL,
+				ProfileURL: identity.ProfileURL, Bio: identity.Bio,
+			})
 			if uErr != nil {
 				log.ErrorContext(ctx, "upsert user failed", slog.Any("error", uErr))
 				http.Error(w, "internal error", http.StatusInternalServerError)

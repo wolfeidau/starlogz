@@ -35,15 +35,19 @@ type Config struct {
 	ShutdownTimeout              time.Duration
 	RefreshTokenGracePeriod      *time.Duration
 	RetiredRefreshTokenRetention *time.Duration
+	UISessionIdleTTL             time.Duration
+	UISessionTTL                 time.Duration
 	SentryHandler                func(http.Handler) http.Handler
 }
 
 // Server is the configured HTTP server ready to serve requests.
 type Server struct {
-	handler         http.Handler
-	logger          *slog.Logger
-	store           store.Store
-	shutdownTimeout time.Duration
+	handler          http.Handler
+	logger           *slog.Logger
+	store            store.Store
+	shutdownTimeout  time.Duration
+	uiSessionIdleTTL time.Duration
+	uiSessionTTL     time.Duration
 }
 
 // New builds the mux, wires all handlers, and returns a Server.
@@ -51,6 +55,17 @@ func New(cfg Config) (*Server, error) {
 	shutdownTimeout := cfg.ShutdownTimeout
 	if shutdownTimeout <= 0 {
 		shutdownTimeout = 30 * time.Second
+	}
+	uiSessionIdleTTL := cfg.UISessionIdleTTL
+	if uiSessionIdleTTL <= 0 {
+		uiSessionIdleTTL = defaultUISessionIdleTTL
+	}
+	uiSessionTTL := cfg.UISessionTTL
+	if uiSessionTTL <= 0 {
+		uiSessionTTL = defaultUISessionTTL
+	}
+	if uiSessionIdleTTL > uiSessionTTL {
+		return nil, fmt.Errorf("UI session idle TTL must not exceed absolute TTL")
 	}
 
 	authState := cfg.AuthState
@@ -77,7 +92,10 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)
 	}
 
-	srv := &Server{logger: cfg.Logger, store: cfg.Store, shutdownTimeout: shutdownTimeout}
+	srv := &Server{
+		logger: cfg.Logger, store: cfg.Store, shutdownTimeout: shutdownTimeout,
+		uiSessionIdleTTL: uiSessionIdleTTL, uiSessionTTL: uiSessionTTL,
+	}
 
 	mcpSrv := newMCPServer(cfg.Store)
 
@@ -98,12 +116,12 @@ func New(cfg Config) (*Server, error) {
 
 	mux := http.NewServeMux()
 	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(newUIService(cfg.Store))
-	mux.Handle(uiPath, srv.uiAuthMiddleware(oidcServer, uiHandler))
+	mux.Handle(uiPath, srv.uiAuthMiddleware(uiHandler))
 	mux.Handle("/public/", publicHandler())
-	mux.HandleFunc("/", redirectIfSession(pageHandler("starlogz")).ServeHTTP)
+	mux.HandleFunc("/", srv.redirectIfSession(pageHandler("starlogz")).ServeHTTP)
 	mux.HandleFunc("/dashboard", pageHandler("starlogz dashboard"))
 	mux.HandleFunc("/login", srv.loginHandler(cfg.BaseURL))
-	mux.HandleFunc("/logout", srv.uiLogoutHandler(oidcServer))
+	mux.HandleFunc("/logout", srv.uiLogoutHandler())
 	mux.HandleFunc("/ui/auth/callback", srv.uiCallbackHandler(oidcServer, cfg.BaseURL))
 	mux.Handle("/.well-known/oauth-authorization-server", oidcServer.DiscoveryHandler())
 	mux.Handle("/.well-known/openid-configuration", oidcServer.DiscoveryHandler())

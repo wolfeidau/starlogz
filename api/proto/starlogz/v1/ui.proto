@@ -36,7 +36,10 @@ message GetSessionResponse {
   string user_id = 1;
   string login = 2;
   string email = 3;
-  repeated string scopes = 4;
+  reserved 4;
+  string display_name = 5;
+  string avatar_url = 6;
+  string profile_url = 7;
 }
 
 message ListProjectsRequest {}

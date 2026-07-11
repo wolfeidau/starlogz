@@ -63,7 +63,9 @@ type GetSessionResponse struct {
 	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Login         string                 `protobuf:"bytes,2,opt,name=login,proto3" json:"login,omitempty"`
 	Email         string                 `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
-	Scopes        []string               `protobuf:"bytes,4,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,5,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	AvatarUrl     string                 `protobuf:"bytes,6,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
+	ProfileUrl    string                 `protobuf:"bytes,7,opt,name=profile_url,json=profileUrl,proto3" json:"profile_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -119,11 +121,25 @@ func (x *GetSessionResponse) GetEmail() string {
 	return ""
 }
 
-func (x *GetSessionResponse) GetScopes() []string {
+func (x *GetSessionResponse) GetDisplayName() string {
 	if x != nil {
-		return x.Scopes
+		return x.DisplayName
 	}
-	return nil
+	return ""
+}
+
+func (x *GetSessionResponse) GetAvatarUrl() string {
+	if x != nil {
+		return x.AvatarUrl
+	}
+	return ""
+}
+
+func (x *GetSessionResponse) GetProfileUrl() string {
+	if x != nil {
+		return x.ProfileUrl
+	}
+	return ""
 }
 
 type ListProjectsRequest struct {
@@ -931,12 +947,16 @@ var File_starlogz_v1_ui_proto protoreflect.FileDescriptor
 const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\n" +
 	"\x14starlogz/v1/ui.proto\x12\vstarlogz.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
-	"\x11GetSessionRequest\"q\n" +
+	"\x11GetSessionRequest\"\xc2\x01\n" +
 	"\x12GetSessionResponse\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05login\x18\x02 \x01(\tR\x05login\x12\x14\n" +
-	"\x05email\x18\x03 \x01(\tR\x05email\x12\x16\n" +
-	"\x06scopes\x18\x04 \x03(\tR\x06scopes\"\x15\n" +
+	"\x05email\x18\x03 \x01(\tR\x05email\x12!\n" +
+	"\fdisplay_name\x18\x05 \x01(\tR\vdisplayName\x12\x1d\n" +
+	"\n" +
+	"avatar_url\x18\x06 \x01(\tR\tavatarUrl\x12\x1f\n" +
+	"\vprofile_url\x18\a \x01(\tR\n" +
+	"profileUrlJ\x04\b\x04\x10\x05\"\x15\n" +
 	"\x13ListProjectsRequest\"|\n" +
 	"\aProject\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
