@@ -1,6 +1,7 @@
 package oidc
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -365,7 +366,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 func TestDCRHandler_Success(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"Test Client","grant_types":["authorization_code","implicit"],"response_types":["code"],"token_endpoint_auth_method":"none","scope":"insights:read insights:write"}`
+	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"Test Client","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","scope":"insights:read insights:write"}`
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -381,7 +382,7 @@ func TestDCRHandler_Success(t *testing.T) {
 
 	grants, ok := resp["grant_types"].([]any)
 	require.True(t, ok)
-	require.Equal(t, []any{"authorization_code"}, grants)
+	require.Equal(t, []any{"authorization_code", "refresh_token"}, grants)
 }
 
 func TestDCRHandler_MissingRedirectURIs(t *testing.T) {
@@ -428,7 +429,7 @@ func TestDCRHandler_DefaultsApplied(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, []any{"authorization_code"}, resp["grant_types"])
+	require.Equal(t, []any{"authorization_code", "refresh_token"}, resp["grant_types"])
 	require.Equal(t, []any{"code"}, resp["response_types"])
 	require.Equal(t, "none", resp["token_endpoint_auth_method"])
 	require.Equal(t, defaultRegisteredClientScope, resp["scope"])
@@ -456,6 +457,146 @@ func TestDCRHandler_UnknownScope(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	require.Equal(t, "invalid_client_metadata", errResp["error"])
 	require.Contains(t, errResp["error_description"], "unknown:scope")
+}
+
+func TestDCRHandler_RejectsUnsupportedGrantType(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	body := `{"redirect_uris":["https://client.example.com/callback"],"grant_types":["implicit"]}`
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "unsupported grant_type")
+}
+
+func TestDCRHandler_RejectsUnsupportedResponseType(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	body := `{"redirect_uris":["https://client.example.com/callback"],"response_types":["token"]}`
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "unsupported response_type")
+}
+
+func TestDCRHandler_AcceptsFieldLimits(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	prefix := "https://client.example.com/"
+	redirectURIs := []string{prefix + strings.Repeat("a", maxRedirectURILen-len(prefix))}
+	for i := 1; i < maxRedirectURIs; i++ {
+		redirectURIs = append(redirectURIs, fmt.Sprintf("https://client%d.example.com/callback", i))
+	}
+	body, err := json.Marshal(map[string]any{
+		"redirect_uris": redirectURIs,
+		"client_name":   strings.Repeat("n", maxClientNameLen),
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+}
+
+func TestDCRHandler_RejectsFieldLimits(t *testing.T) {
+	prefix := "https://client.example.com/"
+	tests := []struct {
+		name      string
+		metadata  map[string]any
+		wantError string
+	}{
+		{
+			name: "too many redirect URIs",
+			metadata: map[string]any{
+				"redirect_uris": func() []string {
+					uris := make([]string, maxRedirectURIs+1)
+					for i := range uris {
+						uris[i] = fmt.Sprintf("https://client%d.example.com/callback", i)
+					}
+					return uris
+				}(),
+			},
+			wantError: "at most 10 entries",
+		},
+		{
+			name: "redirect URI too long",
+			metadata: map[string]any{
+				"redirect_uris": []string{prefix + strings.Repeat("a", maxRedirectURILen-len(prefix)+1)},
+			},
+			wantError: "between 1 and 2048 bytes",
+		},
+		{
+			name: "client name too long",
+			metadata: map[string]any{
+				"redirect_uris": []string{"https://client.example.com/callback"},
+				"client_name":   strings.Repeat("n", maxClientNameLen+1),
+			},
+			wantError: "client_name must be at most 256 bytes",
+		},
+		{
+			name: "scope too long",
+			metadata: map[string]any{
+				"redirect_uris": []string{"https://client.example.com/callback"},
+				"scope":         strings.Repeat("s", maxClientScopeLen+1),
+			},
+			wantError: "scope must be at most 1024 bytes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newTestOIDCServer(t)
+			body, err := json.Marshal(tt.metadata)
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/oauth2/register", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			srv.DCRHandler().ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Contains(t, w.Body.String(), tt.wantError)
+		})
+	}
+}
+
+func TestDCRHandler_RejectsInvalidContentType(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(`{"redirect_uris":["https://client.example.com/callback"]}`))
+	req.Header.Set("Content-Type", "text/plain")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "Content-Type must be application/json")
+}
+
+func TestDCRHandler_RejectsTrailingJSON(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	body := `{"redirect_uris":["https://client.example.com/callback"]} {}`
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "one JSON object")
+}
+
+func TestDCRHandler_RejectsOversizedBody(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	body := `{"redirect_uris":["https://client.example.com/callback"],"client_name":"` + strings.Repeat("x", maxDCRBodyBytes) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.DCRHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "request body too large")
 }
 
 // --- Authorize ---
@@ -507,12 +648,12 @@ func TestAuthorizeHandler_DefaultsScope(t *testing.T) {
 
 func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T) {
 	srv := newTestOIDCServer(t)
-	srv.clients = &testClientStore{records: []store.OAuthClient{{
+	clients := &testClientStore{records: []store.OAuthClient{{
 		ClientID:     "registered-client",
 		RedirectURIs: []string{"https://client.example.com/callback"},
 		Scope:        "insights:read insights:write",
-		ExpiresAt:    time.Now().Add(time.Hour),
 	}}}
+	srv.clients = clients
 
 	q := url.Values{
 		"response_type":         {"code"},
@@ -532,6 +673,7 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
+	require.Equal(t, []string{"registered-client"}, clients.touches)
 }
 
 func TestAuthorizeHandler_RejectsScopeOutsideRegisteredClient(t *testing.T) {
@@ -540,7 +682,6 @@ func TestAuthorizeHandler_RejectsScopeOutsideRegisteredClient(t *testing.T) {
 		ClientID:     "read-only-client",
 		RedirectURIs: []string{"https://client.example.com/callback"},
 		Scope:        "insights:read",
-		ExpiresAt:    time.Now().Add(time.Hour),
 	}}}
 
 	q := url.Values{
@@ -670,10 +811,13 @@ func TestAuthorizeHandler_WrongMethod(t *testing.T) {
 
 func TestTokenHandler_ValidExchange(t *testing.T) {
 	srv := newTestOIDCServer(t)
+	clients := &testClientStore{}
+	srv.clients = clients
 
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "test-auth-code-abc123"
 	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "test-client",
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -709,6 +853,7 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
+	require.Equal(t, []string{"test-client"}, clients.touches)
 }
 
 func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
@@ -717,6 +862,7 @@ func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "one-time-code-xyz"
 	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "test-client",
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -758,6 +904,7 @@ func TestTokenHandler_InvalidCode(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {"nonexistent-code"},
 		"code_verifier": {"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"},
+		"client_id":     {"test-client"},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
@@ -771,11 +918,55 @@ func TestTokenHandler_InvalidCode(t *testing.T) {
 	require.Equal(t, "invalid_grant", errResp["error"])
 }
 
+func TestTokenHandler_MissingClientID(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {"code"},
+		"code_verifier": {"verifier"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "client_id")
+}
+
+func TestTokenHandler_ClientIDMismatch(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "client-mismatch-code"
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "client-a",
+		Sub:           "12345678",
+		Scope:         "insights:read",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   "https://client.example.com/callback",
+	}))
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"client_id":     {"client-b"},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "invalid_grant")
+}
+
 func TestTokenHandler_PKCEMismatch(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
 	code := "pkce-mismatch-code"
 	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "test-client",
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -788,6 +979,7 @@ func TestTokenHandler_PKCEMismatch(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {"wrong-verifier-that-is-also-long-enough-for-pkce"},
+		"client_id":     {"test-client"},
 		"redirect_uri":  {"https://client.example.com/callback"},
 	}
 
@@ -808,6 +1000,7 @@ func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "redirect-mismatch-code"
 	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "test-client",
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -820,6 +1013,7 @@ func TestTokenHandler_RedirectURIMismatch(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {verifier},
+		"client_id":     {"test-client"},
 		"redirect_uri":  {"https://attacker.example.com/callback"},
 	}
 
@@ -840,6 +1034,7 @@ func TestTokenHandler_MissingRedirectURI(t *testing.T) {
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "missing-redirect-code"
 	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "test-client",
 		Sub:           "12345678",
 		GitHubID:      12345678,
 		Email:         "user@example.com",
@@ -852,6 +1047,7 @@ func TestTokenHandler_MissingRedirectURI(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {verifier},
+		"client_id":     {"test-client"},
 		// redirect_uri intentionally absent
 	}
 
@@ -914,6 +1110,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	accessExpiry := time.Now().Add(8 * time.Hour).Truncate(time.Second)
 	refreshExpiry := time.Now().Add(180 * 24 * time.Hour).Truncate(time.Second)
 	require.NoError(t, authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:           "test-client",
 		Sub:                userID.String(),
 		GitHubID:           99887766,
 		Email:              "user@example.com",
@@ -930,6 +1127,7 @@ func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {verifier},
+		"client_id":     {"test-client"},
 		"redirect_uri":  {"https://client.example.com/callback"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
@@ -1894,6 +2092,7 @@ func TestValidateRedirectURIs_AcceptsLocalhost(t *testing.T) {
 
 func TestValidateRedirectURIs_AcceptsLoopback(t *testing.T) {
 	require.NoError(t, validateRedirectURIs([]string{"http://127.0.0.1:4000/callback"}))
+	require.NoError(t, validateRedirectURIs([]string{"http://[::1]:4000/callback"}))
 }
 
 func TestValidateRedirectURIs_AcceptsCustomScheme(t *testing.T) {
@@ -1917,6 +2116,21 @@ func TestValidateRedirectURIs_RejectsWildcard(t *testing.T) {
 	err := validateRedirectURIs([]string{"https://*.example.com/callback"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "wildcard")
+}
+
+func TestValidateRedirectURIs_RejectsMalformedURIs(t *testing.T) {
+	for _, uri := range []string{
+		"callback",
+		"/callback",
+		"https:///callback",
+		"https://user:pass@client.example.com/callback",
+		"javascript:alert(1)",
+		"data:text/plain,callback",
+	} {
+		t.Run(uri, func(t *testing.T) {
+			require.Error(t, validateRedirectURIs([]string{uri}))
+		})
+	}
 }
 
 // --- Spies ---
@@ -2086,6 +2300,12 @@ func (m *mockGitHubConnector) RefreshToken(_ context.Context, refreshToken strin
 
 type testClientStore struct {
 	records []store.OAuthClient
+	touches []string
+}
+
+func (s *testClientStore) TouchClient(_ context.Context, clientID string) error {
+	s.touches = append(s.touches, clientID)
+	return nil
 }
 
 func (s *testClientStore) SaveClient(_ context.Context, c store.OAuthClient) error {
@@ -2122,6 +2342,5 @@ func TestDCRHandler_PersistsToClientStore(t *testing.T) {
 	require.Equal(t, []string{"https://client.example.com/callback"}, r.RedirectURIs)
 	require.Equal(t, "insights:read", r.Scope)
 	require.False(t, r.IssuedAt.IsZero())
-	require.True(t, r.ExpiresAt.After(r.IssuedAt), "ExpiresAt must be after IssuedAt")
-	require.InDelta(t, clientRegistrationTTL.Seconds(), r.ExpiresAt.Sub(r.IssuedAt).Seconds(), 2)
+	require.Nil(t, r.ExpiresAt)
 }

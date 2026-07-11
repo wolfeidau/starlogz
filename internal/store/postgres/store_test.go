@@ -648,6 +648,7 @@ func TestSaveClient(t *testing.T) {
 	ctx := t.Context()
 
 	now := time.Now().UTC().Truncate(time.Second)
+	expiresAt := now.Add(90 * 24 * time.Hour)
 	c := store.OAuthClient{
 		ClientID:                "test-client-id-001",
 		ClientName:              "Test Client",
@@ -657,7 +658,7 @@ func TestSaveClient(t *testing.T) {
 		TokenEndpointAuthMethod: "none",
 		Scope:                   "insights:read",
 		IssuedAt:                now,
-		ExpiresAt:               now.Add(90 * 24 * time.Hour),
+		ExpiresAt:               &expiresAt,
 	}
 
 	require.NoError(t, st.SaveClient(ctx, c))
@@ -672,7 +673,89 @@ func TestSaveClient(t *testing.T) {
 	require.Equal(t, c.TokenEndpointAuthMethod, got.TokenEndpointAuthMethod)
 	require.Equal(t, c.Scope, got.Scope)
 	require.WithinDuration(t, c.IssuedAt, got.IssuedAt, time.Second)
-	require.WithinDuration(t, c.ExpiresAt, got.ExpiresAt, time.Second)
+	require.WithinDuration(t, c.IssuedAt, got.LastUsedAt, time.Second)
+	require.NotNil(t, got.ExpiresAt)
+	require.WithinDuration(t, *c.ExpiresAt, *got.ExpiresAt, time.Second)
+}
+
+func TestTouchClient(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	lastUsedAt := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
+	c := store.OAuthClient{
+		ClientID:                "touched-client",
+		RedirectURIs:            []string{"https://client.example.com/callback"},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		IssuedAt:                lastUsedAt,
+		LastUsedAt:              lastUsedAt,
+	}
+	require.NoError(t, st.SaveClient(ctx, c))
+
+	require.NoError(t, st.TouchClient(ctx, c.ClientID))
+	got, err := st.GetClient(ctx, c.ClientID)
+	require.NoError(t, err)
+	require.Greater(t, got.LastUsedAt, lastUsedAt)
+}
+
+func TestTouchClient_ThrottlesRecentUpdates(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	lastUsedAt := time.Now().UTC().Truncate(time.Second)
+	c := store.OAuthClient{
+		ClientID:                "recent-client",
+		RedirectURIs:            []string{"https://client.example.com/callback"},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		IssuedAt:                lastUsedAt,
+		LastUsedAt:              lastUsedAt,
+	}
+	require.NoError(t, st.SaveClient(ctx, c))
+
+	require.NoError(t, st.TouchClient(ctx, c.ClientID))
+	got, err := st.GetClient(ctx, c.ClientID)
+	require.NoError(t, err)
+	require.True(t, lastUsedAt.Equal(got.LastUsedAt))
+}
+
+func TestSaveClient_Permanent(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+
+	c := store.OAuthClient{
+		ClientID:                "permanent-client-id",
+		RedirectURIs:            []string{"https://client.example.com/callback"},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		IssuedAt:                time.Now().UTC(),
+	}
+
+	require.NoError(t, st.SaveClient(ctx, c))
+	got, err := st.GetClient(ctx, c.ClientID)
+	require.NoError(t, err)
+	require.Nil(t, got.ExpiresAt)
+}
+
+func TestGetClient_ExpiredTemporaryClient(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	expiresAt := time.Now().Add(-time.Minute)
+	c := store.OAuthClient{
+		ClientID:                "expired-temporary-client",
+		RedirectURIs:            []string{"https://client.example.com/callback"},
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		IssuedAt:                time.Now().Add(-time.Hour),
+		ExpiresAt:               &expiresAt,
+	}
+
+	require.NoError(t, st.SaveClient(ctx, c))
+	_, err := st.GetClient(ctx, c.ClientID)
+	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestSaveClient_DuplicateClientID(t *testing.T) {
@@ -680,6 +763,7 @@ func TestSaveClient_DuplicateClientID(t *testing.T) {
 	ctx := t.Context()
 
 	now := time.Now().UTC()
+	expiresAt := now.Add(90 * 24 * time.Hour)
 	c := store.OAuthClient{
 		ClientID:                "duplicate-client-id",
 		ClientName:              "First",
@@ -688,7 +772,7 @@ func TestSaveClient_DuplicateClientID(t *testing.T) {
 		ResponseTypes:           []string{"code"},
 		TokenEndpointAuthMethod: "none",
 		IssuedAt:                now,
-		ExpiresAt:               now.Add(90 * 24 * time.Hour),
+		ExpiresAt:               &expiresAt,
 	}
 
 	require.NoError(t, st.SaveClient(ctx, c))
@@ -702,7 +786,8 @@ func TestUpsertClient_UpdatesExistingClient(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Second)
+	expiresAt := now.Add(90 * 24 * time.Hour)
 	c := store.OAuthClient{
 		ClientID:                "ui-client",
 		ClientName:              "First",
@@ -712,7 +797,7 @@ func TestUpsertClient_UpdatesExistingClient(t *testing.T) {
 		TokenEndpointAuthMethod: "none",
 		Scope:                   "insights:read",
 		IssuedAt:                now,
-		ExpiresAt:               now.Add(90 * 24 * time.Hour),
+		ExpiresAt:               &expiresAt,
 	}
 
 	require.NoError(t, st.UpsertClient(ctx, c))
@@ -720,6 +805,7 @@ func TestUpsertClient_UpdatesExistingClient(t *testing.T) {
 	c.ClientName = "Second"
 	c.RedirectURIs = []string{"https://b.example.com/cb"}
 	c.Scope = "insights:read insights:write"
+	c.IssuedAt = now.Add(time.Hour)
 	require.NoError(t, st.UpsertClient(ctx, c))
 
 	got, err := st.GetClient(ctx, c.ClientID)
@@ -727,6 +813,7 @@ func TestUpsertClient_UpdatesExistingClient(t *testing.T) {
 	require.Equal(t, "Second", got.ClientName)
 	require.Equal(t, []string{"https://b.example.com/cb"}, got.RedirectURIs)
 	require.Equal(t, "insights:read insights:write", got.Scope)
+	require.True(t, got.LastUsedAt.Equal(now), "metadata upsert must preserve client activity")
 }
 
 // --- GetUserByID ---

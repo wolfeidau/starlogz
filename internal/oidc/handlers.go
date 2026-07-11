@@ -216,9 +216,10 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 
 	code := form.Get("code")
 	codeVerifier := form.Get("code_verifier")
-	if code == "" || codeVerifier == "" {
-		log.WarnContext(r.Context(), "auth code grant: missing code or code_verifier")
-		writeOAuthError(w, "invalid_request", "code and code_verifier are required", http.StatusBadRequest)
+	clientID := form.Get("client_id")
+	if code == "" || codeVerifier == "" || clientID == "" {
+		log.WarnContext(r.Context(), "auth code grant: missing code, code_verifier, or client_id")
+		writeOAuthError(w, "invalid_request", "code, code_verifier, and client_id are required", http.StatusBadRequest)
 		return
 	}
 
@@ -231,6 +232,14 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	if err != nil {
 		log.ErrorContext(r.Context(), "consume auth code failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "internal error", http.StatusInternalServerError)
+		return
+	}
+	if clientID != pc.ClientID {
+		log.WarnContext(r.Context(), "authorization code client_id mismatch",
+			slog.String("request_client_id", clientID),
+			slog.String("code_client_id", pc.ClientID),
+		)
+		writeOAuthError(w, "invalid_grant", "authorization code was not issued to this client", http.StatusBadRequest)
 		return
 	}
 
@@ -311,6 +320,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	}
 	log.InfoContext(ctx, "token exchange: issued JWT", logFields...)
 
+	s.touchRegisteredClient(ctx, log, pc.ClientID)
 	writeTokenResponse(ctx, w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry, jwtExpiry)
 }
 
@@ -509,6 +519,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	}
 
 	telemetry.RecordRefreshTokenGrant(ctx, "success", "rotated")
+	s.touchRegisteredClient(ctx, log, clientID)
 	writeTokenResponse(ctx, w, tokenString, grant.Scope, newOurRefreshToken, newGHRefreshExpiry, newJWTExpiry)
 }
 
@@ -622,6 +633,7 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 		slog.String("jti", grant.JTI),
 		slog.String("user_id", grant.UserID.String()),
 	)
+	s.touchRegisteredClient(ctx, log, clientID)
 	writeTokenResponse(ctx, w, tokenString, grant.Scope, grant.OurRefreshToken, grant.RefreshTokenExpiry, grant.JWTExpiry)
 }
 
@@ -636,9 +648,9 @@ func (s *Server) DCRHandler() http.Handler {
 		log := ctxlog.LoggerFrom(r.Context())
 
 		var req oauthex.ClientRegistrationMetadata
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeClientRegistration(w, r, &req); err != nil {
 			log.WarnContext(r.Context(), "DCR: failed to parse request body", slog.Any("error", err))
-			writeOAuthError(w, "invalid_client_metadata", "failed to parse request body", http.StatusBadRequest)
+			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -651,33 +663,13 @@ func (s *Server) DCRHandler() http.Handler {
 			slog.String("requested_scope", req.Scope),
 		)
 
-		if len(req.RedirectURIs) == 0 {
-			log.WarnContext(r.Context(), "DCR: redirect_uris is required")
-			writeOAuthError(w, "invalid_client_metadata", "redirect_uris is required", http.StatusBadRequest)
-			return
-		}
-
-		if err := validateRedirectURIs(req.RedirectURIs); err != nil {
-			log.WarnContext(r.Context(), "DCR: invalid redirect_uris", slog.Any("error", err))
+		if err := validateClientRegistrationMetadata(&req); err != nil {
+			log.WarnContext(r.Context(), "DCR: invalid client metadata", slog.Any("error", err))
 			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		if req.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != tokenEndpointAuthMethodNone {
-			log.WarnContext(r.Context(), "DCR: unsupported token_endpoint_auth_method",
-				slog.String("method", req.TokenEndpointAuthMethod),
-			)
-			writeOAuthError(w, "invalid_client_metadata", "only token_endpoint_auth_method=none is supported", http.StatusBadRequest)
-			return
-		}
-
-		req.GrantTypes = []string{oauthGrantAuthorizationCode}
-		if len(req.ResponseTypes) == 0 {
-			req.ResponseTypes = []string{oauthCode}
-		}
-		if req.TokenEndpointAuthMethod == "" {
-			req.TokenEndpointAuthMethod = tokenEndpointAuthMethodNone
-		}
+		normalizeClientRegistrationMetadata(&req)
 		req.Scope = normalizeScope(req.Scope, defaultRegisteredClientScope)
 		if err := validateSupportedScope(req.Scope); err != nil {
 			log.WarnContext(r.Context(), "DCR: invalid scope", slog.Any("error", err), slog.String("scope", req.Scope))
@@ -698,7 +690,6 @@ func (s *Server) DCRHandler() http.Handler {
 			GrantTypes:              req.GrantTypes,
 			ResponseTypes:           req.ResponseTypes,
 			IssuedAt:                now,
-			ExpiresAt:               now.Add(clientRegistrationTTL),
 		}
 		if err := s.saveRegisteredClient(ctx, rec); err != nil {
 			log.ErrorContext(ctx, "failed to persist DCR client", slog.String("client_id", clientID), slog.Any("error", err))
@@ -905,6 +896,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			writeOAuthError(w, "server_error", "failed to store authorization state", http.StatusInternalServerError)
 			return
 		}
+		s.touchRegisteredClient(ctx, log, clientID)
 
 		log.InfoContext(ctx, "authorize: redirecting to GitHub", slog.String("scope", scope))
 

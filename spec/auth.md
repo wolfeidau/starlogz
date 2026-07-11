@@ -201,7 +201,7 @@ Endpoint: `POST /oauth2/register` (RFC 7591)
 {
   "redirect_uris": ["https://client.example.com/callback"],
   "client_name": "My MCP Client",
-  "grant_types": ["authorization_code"],
+  "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
   "scope": "insights:read insights:write"
@@ -210,22 +210,32 @@ Endpoint: `POST /oauth2/register` (RFC 7591)
 
 Required: `redirect_uris` (non-empty array). Each URI is validated:
 
-- `https://` URIs are always accepted.
-- `http://localhost` and `http://127.0.0.1` (any port) are accepted for local MCP clients.
+- Absolute `https://` URIs with a host are accepted.
+- `http://localhost`, `http://127.0.0.1`, and `http://[::1]` (any port) are accepted for local MCP clients.
 - Custom schemes (e.g. `cursor://`, `claude://`) are accepted for native app callbacks.
 - `http://` with any other hostname is rejected.
-- URIs containing fragments (`#`) or wildcards (`*`) are rejected.
+- Relative URIs and URIs containing fragments (`#`), wildcards (`*`), or userinfo are rejected.
+- Unsafe `javascript:` and `data:` schemes are rejected.
 
 Only `token_endpoint_auth_method=none` is accepted (public clients only).
-`grant_types` is normalised to `["authorization_code"]` — unsupported types
-are silently dropped per RFC 7591 §3.2.1 rather than rejected.
+`grant_types` is normalised to `["authorization_code", "refresh_token"]`.
+Unsupported grant and response types are rejected.
 
 If `scope` is omitted, it defaults to `insights:read insights:write`. Supplied
 scopes are validated against the server's supported scope set and stored as the
 client's registered default and maximum allowed scope set.
 
-Client registrations are persisted to the `oauth_clients` table with a 90-day TTL
-(`expires_at = issued_at + 90 days`). A future cleanup job can prune expired rows.
+Client registrations are persisted without an expiry. MCP clients can safely retain
+and reuse their `client_id` for future authorization and refresh flows. The store
+retains nullable expiry support for explicitly temporary registrations. Successful
+authorization and token operations update `last_used_at` at most once per 24 hours,
+providing a low-write activity signal for future stale-registration cleanup.
+
+Registration requests must use `Content-Type: application/json`, are limited to
+64 KiB and one JSON object, and may contain at most 10 redirect URIs. Individual
+redirect URIs are limited to 2048 bytes, `client_name` to 256 bytes, and `scope`
+to 1024 bytes. Production API Gateway throttles open registration to a sustained
+1 request per second with a burst of 10.
 
 ### Response (201 Created)
 
@@ -235,7 +245,7 @@ Client registrations are persisted to the `oauth_clients` table with a 90-day TT
   "client_id_issued_at": 1745000000,
   "redirect_uris": ["https://client.example.com/callback"],
   "client_name": "My MCP Client",
-  "grant_types": ["authorization_code"],
+  "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none"
 }
@@ -370,7 +380,8 @@ persistence is skipped and the token exchange still completes successfully.
 | `/tokens` | POST | Bearer JWT | Creates API key _(not yet implemented)_ |
 | `/tokens` | GET | Bearer JWT | Lists API keys _(not yet implemented)_ |
 | `/tokens/:id` | DELETE | Bearer JWT | Revokes API key _(not yet implemented)_ |
-| `/mcp` | POST | Bearer JWT | MCP StreamableHTTP endpoint |
+| `/mcp` | GET | Bearer JWT | MCP StreamableHTTP SSE stream and session resumption |
+| `/mcp` | POST | Bearer JWT | MCP StreamableHTTP requests |
 | `/health` | GET | None | Health check |
 
 ---
@@ -387,7 +398,7 @@ persistence is skipped and the token exchange still completes successfully.
   "jwks_uri": "https://starlogz.example.com/.well-known/jwks",
   "registration_endpoint": "https://starlogz.example.com/oauth2/register",
   "response_types_supported": ["code"],
-  "grant_types_supported": ["authorization_code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
   "scopes_supported": ["insights:read", "insights:write", "org:admin"],
   "code_challenge_methods_supported": ["S256"],
   "token_endpoint_auth_methods_supported": ["none"]
@@ -411,21 +422,16 @@ MCP clients construct the discovery URL from the issuer.
 
 ---
 
-## v0.1 constraints
+## Current constraints
 
-- **No refresh tokens** — clients must re-authorize when the JWT expires (7 days)
 - **No token introspection** — not advertised in discovery
 - **No token revocation** — not advertised in discovery
 - **Public clients only** — `token_endpoint_auth_method=none`; no `client_secret`
-- **Client registrations persisted but not yet validated at token endpoint** — DCR saves
-  registrations to `oauth_clients`; the server does not yet check the `client_id` at the
-  token endpoint (planned for v0.2)
+- **Authorization codes are client-bound** — public clients must submit the same
+  `client_id` at the token endpoint that was used to obtain the code
 - **GitHub only** — Google OAuth2 is planned for v0.2
 - **No API key validation yet** — API key bearer tokens are not implemented;
   only JWTs from the GitHub OAuth2 flow are verified
-- **`sub` is GitHub user ID** — the `sub` JWT claim is the GitHub numeric user
-  ID as a decimal string; it will become `users.id` (internal UUID) in v0.2
-  now that the `users` table exists
-- **In-memory OAuth2 state** — pending authorizations (10 min TTL) and issued
-  auth codes (5 min TTL) are stored in-process; a server restart during an
+- **Persistent OAuth2 state** — pending authorizations (10 min TTL) and issued
+  auth codes (5 min TTL) are stored in PostgreSQL; a database outage during an
   active login flow will invalidate the state and require the user to start over

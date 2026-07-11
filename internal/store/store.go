@@ -57,6 +57,7 @@ type Store interface {
 	SaveClient(ctx context.Context, c OAuthClient) error
 	UpsertClient(ctx context.Context, c OAuthClient) error
 	GetClient(ctx context.Context, clientID string) (*OAuthClient, error)
+	TouchClient(ctx context.Context, clientID string) error
 
 	ListAuditLog(ctx context.Context, filter AuditLogFilter) ([]*AuditLogEntry, error)
 }
@@ -228,7 +229,8 @@ type OAuthClient struct {
 	TokenEndpointAuthMethod string
 	Scope                   string
 	IssuedAt                time.Time
-	ExpiresAt               time.Time
+	LastUsedAt              time.Time
+	ExpiresAt               *time.Time
 }
 
 // PendingAuth holds client PKCE and redirect params across the GitHub OAuth2 redirect leg.

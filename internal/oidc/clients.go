@@ -23,6 +23,15 @@ func (s *Server) saveRegisteredClient(ctx context.Context, c storepkg.OAuthClien
 	return s.clients.SaveClient(ctx, c)
 }
 
+func (s *Server) touchRegisteredClient(ctx context.Context, log *slog.Logger, clientID string) {
+	if s.clients == nil || clientID == "" {
+		return
+	}
+	if err := s.clients.TouchClient(ctx, clientID); err != nil {
+		log.ErrorContext(ctx, "touch oauth client failed", slog.Any("error", err))
+	}
+}
+
 func (s *Server) registeredClientForAuthorize(ctx context.Context, log *slog.Logger, clientID, redirectURI string) (*storepkg.OAuthClient, *oauthRequestError) {
 	if s.clients == nil {
 		return nil, nil
