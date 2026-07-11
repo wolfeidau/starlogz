@@ -7,3 +7,5 @@ pre-commit:
       run: golangci-lint run
     - name: go mod tidy
       run: go mod tidy -diff
+    - name: build ts stubs
+      run: bun run proto:generate
