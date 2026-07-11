@@ -1,0 +1,19 @@
+name: JUnit Annotate
+description: Renders failed JUnit XML test cases as a Buildkite annotation.
+author: github.com/wolfeidau
+requirements: []
+configuration:
+  properties:
+    file:
+      type: string
+      description: Path to the JUnit XML file.
+    context:
+      type: string
+      description: Buildkite annotation context. Defaults to junit-failures.
+    max-failures:
+      type: integer
+      minimum: 1
+      description: Maximum failures to include. Defaults to 20.
+  required:
+    - file
+  additionalProperties: false

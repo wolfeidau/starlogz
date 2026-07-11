@@ -1,0 +1,21 @@
+name: Go Coverage
+description: Annotates Go coverage and optionally generates a coverage treemap.
+author: github.com/wolfeidau
+requirements: []
+configuration:
+  properties:
+    coverprofile:
+      type: string
+      description: Path to the Go cover profile.
+    context:
+      type: string
+      description: Buildkite annotation context. Defaults to go-coverage.
+    treemap:
+      type: boolean
+      description: Generate and embed a coverage treemap. Defaults to false.
+    treemap-output:
+      type: string
+      description: Treemap SVG output path. Defaults to cover-tree.svg.
+  required:
+    - coverprofile
+  additionalProperties: false
