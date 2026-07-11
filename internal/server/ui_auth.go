@@ -161,12 +161,11 @@ func (s *Server) ensureUIClient(ctx context.Context, redirectURI string, now tim
 		ClientID:                uiClientID,
 		ClientName:              "starlogz UI",
 		RedirectURIs:            []string{redirectURI},
-		GrantTypes:              []string{"authorization_code"},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
 		ResponseTypes:           []string{oauthCodeValue},
 		TokenEndpointAuthMethod: "none",
 		Scope:                   uiScope,
 		IssuedAt:                now,
-		ExpiresAt:               now.Add(3650 * 24 * time.Hour),
 	})
 }
 

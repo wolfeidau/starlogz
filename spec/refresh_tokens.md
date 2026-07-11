@@ -136,6 +136,10 @@ grant_type=refresh_token
 ```
 
 `client_id` is required and must match the `client_id` stored on the grant row.
+Dynamic client registrations do not expire, so a client can retain the same
+`client_id` for the full lifetime of its authorization and subsequent reauthorization
+flows. Refresh-token expiry remains independent and is governed by the upstream
+GitHub refresh-token lifetime.
 
 ### Response (200 OK)
 

@@ -1267,12 +1267,12 @@ func (s *Store) GetClient(ctx context.Context, clientID string) (*store.OAuthCli
 	var c store.OAuthClient
 	err := s.pool.QueryRow(ctx, `
 		SELECT client_id, client_name, redirect_uris, grant_types, response_types,
-		       token_endpoint_auth_method, scope, issued_at, expires_at
+		       token_endpoint_auth_method, scope, issued_at, last_used_at, expires_at
 		FROM oauth_clients
-		WHERE client_id = $1 AND expires_at > now()`,
+		WHERE client_id = $1 AND (expires_at IS NULL OR expires_at > now())`,
 		clientID).Scan(
 		&c.ClientID, &c.ClientName, &c.RedirectURIs, &c.GrantTypes, &c.ResponseTypes,
-		&c.TokenEndpointAuthMethod, &c.Scope, &c.IssuedAt, &c.ExpiresAt)
+		&c.TokenEndpointAuthMethod, &c.Scope, &c.IssuedAt, &c.LastUsedAt, &c.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -1283,30 +1283,34 @@ func (s *Store) GetClient(ctx context.Context, clientID string) (*store.OAuthCli
 }
 
 func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
-	s.logger(ctx).DebugContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("grant_types", strings.Join(c.GrantTypes, ", ")), slog.String("response_types", strings.Join(c.ResponseTypes, ", ")), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.String("scope", c.Scope), slog.Time("issued_at", c.IssuedAt), slog.Time("expires_at", c.ExpiresAt))
+	s.logger(ctx).DebugContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("grant_types", strings.Join(c.GrantTypes, ", ")), slog.String("response_types", strings.Join(c.ResponseTypes, ", ")), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.String("scope", c.Scope), slog.Time("issued_at", c.IssuedAt), slog.Any("expires_at", c.ExpiresAt))
 
+	lastUsedAt := c.LastUsedAt
+	if lastUsedAt.IsZero() {
+		lastUsedAt = c.IssuedAt
+	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients
 			(client_id, client_name, redirect_uris, grant_types, response_types,
-			 token_endpoint_auth_method, scope, issued_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			 token_endpoint_auth_method, scope, issued_at, last_used_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		c.ClientID, c.ClientName, c.RedirectURIs, c.GrantTypes, c.ResponseTypes,
-		c.TokenEndpointAuthMethod, c.Scope, c.IssuedAt, c.ExpiresAt)
+		c.TokenEndpointAuthMethod, c.Scope, c.IssuedAt, lastUsedAt, c.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("save oauth client: %w", err)
 	}
 	return nil
 }
 
-// UpsertClient stores or refreshes a first-party OAuth2 client registration.
+// UpsertClient refreshes first-party metadata without changing recorded activity.
 func (s *Store) UpsertClient(ctx context.Context, c store.OAuthClient) error {
-	s.logger(ctx).DebugContext(ctx, "upserting oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("scope", c.Scope), slog.Time("expires_at", c.ExpiresAt))
+	s.logger(ctx).DebugContext(ctx, "upserting oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("scope", c.Scope), slog.Any("expires_at", c.ExpiresAt))
 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients
 			(client_id, client_name, redirect_uris, grant_types, response_types,
-			 token_endpoint_auth_method, scope, issued_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			 token_endpoint_auth_method, scope, issued_at, last_used_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (client_id) DO UPDATE SET
 			client_name = EXCLUDED.client_name,
 			redirect_uris = EXCLUDED.redirect_uris,
@@ -1316,9 +1320,22 @@ func (s *Store) UpsertClient(ctx context.Context, c store.OAuthClient) error {
 			scope = EXCLUDED.scope,
 			expires_at = EXCLUDED.expires_at`,
 		c.ClientID, c.ClientName, c.RedirectURIs, c.GrantTypes, c.ResponseTypes,
-		c.TokenEndpointAuthMethod, c.Scope, c.IssuedAt, c.ExpiresAt)
+		c.TokenEndpointAuthMethod, c.Scope, c.IssuedAt, c.IssuedAt, c.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("upsert oauth client: %w", err)
+	}
+	return nil
+}
+
+// TouchClient records recent use without writing more than once per day.
+func (s *Store) TouchClient(ctx context.Context, clientID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE oauth_clients
+		SET last_used_at = now()
+		WHERE client_id = $1
+		  AND last_used_at < now() - interval '24 hours'`, clientID)
+	if err != nil {
+		return fmt.Errorf("touch oauth client: %w", err)
 	}
 	return nil
 }

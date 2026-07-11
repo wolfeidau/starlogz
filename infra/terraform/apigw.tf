@@ -18,6 +18,7 @@ locals {
     "POST /auth/logout",
     "GET /starlogz.v1.UIService/{method}",
     "POST /starlogz.v1.UIService/{method}",
+    "GET /mcp",
     "POST /mcp",
     "DELETE /mcp",
   ])
@@ -65,6 +66,13 @@ resource "aws_apigatewayv2_stage" "default" {
     route_key              = "POST /oauth2/token"
     throttling_burst_limit = 20
     throttling_rate_limit  = 5
+  }
+
+  # Open DCR persists rows, so constrain anonymous registration bursts.
+  route_settings {
+    route_key              = "POST /oauth2/register"
+    throttling_burst_limit = 10
+    throttling_rate_limit  = 1
   }
 }
 
