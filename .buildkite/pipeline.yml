@@ -46,13 +46,19 @@ steps:
           - bun install --frozen-lockfile
           - bun run build
           - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=coverage.out ./...
-          - go run github.com/nikolaydubina/go-cover-treemap -coverprofile coverage.out > cover-tree.svg
-          - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
         env:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
           - mise#v1.1.1: ~
+          - ./.buildkite/plugins/go-coverage:
+              coverprofile: coverage.out
+              treemap: true
+              treemap-output: cover-tree.svg
+          - ./.buildkite/plugins/junit-annotate:
+              file: junit.xml
+              context: go-tests
+              max-failures: 20
 
       - label: ":bun: lint"
         command:

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+COVERPROFILE="${BUILDKITE_PLUGIN_GO_COVERAGE_COVERPROFILE}"
+CONTEXT="${BUILDKITE_PLUGIN_GO_COVERAGE_CONTEXT:-go-coverage}"
+TREEMAP="${BUILDKITE_PLUGIN_GO_COVERAGE_TREEMAP:-false}"
+TREEMAP_OUTPUT="${BUILDKITE_PLUGIN_GO_COVERAGE_TREEMAP_OUTPUT:-cover-tree.svg}"
+
+if [[ ! -s "$COVERPROFILE" ]]; then
+  echo "go-coverage: $COVERPROFILE not found or empty, skipping"
+  exit 0
+fi
+
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+
+if ! COVERAGE=$(go tool cover -func="$COVERPROFILE"); then
+  echo "go-coverage: failed to read $COVERPROFILE, skipping"
+  exit 0
+fi
+
+TOTAL=$(awk '$1 == "total:" { print $3 }' <<< "$COVERAGE")
+if [[ -z "$TOTAL" ]]; then
+  echo "go-coverage: total coverage not found, skipping"
+  exit 0
+fi
+
+{
+  echo "### Go test coverage: $TOTAL"
+  echo
+  echo "Cover profile: \`$COVERPROFILE\`"
+} > "$TMPFILE"
+
+if [[ "$TREEMAP" == "true" ]]; then
+  if go run github.com/nikolaydubina/go-cover-treemap -coverprofile "$COVERPROFILE" > "$TREEMAP_OUTPUT"; then
+    {
+      echo
+      echo "<details><summary>Coverage tree map</summary>"
+      echo
+      echo "<img src=\"artifact://$TREEMAP_OUTPUT\" alt=\"Test coverage tree map\" width=\"70%\">"
+      echo
+      echo "</details>"
+    } >> "$TMPFILE"
+  else
+    echo "go-coverage: failed to generate treemap"
+    rm -f "$TREEMAP_OUTPUT"
+  fi
+fi
+
+if ! buildkite-agent annotate --style "info" --context "$CONTEXT" < "$TMPFILE"; then
+  echo "go-coverage: failed to create annotation"
+fi
+
+exit 0

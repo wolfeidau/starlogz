@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+FILE="${BUILDKITE_PLUGIN_JUNIT_ANNOTATE_FILE}"
+CONTEXT="${BUILDKITE_PLUGIN_JUNIT_ANNOTATE_CONTEXT:-junit-failures}"
+MAX_FAILURES="${BUILDKITE_PLUGIN_JUNIT_ANNOTATE_MAX_FAILURES:-20}"
+
+if [[ ! -f "$FILE" ]]; then
+  echo "junit-annotate: $FILE not found, skipping"
+  exit 0
+fi
+
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+
+if ! go run ./cmd/junit-annotate -max-failures "$MAX_FAILURES" "$FILE" > "$TMPFILE"; then
+  echo "junit-annotate: failed to parse $FILE, skipping"
+  exit 0
+fi
+
+if [[ ! -s "$TMPFILE" ]]; then
+  exit 0
+fi
+
+if ! buildkite-agent annotate --style "error" --context "$CONTEXT" < "$TMPFILE"; then
+  echo "junit-annotate: failed to create annotation"
+fi
+
+exit 0
