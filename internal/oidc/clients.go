@@ -16,6 +16,19 @@ type oauthRequestError struct {
 	status      int
 }
 
+func (s *Server) clientSupportsGrant(ctx context.Context, clientID, grantType string) bool {
+	if s.clients == nil {
+		return true
+	}
+	client, err := s.clients.GetClient(ctx, clientID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "client grant lookup failed",
+			slog.String("client_id", clientID), slog.String("grant_type", grantType), slog.Any("error", err))
+		return false
+	}
+	return slices.Contains(client.GrantTypes, grantType)
+}
+
 func (s *Server) saveRegisteredClient(ctx context.Context, c storepkg.OAuthClient) error {
 	if s.clients == nil {
 		return nil

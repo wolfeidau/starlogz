@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,7 +140,7 @@ var ghIDSeq atomic.Int64
 func (f *toolFixture) makeUser(t *testing.T, ctx context.Context, login string) *store.User {
 	t.Helper()
 	id := ghIDSeq.Add(1)
-	u, err := f.store.UpsertUser(ctx, id, login+"@example.com", login)
+	u, err := f.store.UpsertUser(ctx, store.GitHubProfile{GitHubID: id, Email: login + "@example.com", Login: login})
 	require.NoError(t, err)
 	return u
 }
@@ -168,6 +169,166 @@ func (f *toolFixture) connect(t *testing.T, ctx context.Context, token string) *
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.Close() })
 	return sess
+}
+
+func TestUIWebSession(t *testing.T) {
+	f := newToolFixture(t)
+	user := f.makeUser(t, t.Context(), "web-user")
+	rawToken := "opaque-browser-session"
+	now := time.Now()
+	_, err := f.store.CreateWebSession(t.Context(), store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(7 * 24 * time.Hour), ExpiresAt: now.Add(30 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		f.ts.URL+"/starlogz.v1.UIService/GetSession", strings.NewReader("{}"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, user.ID.String(), body["userId"])
+	require.Equal(t, "web-user", body["login"])
+}
+
+func TestUIWebSessionRejectsInvalidCookieAndClearsIt(t *testing.T) {
+	f := newToolFixture(t)
+	user := f.makeUser(t, t.Context(), "invalid-session-user")
+	now := time.Now()
+
+	for _, tc := range []struct {
+		name     string
+		rawToken string
+		session  store.WebSession
+		revoke   bool
+	}{
+		{
+			name: "expired", rawToken: "expired-browser-session",
+			session: store.WebSession{UserID: user.ID, IdleExpiresAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)},
+		},
+		{
+			name: "revoked", rawToken: "revoked-browser-session", revoke: true,
+			session: store.WebSession{UserID: user.ID, IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(2 * time.Hour)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.session.TokenHash = store.HashSessionToken(tc.rawToken)
+			_, err := f.store.CreateWebSession(t.Context(), tc.session)
+			require.NoError(t, err)
+			if tc.revoke {
+				require.NoError(t, f.store.RevokeWebSessionByTokenHash(t.Context(), tc.session.TokenHash))
+			}
+
+			resp := f.uiSessionRequest(t, tc.rawToken)
+			defer func() { _ = resp.Body.Close() }()
+			require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+			requireSessionCookieCleared(t, resp)
+		})
+	}
+}
+
+func TestUILogoutRevokesSession(t *testing.T) {
+	f := newToolFixture(t)
+	user := f.makeUser(t, t.Context(), "logout-user")
+	rawToken := "logout-browser-session"
+	now := time.Now()
+	_, err := f.store.CreateWebSession(t.Context(), store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(2 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.ts.URL+"/logout", nil)
+	require.NoError(t, err)
+	req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+	requireSessionCookieCleared(t, resp)
+
+	after := f.uiSessionRequest(t, rawToken)
+	defer func() { _ = after.Body.Close() }()
+	require.Equal(t, http.StatusUnauthorized, after.StatusCode)
+}
+
+func TestUIWebSessionTouchIsThrottled(t *testing.T) {
+	f := newToolFixture(t)
+	user := f.makeUser(t, t.Context(), "touch-user")
+	rawToken := "touch-browser-session"
+	now := time.Now()
+	initialSeen := now.Add(-2 * time.Hour)
+	_, err := f.store.CreateWebSession(t.Context(), store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID, LastSeenAt: initialSeen,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(30 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	resp := f.uiSessionRequest(t, rawToken)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	touched, err := f.store.GetWebSessionByTokenHash(t.Context(), store.HashSessionToken(rawToken))
+	require.NoError(t, err)
+	require.True(t, touched.LastSeenAt.After(initialSeen))
+	require.True(t, touched.IdleExpiresAt.After(now.Add(6*24*time.Hour)))
+
+	resp = f.uiSessionRequest(t, rawToken)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	unchanged, err := f.store.GetWebSessionByTokenHash(t.Context(), store.HashSessionToken(rawToken))
+	require.NoError(t, err)
+	require.Equal(t, touched.LastSeenAt, unchanged.LastSeenAt)
+}
+
+func TestUIWebSessionStoreFailureKeepsCookie(t *testing.T) {
+	f := newToolFixture(t)
+	user := f.makeUser(t, t.Context(), "store-failure-user")
+	rawToken := "store-failure-browser-session"
+	now := time.Now()
+	_, err := f.store.CreateWebSession(t.Context(), store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(2 * time.Hour),
+	})
+	require.NoError(t, err)
+	f.store.Close()
+
+	resp := f.uiSessionRequest(t, rawToken)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	for _, cookie := range resp.Cookies() {
+		require.NotEqual(t, "starlogz_session", cookie.Name, "infrastructure errors must not clear the session cookie")
+	}
+}
+
+func (f *toolFixture) uiSessionRequest(t *testing.T, rawToken string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		f.ts.URL+"/starlogz.v1.UIService/GetSession", strings.NewReader("{}"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func requireSessionCookieCleared(t *testing.T, resp *http.Response) {
+	t.Helper()
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == "starlogz_session" {
+			require.Less(t, cookie.MaxAge, 0)
+			return
+		}
+	}
+	require.Fail(t, "response did not clear starlogz_session")
 }
 
 type bearerTransport struct {

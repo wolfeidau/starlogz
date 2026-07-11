@@ -65,7 +65,7 @@ func (s *Store) Migrate(ctx context.Context, logger *slog.Logger) error {
 
 // UpsertUser creates or updates a user from GitHub identity. On first login a personal org
 // is created and the user is added as owner. Returns the user row.
-func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login string) (*store.User, error) {
+func (s *Store) UpsertUser(ctx context.Context, profile store.GitHubProfile) (*store.User, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -76,16 +76,24 @@ func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login str
 	u := &store.User{}
 	var created bool
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (github_id, email, login)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (github_id, email, login, display_name, avatar_url, profile_url, bio)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (github_id) DO UPDATE
-		    SET email      = EXCLUDED.email,
-		        login      = EXCLUDED.login,
-		        updated_at = now()
-		RETURNING id, github_id, email, login, created_at, updated_at,
+		    SET email              = EXCLUDED.email,
+		        login              = EXCLUDED.login,
+		        display_name       = EXCLUDED.display_name,
+		        avatar_url         = EXCLUDED.avatar_url,
+		        profile_url        = EXCLUDED.profile_url,
+		        bio                = EXCLUDED.bio,
+		        profile_updated_at = now(),
+		        updated_at         = now()
+		RETURNING id, github_id, email, login, display_name, avatar_url, profile_url, bio,
+		          profile_updated_at, created_at, updated_at,
 		          (xmax = 0) AS created`,
-		githubID, email, login).
-		Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.CreatedAt, &u.UpdatedAt, &created)
+		profile.GitHubID, profile.Email, profile.Login, profile.DisplayName,
+		profile.AvatarURL, profile.ProfileURL, profile.Bio).
+		Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.DisplayName, &u.AvatarURL,
+			&u.ProfileURL, &u.Bio, &u.ProfileUpdatedAt, &u.CreatedAt, &u.UpdatedAt, &created)
 	if err != nil {
 		return nil, fmt.Errorf("upsert user: %w", err)
 	}
@@ -102,7 +110,7 @@ func (s *Store) UpsertUser(ctx context.Context, githubID int64, email, login str
 			INSERT INTO orgs (slug, name, kind)
 			VALUES ($1, $2, 'personal')
 			RETURNING id`,
-			login, login).Scan(&orgIDStr)
+			profile.Login, profile.Login).Scan(&orgIDStr)
 		if err != nil {
 			return nil, fmt.Errorf("insert personal org: %w", err)
 		}
@@ -135,9 +143,11 @@ func (s *Store) GetUserByGitHubID(ctx context.Context, githubID int64) (*store.U
 	var idStr string
 	u := &store.User{}
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, github_id, email, login, created_at, updated_at
+		SELECT id, github_id, email, login, display_name, avatar_url, profile_url, bio,
+		       profile_updated_at, created_at, updated_at
 		FROM users WHERE github_id = $1`,
-		githubID).Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.CreatedAt, &u.UpdatedAt)
+		githubID).Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.DisplayName, &u.AvatarURL,
+		&u.ProfileURL, &u.Bio, &u.ProfileUpdatedAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -159,9 +169,11 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*store.User, err
 	u := &store.User{}
 	var idStr string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, github_id, email, login, created_at, updated_at
+		SELECT id, github_id, email, login, display_name, avatar_url, profile_url, bio,
+		       profile_updated_at, created_at, updated_at
 		FROM users WHERE id = $1`,
-		id).Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.CreatedAt, &u.UpdatedAt)
+		id).Scan(&idStr, &u.GitHubID, &u.Email, &u.Login, &u.DisplayName, &u.AvatarURL,
+		&u.ProfileURL, &u.Bio, &u.ProfileUpdatedAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -173,6 +185,88 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (*store.User, err
 		return nil, fmt.Errorf("parse user id: %w", parseErr)
 	}
 	return u, nil
+}
+
+func (s *Store) CreateWebSession(ctx context.Context, session store.WebSession) (*store.WebSession, error) {
+	var idStr, userIDStr string
+	var lastSeenAt any
+	if !session.LastSeenAt.IsZero() {
+		lastSeenAt = session.LastSeenAt
+	}
+	err := s.pool.QueryRow(ctx, `
+		WITH pruned AS (
+			DELETE FROM web_sessions
+			WHERE revoked_at IS NOT NULL OR idle_expires_at <= now() OR expires_at <= now()
+		)
+		INSERT INTO web_sessions (token_hash, user_id, last_seen_at, idle_expires_at, expires_at)
+		VALUES ($1, $2, COALESCE($3, now()), $4, $5)
+		RETURNING id, token_hash, user_id, created_at, last_seen_at, idle_expires_at, expires_at`,
+		session.TokenHash, session.UserID, lastSeenAt, session.IdleExpiresAt, session.ExpiresAt).
+		Scan(&idStr, &session.TokenHash, &userIDStr, &session.CreatedAt, &session.LastSeenAt,
+			&session.IdleExpiresAt, &session.ExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("create web session: %w", err)
+	}
+	if session.ID, err = uuid.Parse(idStr); err != nil {
+		return nil, fmt.Errorf("parse web session id: %w", err)
+	}
+	if session.UserID, err = uuid.Parse(userIDStr); err != nil {
+		return nil, fmt.Errorf("parse web session user id: %w", err)
+	}
+	return &session, nil
+}
+
+func (s *Store) GetWebSessionByTokenHash(ctx context.Context, tokenHash []byte) (*store.WebSession, error) {
+	var session store.WebSession
+	var idStr, userIDStr string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, token_hash, user_id, created_at, last_seen_at, idle_expires_at, expires_at
+		FROM web_sessions
+		WHERE token_hash = $1 AND revoked_at IS NULL
+		  AND idle_expires_at > now() AND expires_at > now()`, tokenHash).
+		Scan(&idStr, &session.TokenHash, &userIDStr, &session.CreatedAt, &session.LastSeenAt,
+			&session.IdleExpiresAt, &session.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get web session: %w", err)
+	}
+	if session.ID, err = uuid.Parse(idStr); err != nil {
+		return nil, fmt.Errorf("parse web session id: %w", err)
+	}
+	if session.UserID, err = uuid.Parse(userIDStr); err != nil {
+		return nil, fmt.Errorf("parse web session user id: %w", err)
+	}
+	return &session, nil
+}
+
+func (s *Store) TouchWebSession(ctx context.Context, id uuid.UUID, lastSeenAt, idleExpiresAt time.Time) error {
+	ct, err := s.pool.Exec(ctx, `
+		UPDATE web_sessions
+		SET last_seen_at = $2, idle_expires_at = LEAST($3, expires_at)
+		WHERE id = $1 AND revoked_at IS NULL
+		  AND idle_expires_at > now() AND expires_at > now()`, id, lastSeenAt, idleExpiresAt)
+	if err != nil {
+		return fmt.Errorf("touch web session: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RevokeWebSessionByTokenHash(ctx context.Context, tokenHash []byte) error {
+	ct, err := s.pool.Exec(ctx, `
+		UPDATE web_sessions SET revoked_at = now()
+		WHERE token_hash = $1 AND revoked_at IS NULL`, tokenHash)
+	if err != nil {
+		return fmt.Errorf("revoke web session: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 // GetPersonalOrgByUserID returns the personal org for the given user.

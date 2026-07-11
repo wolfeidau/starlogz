@@ -19,9 +19,13 @@ type Store interface {
 	Migrate(ctx context.Context, logger *slog.Logger) error
 	Close()
 
-	UpsertUser(ctx context.Context, githubID int64, email, login string) (*User, error)
+	UpsertUser(ctx context.Context, profile GitHubProfile) (*User, error)
 	GetUserByGitHubID(ctx context.Context, githubID int64) (*User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
+	CreateWebSession(ctx context.Context, session WebSession) (*WebSession, error)
+	GetWebSessionByTokenHash(ctx context.Context, tokenHash []byte) (*WebSession, error)
+	TouchWebSession(ctx context.Context, id uuid.UUID, lastSeenAt, idleExpiresAt time.Time) error
+	RevokeWebSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 
 	GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*Org, error)
 	ListOrgs(ctx context.Context) ([]*Org, error)
@@ -64,12 +68,43 @@ type Store interface {
 
 // User is a GitHub-authenticated user stored in the database.
 type User struct {
-	ID        uuid.UUID
-	GitHubID  int64
-	Email     string
-	Login     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID               uuid.UUID
+	GitHubID         int64
+	Email            string
+	Login            string
+	DisplayName      string
+	AvatarURL        string
+	ProfileURL       string
+	Bio              string
+	ProfileUpdatedAt time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type GitHubProfile struct {
+	GitHubID    int64
+	Email       string
+	Login       string
+	DisplayName string
+	AvatarURL   string
+	ProfileURL  string
+	Bio         string
+}
+
+type WebSession struct {
+	ID            uuid.UUID
+	TokenHash     []byte
+	UserID        uuid.UUID
+	CreatedAt     time.Time
+	LastSeenAt    time.Time
+	IdleExpiresAt time.Time
+	ExpiresAt     time.Time
+	RevokedAt     time.Time
+}
+
+func HashSessionToken(token string) []byte {
+	sum := sha256.Sum256([]byte(token))
+	return sum[:]
 }
 
 // Org is a tenant boundary; every project belongs to exactly one org.

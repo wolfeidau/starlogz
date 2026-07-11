@@ -22,7 +22,7 @@ import (
 // UserUpserter persists user identity on successful GitHub login.
 // Implemented by store.Store via *postgres.Store.
 type UserUpserter interface {
-	UpsertUser(ctx context.Context, githubID int64, email, login string) (*store.User, error)
+	UpsertUser(ctx context.Context, profile store.GitHubProfile) (*store.User, error)
 }
 
 // GrantStore persists authorization grants with associated GitHub App tokens.

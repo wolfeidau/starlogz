@@ -1,8 +1,5 @@
 import { createConnectTransport } from "@connectrpc/connect-web";
-import {
-  TransportProvider,
-  useQuery,
-} from "@connectrpc/connect-query";
+import { TransportProvider, useQuery } from "@connectrpc/connect-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -59,7 +56,13 @@ function LoginView() {
   );
 }
 
-function BucketList({ title, buckets }: { title: string; buckets: CountBucket[] }) {
+function BucketList({
+  title,
+  buckets,
+}: {
+  title: string;
+  buckets: CountBucket[];
+}) {
   const max = Math.max(1, ...buckets.map((b) => b.count));
   return (
     <section className="panel">
@@ -74,7 +77,9 @@ function BucketList({ title, buckets }: { title: string; buckets: CountBucket[] 
               <div className="bar-track">
                 <div
                   className="bar-fill"
-                  style={{ width: `${Math.max(8, (bucket.count / max) * 100)}%` }}
+                  style={{
+                    width: `${Math.max(8, (bucket.count / max) * 100)}%`,
+                  }}
                 />
               </div>
               <strong>{bucket.count}</strong>
@@ -325,7 +330,11 @@ function ProjectSelector({
 function DashboardView() {
   const session = useQuery(getSession, {});
   const isAuthenticated = Boolean(session.data) && !session.error;
-  const projectsQuery = useQuery(listProjects, {}, { enabled: isAuthenticated });
+  const projectsQuery = useQuery(
+    listProjects,
+    {},
+    { enabled: isAuthenticated },
+  );
   const projects = projectsQuery.data?.projects ?? [];
   const [selectedProject, setSelectedProject] = useState("");
   const [query, setQuery] = useState("");
@@ -350,7 +359,12 @@ function DashboardView() {
   );
   const search = useQuery(
     searchInsights,
-    { project: activeProject, query, tags: selectedTag ? [selectedTag] : [], limit: 100 },
+    {
+      project: activeProject,
+      query,
+      tags: selectedTag ? [selectedTag] : [],
+      limit: 100,
+    },
     { enabled: isAuthenticated && activeProject !== "" && query.trim() !== "" },
   );
   const listed = useQuery(
@@ -368,19 +382,29 @@ function DashboardView() {
   if (projects.length === 0) {
     return (
       <main className="app-shell">
-        <TopBar login={session.data?.login ?? ""} />
+        <TopBar
+          login={session.data?.login ?? ""}
+          displayName={session.data?.displayName ?? ""}
+          avatarUrl={session.data?.avatarUrl ?? ""}
+        />
         <section className="empty-panel">No projects yet.</section>
       </main>
     );
   }
 
   const insights =
-    query.trim() === "" ? (listed.data?.insights ?? []) : (search.data?.insights ?? []);
+    query.trim() === ""
+      ? (listed.data?.insights ?? [])
+      : (search.data?.insights ?? []);
   const topTags = tags.data?.tags ?? dashboard.data?.topTags ?? [];
 
   return (
     <main className="app-shell">
-      <TopBar login={session.data?.login ?? ""} />
+      <TopBar
+        login={session.data?.login ?? ""}
+        displayName={session.data?.displayName ?? ""}
+        avatarUrl={session.data?.avatarUrl ?? ""}
+      />
 
       <section className="toolbar">
         <ProjectSelector
@@ -397,7 +421,10 @@ function DashboardView() {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search insights"
         />
-        <select value={selectedTag} onChange={(event) => setSelectedTag(event.target.value)}>
+        <select
+          value={selectedTag}
+          onChange={(event) => setSelectedTag(event.target.value)}
+        >
           <option value="">All tags</option>
           {topTags.map((tag) => (
             <option key={tag.name} value={tag.name}>
@@ -427,8 +454,14 @@ function DashboardView() {
       </section>
 
       <section className="dashboard-grid">
-        <BucketList title="Categories" buckets={dashboard.data?.categoryCounts ?? []} />
-        <BucketList title="Sources" buckets={dashboard.data?.sourceCounts ?? []} />
+        <BucketList
+          title="Categories"
+          buckets={dashboard.data?.categoryCounts ?? []}
+        />
+        <BucketList
+          title="Sources"
+          buckets={dashboard.data?.sourceCounts ?? []}
+        />
         <BucketList title="Top Tags" buckets={topTags.slice(0, 8)} />
         <ActivityStrip buckets={dashboard.data?.recentActivity ?? []} />
       </section>
@@ -450,7 +483,15 @@ function DashboardView() {
   );
 }
 
-function TopBar({ login }: { login: string }) {
+function TopBar({
+  login,
+  displayName,
+  avatarUrl,
+}: {
+  login: string;
+  displayName: string;
+  avatarUrl: string;
+}) {
   return (
     <header className="topbar">
       <div>
@@ -458,8 +499,13 @@ function TopBar({ login }: { login: string }) {
         <h1>Insights Dashboard</h1>
       </div>
       <div className="topbar-actions">
-        <span>{login}</span>
-        <a href="/logout">Logout</a>
+        {avatarUrl && <img className="user-avatar" src={avatarUrl} alt="" />}
+        <span>{displayName || login}</span>
+        <form action="/logout" method="post">
+          <button className="logout-button" type="submit">
+            Logout
+          </button>
+        </form>
       </div>
     </header>
   );

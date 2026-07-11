@@ -113,6 +113,20 @@ func testFixtureWithConfig(t *testing.T, configure func(*server.Config)) (*httpt
 	return ts, oidcSrv
 }
 
+func TestNewRejectsUISessionIdleTTLAboveAbsoluteTTL(t *testing.T) {
+	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	raw, err := jwk.Import(privkey)
+	require.NoError(t, err)
+
+	_, err = server.New(server.Config{
+		BaseURL: "http://localhost", PrivKey: raw, Logger: slog.Default(),
+		AuthState: newMemAuthState(), Revocation: newMemRevocation(),
+		UISessionIdleTTL: 2 * time.Hour, UISessionTTL: time.Hour,
+	})
+	require.EqualError(t, err, "UI session idle TTL must not exceed absolute TTL")
+}
+
 // --- Health ---
 
 func TestHealth_OK(t *testing.T) {

@@ -39,7 +39,7 @@ func seedUserOrgProject(t *testing.T, st *postgres.Store, githubID int64, login,
 	t.Helper()
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, githubID, login+"@example.com", login)
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: githubID, Email: login + "@example.com", Login: login})
 	require.NoError(t, err)
 	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
 	require.NoError(t, err)

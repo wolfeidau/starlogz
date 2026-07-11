@@ -53,7 +53,10 @@ func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	_, err := st.UpsertUser(ctx, 12345, "alice@example.com", "alice")
+	_, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 12345, Email: "alice@example.com", Login: "alice", DisplayName: "Alice",
+		AvatarURL: "https://avatars.example/alice", ProfileURL: "https://example/alice", Bio: "Builder",
+	})
 	require.NoError(t, err)
 
 	u, err := st.GetUserByGitHubID(ctx, 12345)
@@ -61,16 +64,84 @@ func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	require.Equal(t, int64(12345), u.GitHubID)
 	require.Equal(t, "alice@example.com", u.Email)
 	require.Equal(t, "alice", u.Login)
+	require.Equal(t, "Alice", u.DisplayName)
+	require.Equal(t, "https://avatars.example/alice", u.AvatarURL)
+	require.Equal(t, "https://example/alice", u.ProfileURL)
+	require.Equal(t, "Builder", u.Bio)
 	require.NotEqual(t, uuid.Nil, u.ID)
 
 	// Update email and login on re-upsert.
-	_, err = st.UpsertUser(ctx, 12345, "alice2@example.com", "alice2")
+	_, err = st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 12345, Email: "alice2@example.com", Login: "alice2", DisplayName: "Alice Updated",
+	})
 	require.NoError(t, err)
 	u2, err := st.GetUserByGitHubID(ctx, 12345)
 	require.NoError(t, err)
 	require.Equal(t, u.ID, u2.ID, "ID must not change on upsert")
 	require.Equal(t, "alice2@example.com", u2.Email)
 	require.Equal(t, "alice2", u2.Login)
+	require.Equal(t, "Alice Updated", u2.DisplayName)
+	require.Empty(t, u2.AvatarURL)
+}
+
+func TestWebSessionLifecycle(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 12346, Email: "web@example.com", Login: "web"})
+	require.NoError(t, err)
+
+	rawToken := "browser-session-token"
+	now := time.Now()
+	created, err := st.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(7 * 24 * time.Hour), ExpiresAt: now.Add(30 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, created.ID)
+	audit, err := st.ListAuditLog(ctx, store.AuditLogFilter{TableName: "web_sessions"})
+	require.NoError(t, err)
+	require.Len(t, audit, 1)
+	require.NotContains(t, string(audit[0].NewData), "token_hash")
+
+	got, err := st.GetWebSessionByTokenHash(ctx, store.HashSessionToken(rawToken))
+	require.NoError(t, err)
+	require.Equal(t, user.ID, got.UserID)
+	_, err = st.GetWebSessionByTokenHash(ctx, []byte(rawToken))
+	require.ErrorIs(t, err, store.ErrNotFound)
+
+	newSeen := now.Add(time.Hour)
+	require.NoError(t, st.TouchWebSession(ctx, got.ID, newSeen, now.Add(8*24*time.Hour)))
+	touched, err := st.GetWebSessionByTokenHash(ctx, store.HashSessionToken(rawToken))
+	require.NoError(t, err)
+	require.WithinDuration(t, newSeen, touched.LastSeenAt, time.Second)
+	audit, err = st.ListAuditLog(ctx, store.AuditLogFilter{TableName: "web_sessions"})
+	require.NoError(t, err)
+	require.Len(t, audit, 1, "activity touches must not create audit churn")
+
+	require.NoError(t, st.RevokeWebSessionByTokenHash(ctx, store.HashSessionToken(rawToken)))
+	audit, err = st.ListAuditLog(ctx, store.AuditLogFilter{TableName: "web_sessions"})
+	require.NoError(t, err)
+	require.Len(t, audit, 2)
+	require.Equal(t, "UPDATE", audit[0].Operation)
+	require.NotContains(t, string(audit[0].OldData), "token_hash")
+	require.NotContains(t, string(audit[0].NewData), "token_hash")
+	_, err = st.GetWebSessionByTokenHash(ctx, store.HashSessionToken(rawToken))
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestWebSessionExpiredNotFound(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 12347, Email: "expired@example.com", Login: "expired"})
+	require.NoError(t, err)
+
+	_, err = st.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken("expired-token"), UserID: user.ID,
+		IdleExpiresAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	_, err = st.GetWebSessionByTokenHash(ctx, store.HashSessionToken("expired-token"))
+	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestGetUserByGitHubID_NotFound(t *testing.T) {
@@ -83,7 +154,7 @@ func TestEnsureProject_CreateAndIdempotent(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	_, err := st.UpsertUser(ctx, 1, "bob@example.com", "bob")
+	_, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1, Email: "bob@example.com", Login: "bob"})
 	require.NoError(t, err)
 	u, err := st.GetUserByGitHubID(ctx, 1)
 	require.NoError(t, err)
@@ -107,7 +178,7 @@ func TestGetProjectBySlug_NotFound(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	_, err := st.UpsertUser(ctx, 2, "c@example.com", "c")
+	_, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 2, Email: "c@example.com", Login: "c"})
 	require.NoError(t, err)
 	u, err := st.GetUserByGitHubID(ctx, 2)
 	require.NoError(t, err)
@@ -121,7 +192,7 @@ func TestGetProjectBySlug_NotFound(t *testing.T) {
 func testUserAndProject(t *testing.T, st *postgres.Store, githubID int64) (*store.User, *store.Project) {
 	t.Helper()
 	ctx := t.Context()
-	u, err := st.UpsertUser(ctx, githubID, "u@example.com", "u")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: githubID, Email: "u@example.com", Login: "u"})
 	require.NoError(t, err)
 	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
 	require.NoError(t, err)
@@ -260,7 +331,7 @@ func TestListProjects(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	_, err := st.UpsertUser(ctx, 60, "d@example.com", "d")
+	_, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 60, Email: "d@example.com", Login: "d"})
 	require.NoError(t, err)
 	u, err := st.GetUserByGitHubID(ctx, 60)
 	require.NoError(t, err)
@@ -289,9 +360,9 @@ func TestListOrgs(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	_, err := st.UpsertUser(ctx, 61, "zed@example.com", "zed")
+	_, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 61, Email: "zed@example.com", Login: "zed"})
 	require.NoError(t, err)
-	_, err = st.UpsertUser(ctx, 62, "amy@example.com", "amy")
+	_, err = st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 62, Email: "amy@example.com", Login: "amy"})
 	require.NoError(t, err)
 
 	orgs, err := st.ListOrgs(ctx)
@@ -462,7 +533,7 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 100, "grantuser@example.com", "grantuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 100, Email: "grantuser@example.com", Login: "grantuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -492,7 +563,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 200, "pruneuser@example.com", "pruneuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 200, Email: "pruneuser@example.com", Login: "pruneuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
@@ -562,7 +633,7 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 400, "rotate@example.com", "rotateuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 400, Email: "rotate@example.com", Login: "rotateuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -631,7 +702,7 @@ func TestUpsertGrant_NoEncryptionKey(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 300, "nokey@example.com", "nokey")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 300, Email: "nokey@example.com", Login: "nokey"})
 	require.NoError(t, err)
 
 	err = st.UpsertGrant(ctx, store.Grant{
@@ -822,7 +893,7 @@ func TestGetUserByID_Success(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	upserted, err := st.UpsertUser(ctx, 900, "id@example.com", "iduser")
+	upserted, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 900, Email: "id@example.com", Login: "iduser"})
 	require.NoError(t, err)
 
 	got, err := st.GetUserByID(ctx, upserted.ID)
@@ -844,7 +915,7 @@ func TestGetPersonalOrgByUserID_CreatedOnFirstLogin(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 910, "org@example.com", "orguser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 910, Email: "org@example.com", Login: "orguser"})
 	require.NoError(t, err)
 
 	org, err := st.GetPersonalOrgByUserID(ctx, u.ID)
@@ -868,10 +939,10 @@ func TestUpsertUser_SameLoginSlugAllowedForMultiplePersonalOrgs(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
 
-	u1, err := st.UpsertUser(ctx, 920, "first@example.com", "sharedlogin")
+	u1, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 920, Email: "first@example.com", Login: "sharedlogin"})
 	require.NoError(t, err)
 
-	u2, err := st.UpsertUser(ctx, 921, "second@example.com", "sharedlogin")
+	u2, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 921, Email: "second@example.com", Login: "sharedlogin"})
 	require.NoError(t, err)
 
 	org1, err := st.GetPersonalOrgByUserID(ctx, u1.ID)
@@ -1092,7 +1163,7 @@ func TestGetGrantByRefreshToken_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1100, "rftoken@example.com", "rfuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1100, Email: "rftoken@example.com", Login: "rfuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1129,7 +1200,7 @@ func TestRotateGrant_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1200, "rotate@example.com", "rotateuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1200, Email: "rotate@example.com", Login: "rotateuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1179,7 +1250,7 @@ func TestRotateGrant_RecordsRetiredRefreshToken(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1250, "retired@example.com", "retireduser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1250, Email: "retired@example.com", Login: "retireduser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1236,7 +1307,7 @@ func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1260, "rollback@example.com", "rollbackuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1260, Email: "rollback@example.com", Login: "rollbackuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1282,7 +1353,7 @@ func TestGetRetiredRefreshToken_IgnoresExpiredRetention(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1270, "pruneretired@example.com", "pruneretired")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1270, Email: "pruneretired@example.com", Login: "pruneretired"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1328,7 +1399,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1300, "race@example.com", "raceuser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1300, Email: "race@example.com", Login: "raceuser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1370,7 +1441,7 @@ func TestDeleteGrant_Success(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 
-	u, err := st.UpsertUser(ctx, 1400, "del@example.com", "deluser")
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1400, Email: "del@example.com", Login: "deluser"})
 	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
