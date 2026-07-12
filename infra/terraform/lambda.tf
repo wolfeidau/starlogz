@@ -14,6 +14,7 @@ resource "aws_lambda_function" "starlogz" {
   environment {
     variables = {
       PORT                 = "8088"
+      LOG_LEVEL            = "INFO"
       READINESS_CHECK_PATH = "/health"
       SERVER_URL           = local.server_url
       GITHUB_CLIENT_ID     = var.github_client_id

@@ -117,6 +117,7 @@ Key env vars:
 | Var | Default | Description |
 |-----|---------|-------------|
 | `HTTP_LISTEN_ADDR` | `localhost:8088` | TCP listen address |
+| `LOG_LEVEL` | `INFO` in production; `DEBUG` with `--development` | Application log level. Accepts `slog.Level` text values (`DEBUG`, `INFO`, `WARN`, `ERROR`) with optional `+N` or `-N` offsets. |
 | `SERVER_URL` | `http://localhost:8088` | Public base URL (used in discovery docs) |
 | `GITHUB_CLIENT_ID` | _(required)_ | GitHub App client ID |
 | `GITHUB_CLIENT_SECRET` | _(required)_ | GitHub App client secret |

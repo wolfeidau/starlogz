@@ -47,15 +47,25 @@ func main() {
 }
 
 func newLogger(ctx context.Context, development, sentryEnabled bool) *slog.Logger {
+	level := slog.LevelInfo
+	if development {
+		level = slog.LevelDebug
+	}
+	if configured := os.Getenv("LOG_LEVEL"); configured != "" {
+		if err := level.UnmarshalText([]byte(configured)); err != nil {
+			fmt.Fprintf(os.Stderr, "invalid LOG_LEVEL %q; using %s\n", configured, level)
+		}
+	}
+
 	var handler slog.Handler
 	if development {
 		handler = tint.NewHandler(os.Stderr, &tint.Options{
-			Level:      slog.LevelDebug,
+			Level:      level,
 			TimeFormat: time.Kitchen,
 		})
 	} else {
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level: level,
 		})
 	}
 
