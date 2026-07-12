@@ -1,0 +1,20 @@
+{
+  "name": "starlogz",
+  "interface": {
+    "displayName": "Starlogz"
+  },
+  "plugins": [
+    {
+      "name": "starlogz-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/starlogz-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

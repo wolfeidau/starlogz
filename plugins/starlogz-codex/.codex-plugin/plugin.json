@@ -1,0 +1,27 @@
+{
+  "name": "starlogz-codex",
+  "version": "0.1.0",
+  "description": "Build durable project memory with Starlogz and Codex.",
+  "author": {
+    "name": "Mark Wolfe",
+    "url": "https://github.com/wolfeidau"
+  },
+  "homepage": "https://github.com/wolfeidau/starlogz#use-starlogz-with-codex",
+  "repository": "https://github.com/wolfeidau/starlogz",
+  "license": "Apache-2.0",
+  "keywords": ["codex", "mcp", "memory", "starlogz"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Starlogz Codex",
+    "shortDescription": "Build durable project memory with Starlogz.",
+    "longDescription": "Recall relevant project context before work, verify it against the repository, and preserve durable findings for future Codex sessions.",
+    "developerName": "Mark Wolfe",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/wolfeidau/starlogz",
+    "defaultPrompt": [
+      "Recall relevant Starlogz insights before starting this task.",
+      "Save the durable lessons from this work to Starlogz."
+    ]
+  }
+}
