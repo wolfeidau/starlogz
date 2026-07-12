@@ -43,7 +43,7 @@ func newMCPServer(st store.Store) *mcpServer {
 	}, ms.insightWrite)
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
-		Description: "Full-text search over live insights in a project. Returns results ordered by relevance.",
+		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance.",
 		InputSchema: insightSearchSchema,
 	}, ms.insightSearch)
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -106,10 +106,12 @@ type insightWriteInput struct {
 }
 
 type insightSearchInput struct {
-	Project string   `json:"project"`
-	Query   string   `json:"query"`
-	Tags    []string `json:"tags"`
-	Limit   int      `json:"limit"`
+	Project   string   `json:"project"`
+	Query     string   `json:"query"`
+	QueryMode string   `json:"query_mode"`
+	Tags      []string `json:"tags"`
+	TagMode   string   `json:"tag_mode"`
+	Limit     int      `json:"limit"`
 }
 
 type insightListInput struct {
@@ -167,6 +169,8 @@ var (
 		s := inputSchemaFor[insightSearchInput]()
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["query"].MinLength = jsonschema.Ptr(1)
+		s.Properties["query_mode"].Enum = []any{"all", "web"}
+		s.Properties["tag_mode"].Enum = []any{"all", "any"}
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
 		s.Required = []string{projectSchemaProperty, "query"}
@@ -310,7 +314,15 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	insights, err := ms.store.SearchInsights(ctx, project.ID, in.Query, in.Tags, limit)
+	queryMode := store.SearchQueryMode(in.QueryMode)
+	if queryMode == "" {
+		queryMode = store.SearchQueryModeAll
+	}
+	tagMode := store.SearchTagMode(in.TagMode)
+	if tagMode == "" {
+		tagMode = store.SearchTagModeAll
+	}
+	insights, err := ms.store.SearchInsights(ctx, project.ID, in.Query, queryMode, normaliseTags(in.Tags), tagMode, limit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("search insights: %w", err)
 	}

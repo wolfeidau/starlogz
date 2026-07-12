@@ -119,7 +119,7 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	insights, err := s.store.SearchInsights(ctx, project.ID, req.Msg.GetQuery(), req.Msg.GetTags(), limit)
+	insights, err := s.store.SearchInsights(ctx, project.ID, req.Msg.GetQuery(), store.SearchQueryModeAll, req.Msg.GetTags(), store.SearchTagModeAll, limit)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("search insights: %w", err))
 	}
