@@ -14,6 +14,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/lmittmann/tint"
 	"github.com/wolfeidau/starlogz/internal/commands"
+	"github.com/wolfeidau/starlogz/internal/logattr"
 	"github.com/wolfeidau/starlogz/internal/telemetry"
 )
 
@@ -73,6 +74,7 @@ func newLogger(ctx context.Context, development, sentryEnabled bool) *slog.Logge
 	if sentryEnabled {
 		handler = slog.NewMultiHandler(handler, telemetry.NewSentrySlogHandler(ctx))
 	}
+	handler = logattr.NewPrivacyHandler(handler)
 	return slog.New(handler)
 }
 

@@ -19,7 +19,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
-	"github.com/wolfeidau/starlogz/internal/logattr"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/telemetry"
 	"golang.org/x/oauth2"
@@ -192,7 +191,7 @@ func (s *Server) TokenHandler() http.Handler {
 
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		if err := r.ParseForm(); err != nil {
-			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: failed to parse form", slog.Any("error", err))
+			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: failed to parse form")
 			writeOAuthError(w, "invalid_request", "failed to parse request body", http.StatusBadRequest)
 			return
 		}
@@ -245,10 +244,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 
 	// RFC 6749 §4.1.3: redirect_uri must be present and identical.
 	if form.Get("redirect_uri") != pc.RedirectURI {
-		log.WarnContext(r.Context(), "redirect_uri mismatch",
-			slog.String("request_uri", form.Get("redirect_uri")),
-			slog.String("stored_uri", pc.RedirectURI),
-		)
+		log.WarnContext(r.Context(), "redirect_uri mismatch")
 		writeOAuthError(w, "invalid_grant", "redirect_uri does not match authorization request", http.StatusBadRequest)
 		return
 	}
@@ -311,14 +307,10 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		}
 	}
 
-	logFields := []any{
+	log.InfoContext(ctx, "token exchange: issued JWT",
 		slog.String("sub", pc.Sub),
 		slog.String("scope", pc.Scope),
-	}
-	if ourRefreshToken != "" {
-		logFields = append(logFields, logattr.ObscureString("refresh_token", ourRefreshToken))
-	}
-	log.InfoContext(ctx, "token exchange: issued JWT", logFields...)
+	)
 
 	s.touchRegisteredClient(ctx, log, pc.ClientID)
 	writeTokenResponse(ctx, w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry, jwtExpiry)
@@ -330,7 +322,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 
 	// Enrich the logger with client_id as soon as it's known.
 	ctx := r.Context()
-	log := ctxlog.LoggerFrom(ctx).With(slog.String("client_id", clientID), logattr.ObscureString("refresh_token", refreshToken))
+	log := ctxlog.LoggerFrom(ctx).With(slog.String("client_id", clientID))
 	ctx = ctxlog.WithLogger(ctx, log)
 
 	if refreshToken == "" || clientID == "" {
@@ -378,7 +370,6 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			slog.String("request_client_id", clientID),
 			slog.String("grant_client_id", grant.ClientID),
 		}
-		warnFields = s.appendClientNames(ctx, warnFields, clientID, grant.ClientID)
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_mismatch")
 		warnFields = append(warnFields, slog.String("outcome", "failure"), slog.String("reason", "client_mismatch"))
 		log.WarnContext(ctx, "client_id mismatch on token refresh", warnFields...)
@@ -421,7 +412,6 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			telemetry.RecordRefreshTokenGrant(ctx, "failure", "github_invalid")
 			log.ErrorContext(ctx, "GitHub refresh token rejected; dropping grant",
 				slog.String("github_error", retrieveErr.ErrorCode),
-				slog.String("github_error_description", retrieveErr.ErrorDescription),
 				slog.String("outcome", "failure"),
 				slog.String("reason", "github_invalid"),
 			)
@@ -430,7 +420,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			return
 		}
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
-		log.ErrorContext(ctx, "GitHub token refresh failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
+		log.ErrorContext(ctx, "GitHub token refresh failed", slog.String("outcome", "failure"), slog.String("reason", "server_error"))
 		writeOAuthError(w, "server_error", "GitHub token refresh failed", http.StatusInternalServerError)
 		return
 	}
@@ -509,7 +499,6 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	log.InfoContext(ctx, "token rotation: grant rotated",
 		slog.String("old_jti", grant.JTI),
 		slog.String("new_jti", newJTI),
-		logattr.ObscureString("new_refresh_token", newOurRefreshToken),
 		slog.String("outcome", "success"),
 		slog.String("reason", "rotated"),
 	)
@@ -659,16 +648,13 @@ func (s *Server) DCRHandler() http.Handler {
 		}
 
 		log.InfoContext(r.Context(), "DCR request",
-			slog.Any("grant_types", req.GrantTypes),
-			slog.Any("response_types", req.ResponseTypes),
-			slog.Any("redirect_uris", req.RedirectURIs),
-			slog.String("token_endpoint_auth_method", req.TokenEndpointAuthMethod),
-			slog.String("client_name", req.ClientName),
-			slog.String("requested_scope", req.Scope),
+			slog.Int("grant_type_count", len(req.GrantTypes)),
+			slog.Int("response_type_count", len(req.ResponseTypes)),
+			slog.Int("redirect_uri_count", len(req.RedirectURIs)),
 		)
 
 		if err := validateClientRegistrationMetadata(&req); err != nil {
-			log.WarnContext(r.Context(), "DCR: invalid client metadata", slog.Any("error", err))
+			log.WarnContext(r.Context(), "DCR: invalid client metadata")
 			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -676,7 +662,7 @@ func (s *Server) DCRHandler() http.Handler {
 		normalizeClientRegistrationMetadata(&req)
 		req.Scope = normalizeScope(req.Scope, defaultRegisteredClientScope)
 		if err := validateSupportedScope(req.Scope); err != nil {
-			log.WarnContext(r.Context(), "DCR: invalid scope", slog.Any("error", err), slog.String("scope", req.Scope))
+			log.WarnContext(r.Context(), "DCR: invalid scope")
 			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -744,7 +730,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 
 		githubToken, identity, err := s.github.ExchangeCode(r.Context(), q.Get("code"))
 		if err != nil {
-			log.ErrorContext(r.Context(), "GitHub exchange failed", slog.Any("error", err))
+			log.ErrorContext(r.Context(), "GitHub exchange failed")
 			http.Error(w, "failed to authenticate with GitHub", http.StatusBadGateway)
 			return
 		}
@@ -753,7 +739,6 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		log = log.With(
 			slog.String("client_id", pending.ClientID),
 			slog.Int64("github_id", identity.ID),
-			slog.String("login", identity.Login),
 		)
 		ctx := ctxlog.WithLogger(r.Context(), log)
 
@@ -794,7 +779,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 
 		redirectTo, err := url.Parse(pending.RedirectURI)
 		if err != nil {
-			log.ErrorContext(ctx, "invalid redirect URI in pending auth", slog.Any("error", err))
+			log.ErrorContext(ctx, "invalid redirect URI in pending auth")
 			http.Error(w, "invalid redirect_uri", http.StatusInternalServerError)
 			return
 		}
@@ -807,7 +792,6 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		redirectTo.RawQuery = rq.Encode()
 
 		log.InfoContext(ctx, "GitHub auth complete",
-			slog.String("email", identity.Email),
 			slog.String("sub", sub),
 		)
 
@@ -828,7 +812,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		q := r.URL.Query()
 
 		if q.Get("response_type") != oauthCode {
-			log.WarnContext(ctx, "authorize: unsupported response_type", slog.String("response_type", q.Get("response_type")))
+			log.WarnContext(ctx, "authorize: unsupported response_type")
 			writeOAuthError(w, "unsupported_response_type", "only response_type=code is supported", http.StatusBadRequest)
 			return
 		}
@@ -859,9 +843,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		}
 
 		if q.Get("code_challenge_method") != pkceMethodS256 {
-			log.WarnContext(ctx, "authorize: unsupported code_challenge_method",
-				slog.String("method", q.Get("code_challenge_method")),
-			)
+			log.WarnContext(ctx, "authorize: unsupported code_challenge_method")
 			writeOAuthError(w, "invalid_request", "only code_challenge_method=S256 is supported", http.StatusBadRequest)
 			return
 		}
@@ -871,23 +853,20 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		if client != nil {
 			registeredScope := normalizeScope(client.Scope, defaultRegisteredClientScope)
 			if err := validateSupportedScope(registeredScope); err != nil {
-				log.ErrorContext(ctx, "registered client has invalid scope", slog.Any("error", err))
+				log.ErrorContext(ctx, "registered client has invalid scope")
 				writeOAuthError(w, "server_error", "registered client has invalid scope", http.StatusInternalServerError)
 				return
 			}
 			if len(strings.Fields(rawScope)) == 0 {
 				scope = registeredScope
 			} else if sc, ok := firstDisallowedScope(scope, registeredScope); ok {
-				log.WarnContext(ctx, "authorize: scope not registered for client",
-					slog.String("scope", sc),
-					slog.String("registered_scope", registeredScope),
-				)
+				log.WarnContext(ctx, "authorize: scope not registered for client")
 				writeOAuthError(w, "invalid_scope", "scope not registered for this client: "+sc, http.StatusBadRequest)
 				return
 			}
 		}
 		if err := validateSupportedScope(scope); err != nil {
-			log.WarnContext(ctx, "authorize: invalid scope", slog.Any("error", err), slog.String("scope", scope))
+			log.WarnContext(ctx, "authorize: invalid scope")
 			writeOAuthError(w, "invalid_scope", err.Error(), http.StatusBadRequest)
 			return
 		}

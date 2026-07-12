@@ -63,29 +63,8 @@ func (s *Server) registeredClientForAuthorize(ctx context.Context, log *slog.Log
 		return nil, &oauthRequestError{code: "server_error", description: "internal error", status: http.StatusInternalServerError}
 	}
 	if !slices.Contains(client.RedirectURIs, redirectURI) {
-		log.WarnContext(ctx, "authorize: redirect_uri not registered", slog.String("redirect_uri", redirectURI))
+		log.WarnContext(ctx, "authorize: redirect_uri not registered")
 		return nil, &oauthRequestError{code: "invalid_request", description: "redirect_uri not registered for this client", status: http.StatusBadRequest}
 	}
 	return client, nil
-}
-
-func (s *Server) appendClientNames(ctx context.Context, fields []any, requestClientID, grantClientID string) []any {
-	if name, ok := s.clientDisplayName(ctx, requestClientID); ok {
-		fields = append(fields, slog.String("request_client_name", name))
-	}
-	if name, ok := s.clientDisplayName(ctx, grantClientID); ok {
-		fields = append(fields, slog.String("grant_client_name", name))
-	}
-	return fields
-}
-
-func (s *Server) clientDisplayName(ctx context.Context, clientID string) (string, bool) {
-	if s.clients == nil || clientID == "" {
-		return "", false
-	}
-	client, err := s.clients.GetClient(ctx, clientID)
-	if err != nil || client.ClientName == "" {
-		return "", false
-	}
-	return client.ClientName, true
 }

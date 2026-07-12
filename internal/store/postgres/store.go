@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
-	"github.com/wolfeidau/starlogz/internal/logattr"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
@@ -502,7 +501,7 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 
 // GetGrantByRefreshToken fetches and decrypts a grant by our_refresh_token.
 func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*store.Grant, error) {
-	s.logger(ctx).DebugContext(ctx, "getting grant by refresh token", logattr.ObscureString("token", token))
+	s.logger(ctx).DebugContext(ctx, "getting grant by refresh token")
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -643,8 +642,6 @@ func (s *Store) insertRetiredRefreshTokenTx(ctx context.Context, tx pgx.Tx, rt *
 // does not match any row (concurrent rotation race).
 func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g store.Grant, retired *store.RetiredRefreshToken) (*store.Grant, error) {
 	s.logger(ctx).DebugContext(ctx, "rotating grant",
-		logattr.ObscureString("old_token", oldToken),
-		logattr.ObscureString("new_token", g.OurRefreshToken),
 		slog.String("old_jti", oldJTI),
 		slog.Time("old_jwt_expiry", oldJWTExpiry),
 		slog.String("new_jti", g.JTI),
@@ -768,7 +765,7 @@ func (s *Store) DeleteGrant(ctx context.Context, jti string, retired *store.Reti
 // StorePendingAuth persists an authorization state with a 10-minute TTL.
 // Lazily prunes all expired rows in the same transaction.
 func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error {
-	s.logger(ctx).DebugContext(ctx, "storing pending auth", slog.String("state", state))
+	s.logger(ctx).DebugContext(ctx, "storing pending auth")
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -795,7 +792,7 @@ func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.Pend
 // ConsumePendingAuth atomically deletes and returns the pending auth for the given state.
 // Returns ErrNotFound for unknown or expired states.
 func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.PendingAuth, error) {
-	s.logger(ctx).DebugContext(ctx, "consuming pending auth", slog.String("state", state))
+	s.logger(ctx).DebugContext(ctx, "consuming pending auth")
 
 	p := &store.PendingAuth{}
 	err := s.pool.QueryRow(ctx, `
@@ -815,7 +812,7 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 // StoreAuthCode persists an authorization code with a 5-minute TTL.
 // Lazily prunes all expired rows in the same transaction.
 func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode) error {
-	s.logger(ctx).DebugContext(ctx, "storing auth code", slog.String("code", code))
+	s.logger(ctx).DebugContext(ctx, "storing auth code")
 
 	if s.enc == nil {
 		return fmt.Errorf("encryption key not configured")
@@ -874,7 +871,7 @@ func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode
 // ConsumeAuthCode atomically deletes and returns the auth code record.
 // Returns ErrNotFound for unknown or expired codes.
 func (s *Store) ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCode, error) {
-	s.logger(ctx).DebugContext(ctx, "consuming auth code", slog.String("code", code))
+	s.logger(ctx).DebugContext(ctx, "consuming auth code")
 
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
@@ -1072,7 +1069,7 @@ func (s *Store) ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, 
 
 // SearchInsights runs a full-text search over live insights in a project.
 func (s *Store) SearchInsights(ctx context.Context, projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, limit int) ([]*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("query_mode", string(queryMode)), slog.String("tags", strings.Join(tags, ", ")), slog.String("tag_mode", string(tagMode)), slog.Int("limit", limit))
+	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", projectID.String()), slog.Int("query_length", len(query)), slog.String("query_mode", string(queryMode)), slog.Int("tag_count", len(tags)), slog.String("tag_mode", string(tagMode)), slog.Int("limit", limit))
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
@@ -1102,7 +1099,7 @@ func (s *Store) SearchInsights(ctx context.Context, projectID uuid.UUID, query s
 
 // ListInsights returns live insights for a project ordered by most recently updated.
 func (s *Store) ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "listing insights", slog.String("project_id", projectID.String()), slog.String("tag", tag), slog.Int("limit", limit))
+	s.logger(ctx).DebugContext(ctx, "listing insights", slog.String("project_id", projectID.String()), slog.Bool("tag_filter", tag != ""), slog.Int("limit", limit))
 
 	var rows pgx.Rows
 	var err error
@@ -1265,7 +1262,7 @@ func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID) ([]sto
 
 // UpdateInsight patches content and/or tags on an existing live insight, scoped to orgID.
 func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) (*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.String("tags", strings.Join(p.Tags, ", ")), slog.String("org_id", p.OrgID.String()))
+	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.Int("tag_count", len(p.Tags)), slog.String("org_id", p.OrgID.String()))
 
 	tags := p.Tags
 	if tags == nil {
@@ -1372,7 +1369,7 @@ func (s *Store) GetClient(ctx context.Context, clientID string) (*store.OAuthCli
 }
 
 func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
-	s.logger(ctx).DebugContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("grant_types", strings.Join(c.GrantTypes, ", ")), slog.String("response_types", strings.Join(c.ResponseTypes, ", ")), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.String("scope", c.Scope), slog.Time("issued_at", c.IssuedAt), slog.Any("expires_at", c.ExpiresAt))
+	s.logger(ctx).DebugContext(ctx, "saving oauth client", slog.String("client_id", c.ClientID), slog.Int("redirect_uri_count", len(c.RedirectURIs)), slog.Int("grant_type_count", len(c.GrantTypes)), slog.Int("response_type_count", len(c.ResponseTypes)), slog.String("token_endpoint_auth_method", c.TokenEndpointAuthMethod), slog.Time("issued_at", c.IssuedAt), slog.Any("expires_at", c.ExpiresAt))
 
 	lastUsedAt := c.LastUsedAt
 	if lastUsedAt.IsZero() {
@@ -1393,7 +1390,7 @@ func (s *Store) SaveClient(ctx context.Context, c store.OAuthClient) error {
 
 // UpsertClient refreshes first-party metadata without changing recorded activity.
 func (s *Store) UpsertClient(ctx context.Context, c store.OAuthClient) error {
-	s.logger(ctx).DebugContext(ctx, "upserting oauth client", slog.String("client_id", c.ClientID), slog.String("client_name", c.ClientName), slog.String("redirect_uris", strings.Join(c.RedirectURIs, ", ")), slog.String("scope", c.Scope), slog.Any("expires_at", c.ExpiresAt))
+	s.logger(ctx).DebugContext(ctx, "upserting oauth client", slog.String("client_id", c.ClientID), slog.Int("redirect_uri_count", len(c.RedirectURIs)), slog.Any("expires_at", c.ExpiresAt))
 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients

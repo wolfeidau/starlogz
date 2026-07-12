@@ -112,7 +112,7 @@ func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http
 
 		tokenResp, err := exchangeUICode(r.Context(), oidcServer, code, verifierCookie.Value, baseURL+"/ui/auth/callback")
 		if err != nil {
-			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "UI token exchange failed", slog.Any("error", err))
+			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "UI token exchange failed")
 			http.Error(w, "token exchange failed", http.StatusBadRequest)
 			return
 		}
