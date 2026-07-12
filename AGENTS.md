@@ -54,7 +54,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `project_ensure`   | `insights:read`  | Creates a project if missing; returns it either way |
 | `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
 | `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. |
-| `insight_search`   | `insights:read`  | Full-text search over live insights |
+| `insight_search`   | `insights:read`  | Full-text search over live insights. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`. |
 | `insight_list`     | `insights:read`  | Lists live insights, newest first. Optional tag filter. |
 | `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight |
 | `insight_delete`   | `insights:write` | Soft-deletes an insight |
