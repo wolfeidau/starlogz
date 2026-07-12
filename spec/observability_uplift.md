@@ -32,6 +32,8 @@ Never log:
 - email addresses or redirect URIs;
 - raw client IP addresses.
 
+Enforce these exclusions both at the log call site and with an outer `slog.Handler` privacy guard shared by JSON, OpenTelemetry, and Sentry sinks. Do not emit token hashes or other stable secret-derived correlators.
+
 Do not log the raw `User-Agent` header. Parse it with `medama-io/go-useragent` and emit only Starlogz-owned bounded classifications: `client_kind`, `client_family`, `client_major`, `os_family`, and `device_class`. Unknown or malformed values map to `other`; never fall back to header text or arbitrary parser output.
 
 Replace the existing access record with one bounded structured event per request:

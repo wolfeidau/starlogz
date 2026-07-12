@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,6 +26,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/ctxlog"
+	"github.com/wolfeidau/starlogz/internal/logattr"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"golang.org/x/oauth2"
 )
@@ -916,6 +919,42 @@ func TestTokenHandler_InvalidCode(t *testing.T) {
 	var errResp map[string]string
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	require.Equal(t, "invalid_grant", errResp["error"])
+}
+
+func TestTokenHandlerDoesNotLogOAuthSecrets(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	var output bytes.Buffer
+	logger := slog.New(logattr.NewPrivacyHandler(slog.NewJSONHandler(&output, nil)))
+	const code = "secret-authorization-code"
+	const verifier = "secret-code-verifier"
+	const storedRedirect = "https://stored.example.com/secret-callback"
+	const requestRedirect = "https://request.example.com/secret-callback"
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:      "test-client",
+		Sub:           "12345678",
+		Scope:         "insights:read",
+		CodeChallenge: pkceChallenge(verifier),
+		RedirectURI:   storedRedirect,
+	}))
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"client_id":     {"test-client"},
+		"redirect_uri":  {requestRedirect},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(ctxlog.WithLogger(req.Context(), logger))
+	w := httptest.NewRecorder()
+
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, output.String(), "redirect_uri mismatch")
+	for _, secret := range []string{code, verifier, storedRedirect, requestRedirect} {
+		require.NotContains(t, output.String(), secret)
+	}
 }
 
 func TestTokenHandler_MissingClientID(t *testing.T) {
