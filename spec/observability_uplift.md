@@ -32,6 +32,8 @@ Never log:
 - email addresses or redirect URIs;
 - raw client IP addresses.
 
+Do not log the raw `User-Agent` header. Parse it with `medama-io/go-useragent` and emit only Starlogz-owned bounded classifications: `client_kind`, `client_family`, `client_major`, `os_family`, and `device_class`. Unknown or malformed values map to `other`; never fall back to header text or arbitrary parser output.
+
 Replace the existing access record with one bounded structured event per request:
 
 ```json
@@ -44,11 +46,16 @@ Replace the existing access record with one bounded structured event per request
   "route": "/oauth2/token",
   "status": 200,
   "duration_ms": 387,
-  "response_bytes": 412
+  "response_bytes": 412,
+  "client_kind": "browser",
+  "client_family": "chrome",
+  "client_major": 126,
+  "os_family": "macos",
+  "device_class": "desktop"
 }
 ```
 
-Use the route template where possible, never the raw URL. Express durations in milliseconds. Add tests that capture log output and assert that known OAuth secrets and query values are absent.
+Use the route template where possible, never the raw URL. Express durations in milliseconds. Omit `trace_id` when no valid trace context exists. Add tests that capture log output and assert that known OAuth secrets, query values, and raw user-agent strings are absent.
 
 ## 2. API Gateway access logs
 

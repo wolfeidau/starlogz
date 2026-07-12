@@ -3,13 +3,18 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/medama-io/go-useragent"
+	"github.com/medama-io/go-useragent/agents"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"go.opentelemetry.io/otel/trace"
 )
+
+const otherClassification = "other"
 
 type responseWriter struct {
 	http.ResponseWriter
@@ -39,11 +44,12 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 	return rw.ResponseWriter
 }
 
-// AccessLog returns middleware that logs each request's method, path, status,
-// duration, and response size. It seeds a request_id into the context logger
+// AccessLog returns middleware that logs one bounded event per request. It seeds
+// a request_id into the context logger
 // so all log lines within a request share a correlation field.
 // Place inside otelhttp so trace context is available.
 func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
+	parser := useragent.NewParser()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reqLogger := logger.With(
@@ -59,14 +65,20 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				rw.status = http.StatusOK
 			}
 
-			reqLogger.InfoContext(r.Context(), "http_request",
-				slog.String("trace_id", trace.SpanContextFromContext(r.Context()).TraceID().String()),
+			attrs := []slog.Attr{
 				slog.String("method", r.Method),
 				slog.String("route", routePattern(r)),
 				slog.Int("status", rw.status),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 				slog.Int64("response_bytes", rw.bytes),
-			)
+			}
+			spanContext := trace.SpanContextFromContext(r.Context())
+			if spanContext.IsValid() {
+				attrs = append(attrs, slog.String("trace_id", spanContext.TraceID().String()))
+			}
+			attrs = append(attrs, userAgentAttrs(parser.Parse(r.UserAgent()))...)
+
+			reqLogger.LogAttrs(r.Context(), slog.LevelInfo, "http_request", attrs...)
 		})
 	}
 }
@@ -76,5 +88,107 @@ func routePattern(r *http.Request) string {
 		return "unmatched"
 	}
 	parts := strings.Fields(r.Pattern)
-	return parts[len(parts)-1]
+	pattern := parts[len(parts)-1]
+	if pattern == "/" && r.URL.Path != "/" {
+		return "/*"
+	}
+	return pattern
+}
+
+func userAgentAttrs(ua useragent.UserAgent) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("client_kind", clientKind(ua)),
+		slog.String("client_family", browserFamily(ua.Browser())),
+		slog.String("os_family", osFamily(ua.OS())),
+		slog.String("device_class", deviceClass(ua.Device())),
+	}
+	if major, err := strconv.Atoi(ua.BrowserVersionMajor()); err == nil && major >= 0 && major <= 999 {
+		attrs = append(attrs, slog.Int("client_major", major))
+	}
+	return attrs
+}
+
+func clientKind(ua useragent.UserAgent) string {
+	if ua.IsBot() {
+		return "bot"
+	}
+	if ua.Browser() != "" {
+		return "browser"
+	}
+	return otherClassification
+}
+
+func browserFamily(browser agents.Browser) string {
+	switch browser {
+	case agents.BrowserAndroid:
+		return "android"
+	case agents.BrowserChrome:
+		return "chrome"
+	case agents.BrowserEdge:
+		return "edge"
+	case agents.BrowserFirefox:
+		return "firefox"
+	case agents.BrowserIE:
+		return "ie"
+	case agents.BrowserOpera:
+		return "opera"
+	case agents.BrowserOperaMini:
+		return "opera_mini"
+	case agents.BrowserSafari:
+		return "safari"
+	case agents.BrowserVivaldi:
+		return "vivaldi"
+	case agents.BrowserSilk:
+		return "silk"
+	case agents.BrowserSamsung:
+		return "samsung"
+	case agents.BrowserFalkon:
+		return "falkon"
+	case agents.BrowserNintendo:
+		return "nintendo"
+	case agents.BrowserYandex:
+		return "yandex"
+	default:
+		return otherClassification
+	}
+}
+
+func osFamily(os agents.OS) string {
+	switch os {
+	case agents.OSAndroid:
+		return "android"
+	case agents.OSChromeOS:
+		return "chromeos"
+	case agents.OSIOS:
+		return "ios"
+	case agents.OSLinux:
+		return "linux"
+	case agents.OSFreeBSD:
+		return "freebsd"
+	case agents.OSOpenBSD:
+		return "openbsd"
+	case agents.OSMacOS:
+		return "macos"
+	case agents.OSWindows:
+		return "windows"
+	default:
+		return otherClassification
+	}
+}
+
+func deviceClass(device agents.Device) string {
+	switch device {
+	case agents.DeviceDesktop:
+		return "desktop"
+	case agents.DeviceMobile:
+		return "mobile"
+	case agents.DeviceTablet:
+		return "tablet"
+	case agents.DeviceTV:
+		return "tv"
+	case agents.DeviceBot:
+		return "bot"
+	default:
+		return otherClassification
+	}
 }
