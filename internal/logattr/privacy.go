@@ -43,7 +43,7 @@ type privacyHandler struct {
 	blocked bool
 }
 
-// NewPrivacyHandler prevents prohibited attributes from reaching any logging sink.
+// NewPrivacyHandler filters keys only; callers must not put secrets in messages or values under safe keys.
 func NewPrivacyHandler(handler slog.Handler) slog.Handler {
 	return &privacyHandler{Handler: handler}
 }
@@ -79,6 +79,7 @@ func (h *privacyHandler) WithGroup(name string) slog.Handler {
 		return h
 	}
 	if isProhibitedKey(name) {
+		// Fail closed because attributes below a prohibited group have lost their privacy context.
 		return &privacyHandler{Handler: h.Handler, blocked: true}
 	}
 	return &privacyHandler{Handler: h.Handler.WithGroup(name)}
@@ -108,7 +109,7 @@ func privacySafeAttr(attr slog.Attr) (slog.Attr, bool) {
 func isProhibitedKey(key string) bool {
 	key = strings.ToLower(key)
 	_, prohibited := prohibitedKeys[key]
-	return prohibited || strings.HasSuffix(key, "_token")
+	return prohibited || strings.HasSuffix(key, "_token") || strings.HasSuffix(key, "_client_name")
 }
 
 func attrsToAny(attrs []slog.Attr) []any {
