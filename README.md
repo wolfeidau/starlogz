@@ -87,6 +87,25 @@ npx @modelcontextprotocol/inspector
 
 Point it at `http://localhost:8088/mcp`. The inspector walks through the full OAuth2 browser flow.
 
+### Use Starlogz with Codex
+
+Starlogz is used during its own development as persistent project memory for OpenAI Codex. The optional `compound-knowledge` skill recalls relevant insights before meaningful work, verifies them against the current repository, and preserves only durable decisions, preferences, procedures, and validated findings afterward.
+
+Install the repository marketplace and plugin:
+
+```bash
+codex plugin marketplace add wolfeidau/starlogz
+codex plugin add starlogz-codex@starlogz
+```
+
+Configure the plugin to use your Starlogz deployment:
+
+```bash
+codex mcp add starlogz --url https://your-starlogz.example/mcp
+```
+
+The plugin is an optional Codex workflow, not a runtime dependency of the Starlogz server. Repository instructions, specifications, and source remain authoritative when stored memory is stale.
+
 ## Configuration
 
 All configuration is via environment variables.
@@ -273,7 +292,7 @@ Error events are forwarded to Sentry when `SENTRY_DSN` is set. Only `Error`-leve
 
 ## Built with AI
 
-This project is built with AI-assisted development workflows, using tools such as [Claude Code](https://claude.ai/code) and [Cursor](https://cursor.com).
+This project is built with AI-assisted development workflows using tools including [OpenAI Codex](https://developers.openai.com/codex/), [Claude Code](https://claude.ai/code), and [Cursor](https://cursor.com). Starlogz also provides persistent project memory to Codex through the optional `compound-knowledge` plugin described above.
 
 ## License
 
