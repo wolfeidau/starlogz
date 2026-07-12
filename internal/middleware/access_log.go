@@ -118,6 +118,7 @@ func clientKind(ua useragent.UserAgent) string {
 	return otherClassification
 }
 
+// Keep log values stable and bounded when the parser adds or renames browsers.
 func browserFamily(browser agents.Browser) string {
 	switch browser {
 	case agents.BrowserAndroid:
@@ -153,6 +154,7 @@ func browserFamily(browser agents.Browser) string {
 	}
 }
 
+// Keep log values stable and bounded when the parser adds or renames operating systems.
 func osFamily(os agents.OS) string {
 	switch os {
 	case agents.OSAndroid:
