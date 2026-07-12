@@ -42,6 +42,11 @@ resource "aws_apigatewayv2_integration" "lambda" {
   payload_format_version = "2.0"
 }
 
+resource "aws_cloudwatch_log_group" "apigw" {
+  name              = "/aws/apigateway/${local.name_prefix}"
+  retention_in_days = 30
+}
+
 resource "aws_apigatewayv2_route" "routes" {
   for_each  = local.apigw_routes
   api_id    = aws_apigatewayv2_api.starlogz.id
@@ -55,6 +60,22 @@ resource "aws_apigatewayv2_stage" "default" {
   auto_deploy = true
 
   depends_on = [aws_apigatewayv2_route.routes]
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.apigw.arn
+    format = jsonencode({
+      request_id             = "$context.requestId"
+      route_key              = "$context.routeKey"
+      http_method            = "$context.httpMethod"
+      status                 = "$context.status"
+      response_length        = "$context.responseLength"
+      response_latency_ms    = "$context.responseLatency"
+      integration_latency_ms = "$context.integrationLatency"
+      integration_status     = "$context.integrationStatus"
+      domain_name            = "$context.domainName"
+      protocol               = "$context.protocol"
+    })
+  }
 
   default_route_settings {
     throttling_burst_limit = 100
