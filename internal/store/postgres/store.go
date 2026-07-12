@@ -1071,33 +1071,28 @@ func (s *Store) ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, 
 }
 
 // SearchInsights runs a full-text search over live insights in a project.
-func (s *Store) SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("tags", strings.Join(tags, ", ")), slog.Int("limit", limit))
+func (s *Store) SearchInsights(ctx context.Context, projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, limit int) ([]*store.Insight, error) {
+	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", projectID.String()), slog.String("query", query), slog.String("query_mode", string(queryMode)), slog.String("tags", strings.Join(tags, ", ")), slog.String("tag_mode", string(tagMode)), slog.Int("limit", limit))
 
-	var rows pgx.Rows
-	var err error
-	if len(tags) > 0 {
-		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
-			FROM insights
-			WHERE project_id = $1
-			  AND deleted_at IS NULL
-			  AND search_vector @@ plainto_tsquery('english', $2)
-			  AND tags @> $4
-			ORDER BY ts_rank(search_vector, plainto_tsquery('english', $2)) DESC
-			LIMIT $3`,
-			projectID, query, limit, tags)
-	} else {
-		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
-			FROM insights
-			WHERE project_id = $1
-			  AND deleted_at IS NULL
-			  AND search_vector @@ plainto_tsquery('english', $2)
-			ORDER BY ts_rank(search_vector, plainto_tsquery('english', $2)) DESC
-			LIMIT $3`,
-			projectID, query, limit)
-	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+		FROM insights
+		WHERE project_id = $1
+		  AND deleted_at IS NULL
+		  AND search_vector @@ CASE
+			WHEN $3 = 'web' THEN websearch_to_tsquery('english', $2)
+			ELSE plainto_tsquery('english', $2)
+		  END
+		  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR CASE
+			WHEN $5 = 'any' THEN tags && $4
+			ELSE tags @> $4
+		  END)
+		ORDER BY ts_rank(search_vector, CASE
+			WHEN $3 = 'web' THEN websearch_to_tsquery('english', $2)
+			ELSE plainto_tsquery('english', $2)
+		END) DESC
+		LIMIT $6`,
+		projectID, query, queryMode, tags, tagMode, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search insights: %w", err)
 	}

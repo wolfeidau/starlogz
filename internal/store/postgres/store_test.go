@@ -262,21 +262,37 @@ func TestSearchInsights(t *testing.T) {
 	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "Redis is an in-memory store", Tags: []string{"cache"}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	results, err := st.SearchInsights(ctx, p.ID, "relational database", nil, 10)
+	results, err := st.SearchInsights(ctx, p.ID, "relational database", store.SearchQueryModeAll, nil, store.SearchTagModeAll, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Contains(t, results[0].Content, "PostgreSQL")
 
 	// Tag filter should narrow results.
-	tagged, err := st.SearchInsights(ctx, p.ID, "database", []string{"cache"}, 10)
+	tagged, err := st.SearchInsights(ctx, p.ID, "database", store.SearchQueryModeAll, []string{"cache"}, store.SearchTagModeAll, 10)
 	require.NoError(t, err)
 	require.Empty(t, tagged, "cache tag should exclude PostgreSQL result")
 
 	// Tag names should be searchable even when absent from content.
-	byTagName, err := st.SearchInsights(ctx, p.ID, "cache", nil, 10)
+	byTagName, err := st.SearchInsights(ctx, p.ID, "cache", store.SearchQueryModeAll, nil, store.SearchTagModeAll, 10)
 	require.NoError(t, err)
 	require.Len(t, byTagName, 1, "searching by tag name should find insights tagged with that word")
 	require.Contains(t, byTagName[0].Content, "Redis")
+
+	web, err := st.SearchInsights(ctx, p.ID, "relational OR redis", store.SearchQueryModeWeb, nil, store.SearchTagModeAll, 10)
+	require.NoError(t, err)
+	require.Len(t, web, 2)
+
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "PostgreSQL replication", Tags: []string{"db", "operations"}, CreatedBy: u.ID})
+	require.NoError(t, err)
+
+	allTags, err := st.SearchInsights(ctx, p.ID, "postgresql", store.SearchQueryModeAll, []string{"db", "operations"}, store.SearchTagModeAll, 10)
+	require.NoError(t, err)
+	require.Len(t, allTags, 1)
+	require.Contains(t, allTags[0].Content, "replication")
+
+	anyTags, err := st.SearchInsights(ctx, p.ID, "postgresql", store.SearchQueryModeAll, []string{"db", "operations"}, store.SearchTagModeAny, 10)
+	require.NoError(t, err)
+	require.Len(t, anyTags, 2)
 }
 
 func TestListInsights(t *testing.T) {

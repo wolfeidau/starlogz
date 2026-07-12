@@ -53,7 +53,7 @@ type Store interface {
 	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
-	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, tags []string, limit int) ([]*Insight, error)
+	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, queryMode SearchQueryMode, tags []string, tagMode SearchTagMode, limit int) ([]*Insight, error)
 	ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Insight, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
 	GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*ProjectDashboard, error)
@@ -139,6 +139,20 @@ type Insight struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+type SearchQueryMode string
+
+const (
+	SearchQueryModeAll SearchQueryMode = "all"
+	SearchQueryModeWeb SearchQueryMode = "web"
+)
+
+type SearchTagMode string
+
+const (
+	SearchTagModeAll SearchTagMode = "all"
+	SearchTagModeAny SearchTagMode = "any"
+)
 
 // WriteInsightParams holds the inputs for Store.WriteInsight.
 type WriteInsightParams struct {

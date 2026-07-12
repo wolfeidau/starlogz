@@ -509,6 +509,8 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	require.ElementsMatch(t, []string{"project", "query"}, schemaRequired(t, insightSearch))
 	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "project")["minLength"])
 	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "query")["minLength"])
+	require.ElementsMatch(t, []any{"all", "web"}, schemaProperty(t, insightSearch, "query_mode")["enum"])
+	require.ElementsMatch(t, []any{"all", "any"}, schemaProperty(t, insightSearch, "tag_mode")["enum"])
 	requireSchemaNumber(t, 0, schemaProperty(t, insightSearch, "limit")["minimum"])
 	requireSchemaNumber(t, 100, schemaProperty(t, insightSearch, "limit")["maximum"])
 
@@ -819,6 +821,63 @@ func TestInsightSearch_ReturnsMatchingInsights(t *testing.T) {
 	text := resultText(t, res)
 	require.Contains(t, text, "golang concurrency patterns")
 	require.NotContains(t, text, "python asyncio basics")
+}
+
+func TestInsightSearch_WebQueryAndTagModes(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	writes := []struct {
+		content string
+		tags    []string
+	}{
+		{content: "OAuth client registration", tags: []string{"auth", "api"}},
+		{content: "MCP server transport", tags: []string{"mcp", "api"}},
+		{content: "deprecated OAuth callback", tags: []string{"auth", "legacy"}},
+	}
+	for _, write := range writes {
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("search-modes", write.content, map[string]any{"tags": write.tags}))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	}
+
+	web := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project":    "search-modes",
+		"query":      "\"OAuth client\" OR MCP -deprecated",
+		"query_mode": "web",
+		"limit":      10,
+	})
+	require.False(t, web.IsError, "insight_search failed: %s", resultText(t, web))
+	webText := resultText(t, web)
+	require.Contains(t, webText, "OAuth client registration")
+	require.Contains(t, webText, "MCP server transport")
+	require.NotContains(t, webText, "deprecated OAuth callback")
+
+	allTags := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project":    "search-modes",
+		"query":      "OAuth OR MCP",
+		"tags":       []string{"auth", "api"},
+		"tag_mode":   "all",
+		"query_mode": "web",
+		"limit":      10,
+	})
+	require.False(t, allTags.IsError, "insight_search failed: %s", resultText(t, allTags))
+	require.Contains(t, resultText(t, allTags), "OAuth client registration")
+	require.NotContains(t, resultText(t, allTags), "MCP server transport")
+
+	anyTags := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project":    "search-modes",
+		"query":      "OAuth OR MCP",
+		"tags":       []string{"auth", "mcp"},
+		"tag_mode":   "any",
+		"query_mode": "web",
+		"limit":      10,
+	})
+	require.False(t, anyTags.IsError, "insight_search failed: %s", resultText(t, anyTags))
+	require.Contains(t, resultText(t, anyTags), "OAuth client registration")
+	require.Contains(t, resultText(t, anyTags), "MCP server transport")
 }
 
 func TestInsightListTags_ScopedToCallerOrg(t *testing.T) {
