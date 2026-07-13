@@ -1,0 +1,16 @@
+{
+  "name": "starlogz",
+  "description": "Claude Code plugins for Starlogz, persistent project memory over MCP.",
+  "owner": {
+    "name": "Mark Wolfe",
+    "url": "https://github.com/wolfeidau"
+  },
+  "plugins": [
+    {
+      "name": "starlogz-claude",
+      "source": "./plugins/starlogz-claude",
+      "description": "Build durable project memory with Starlogz and Claude Code.",
+      "version": "0.1.0"
+    }
+  ]
+}

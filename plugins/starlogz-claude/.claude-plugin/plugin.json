@@ -1,0 +1,13 @@
+{
+  "name": "starlogz-claude",
+  "version": "0.1.0",
+  "description": "Build durable project memory with Starlogz and Claude Code.",
+  "author": {
+    "name": "Mark Wolfe",
+    "url": "https://github.com/wolfeidau"
+  },
+  "homepage": "https://github.com/wolfeidau/starlogz#use-starlogz-with-claude-code",
+  "repository": "https://github.com/wolfeidau/starlogz",
+  "license": "Apache-2.0",
+  "keywords": ["claude-code", "mcp", "memory", "starlogz"]
+}
