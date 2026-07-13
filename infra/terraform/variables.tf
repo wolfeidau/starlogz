@@ -69,6 +69,12 @@ variable "lambda_web_adapter_layer_arn" {
   type        = string
 }
 
+variable "alarm_email_endpoints" {
+  description = "Email addresses subscribed to operational alarm notifications. Recipients must confirm their subscriptions."
+  type        = set(string)
+  default     = []
+}
+
 # Sensitive variables — set via terraform.tfvars (gitignored) or environment variables.
 
 variable "github_client_secret" {
