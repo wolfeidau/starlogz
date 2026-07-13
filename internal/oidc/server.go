@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
 
 // UserUpserter persists user identity on successful GitHub login.
@@ -64,6 +65,7 @@ type Config struct {
 	Revocation                   RevocationStore // required
 	RefreshTokenGracePeriod      *time.Duration  // optional; nil defaults to 30s, 0 disables grace retry
 	RetiredRefreshTokenRetention *time.Duration  // optional; nil defaults to 24h
+	Events                       *wideevent.Emitter
 }
 
 // Server is the OAuth2/OIDC authorization server for the MCP endpoint.
@@ -83,6 +85,7 @@ type Server struct {
 	refreshTokenGracePeriod      time.Duration
 	retiredRefreshTokenRetention time.Duration
 	logger                       *slog.Logger
+	events                       *wideevent.Emitter
 }
 
 // NewServer constructs an OIDC Server from config and a loaded private key.
@@ -138,6 +141,11 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		return nil, fmt.Errorf("failed to marshal JWKS: %w", err)
 	}
 
+	eventEmitter := cfg.Events
+	if eventEmitter == nil {
+		eventEmitter = wideevent.NewNoopEmitter()
+	}
+
 	return &Server{
 		baseURL:                      base,
 		privkey:                      privkey,
@@ -154,6 +162,7 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		refreshTokenGracePeriod:      refreshTokenGracePeriod,
 		retiredRefreshTokenRetention: retiredRefreshTokenRetention,
 		logger:                       slog.Default().With(slog.String("component", "oidc")),
+		events:                       eventEmitter,
 	}, nil
 }
 

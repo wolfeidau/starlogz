@@ -92,6 +92,8 @@ Do not add a CloudWatch dashboard in this change. A first-party Web UI service-s
 
 ## 4. EventBridge wide events
 
+The implemented event contract and operator guidance are maintained in [events.md](events.md).
+
 Create:
 
 - custom bus `starlogz-${env}`;

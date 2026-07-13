@@ -30,3 +30,16 @@ resource "aws_iam_role_policy" "lambda_s3" {
   role   = aws_iam_role.lambda.id
   policy = data.aws_iam_policy_document.lambda_s3.json
 }
+
+data "aws_iam_policy_document" "lambda_wide_events" {
+  statement {
+    actions   = ["events:PutEvents"]
+    resources = [aws_cloudwatch_event_bus.wide_events.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_wide_events" {
+  name   = "eventbridge-wide-events"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.lambda_wide_events.json
+}

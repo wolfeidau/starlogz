@@ -27,3 +27,13 @@ output "operations_sns_topic_arn" {
   description = "SNS topic receiving operational alarm state transitions."
   value       = aws_sns_topic.operations.arn
 }
+
+output "wide_event_bus_arn" {
+  description = "EventBridge bus receiving privacy-safe core-flow events."
+  value       = aws_cloudwatch_event_bus.wide_events.arn
+}
+
+output "wide_event_log_group_name" {
+  description = "CloudWatch Logs group receiving EventBridge wide events."
+  value       = aws_cloudwatch_log_group.wide_events.name
+}

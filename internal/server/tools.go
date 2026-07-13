@@ -15,62 +15,104 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
 
 type mcpServer struct {
 	server *mcp.Server
 	store  store.Store
+	events *wideevent.Emitter
 }
 
-func newMCPServer(st store.Store) *mcpServer {
+type toolEventMetadata struct {
+	resultCount int
+}
+
+func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
+	if eventEmitter == nil {
+		eventEmitter = wideevent.NewNoopEmitter()
+	}
 	ms := &mcpServer{
 		server: mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{}),
 		store:  st,
+		events: eventEmitter,
 	}
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Returns identity and token scopes. Call this first to verify access.",
-	}, ms.whoami)
+	}, trackTool(ms, wideevent.ToolWhoami, ms.whoami))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_ensure",
 		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; insight_write auto-creates projects.",
 		InputSchema: projectEnsureSchema,
-	}, ms.projectEnsure)
+	}, trackTool(ms, wideevent.ToolProjectEnsure, ms.projectEnsure))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_write",
 		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier. Requires category and source.",
 		InputSchema: insightWriteSchema,
-	}, ms.insightWrite)
+	}, trackTool(ms, wideevent.ToolInsightWrite, ms.insightWrite))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
 		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance.",
 		InputSchema: insightSearchSchema,
-	}, ms.insightSearch)
+	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list",
 		Description: "Lists all live insights in a project, newest first. Optionally filter by a single tag.",
 		InputSchema: insightListSchema,
-	}, ms.insightList)
+	}, trackTool(ms, wideevent.ToolInsightList, ms.insightList))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_delete",
 		Description: "Soft-deletes an insight by ID. The insight no longer appears in list or search results.",
 		InputSchema: insightDeleteSchema,
-	}, ms.insightDelete)
+	}, trackTool(ms, wideevent.ToolInsightDelete, ms.insightDelete))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_list",
 		Description: "Lists all projects in the caller's personal org.",
-	}, ms.projectList)
+	}, trackTool(ms, wideevent.ToolProjectList, ms.projectList))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list_tags",
 		Description: "Returns tags for a project ordered by usage frequency. Call before writing tags to avoid fragmentation.",
 		InputSchema: insightListTagsSchema,
-	}, ms.insightListTags)
+	}, trackTool(ms, wideevent.ToolInsightListTags, ms.insightListTags))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_update",
 		Description: "Updates the content and/or tags of an existing insight. Supply only the fields you want to change.",
 		InputSchema: insightUpdateSchema,
-	}, ms.insightUpdate)
+	}, trackTool(ms, wideevent.ToolInsightUpdate, ms.insightUpdate))
 	return ms
+}
+
+func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Context, *mcp.CallToolRequest, Input) (*mcp.CallToolResult, any, error)) func(context.Context, *mcp.CallToolRequest, Input) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, input Input) (*mcp.CallToolResult, any, error) {
+		started := time.Now()
+		result, output, err := handler(ctx, req, input)
+		outcome, reason := wideevent.OutcomeSuccess, wideevent.ReasonCompleted
+		attributes := map[string]string{wideevent.AttributeTool: tool}
+		if err != nil {
+			outcome, reason = wideevent.OutcomeFailure, wideevent.ReasonFailed
+		} else if metadata, ok := output.(toolEventMetadata); ok {
+			attributes[wideevent.AttributeResultCountBucket] = resultCountBucket(metadata.resultCount)
+			output = nil
+		}
+		ms.events.Completion(ctx, wideevent.MCPToolCallCompleted, outcome, reason, started, attributes)
+		return result, output, err
+	}
+}
+
+func resultCountBucket(count int) string {
+	switch {
+	case count == 0:
+		return wideevent.ResultCountZero
+	case count <= 10:
+		return wideevent.ResultCountOneToTen
+	case count <= 50:
+		return wideevent.ResultCountElevenTo50
+	case count <= 100:
+		return wideevent.ResultCount51To100
+	default:
+		return wideevent.ResultCount101To200
+	}
 }
 
 func (s *mcpServer) logger(ctx context.Context) *slog.Logger {
@@ -326,7 +368,8 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return nil, nil, fmt.Errorf("search insights: %w", err)
 	}
-	return jsonResult(map[string]any{"insights": toInsightResponses(insights)})
+	result, _, err := jsonResult(map[string]any{"insights": toInsightResponses(insights)})
+	return result, toolEventMetadata{resultCount: len(insights)}, err
 }
 
 func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, in insightListInput) (*mcp.CallToolResult, any, error) {
@@ -352,7 +395,8 @@ func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("list insights: %w", err)
 	}
-	return jsonResult(map[string]any{"insights": toInsightResponses(insights)})
+	result, _, err := jsonResult(map[string]any{"insights": toInsightResponses(insights)})
+	return result, toolEventMetadata{resultCount: len(insights)}, err
 }
 
 func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest, in insightDeleteInput) (*mcp.CallToolResult, any, error) {

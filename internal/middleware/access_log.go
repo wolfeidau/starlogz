@@ -52,10 +52,12 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	parser := useragent.NewParser()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestID := uuid.New().String()
 			reqLogger := logger.With(
-				slog.String("request_id", uuid.New().String()),
+				slog.String("request_id", requestID),
 			)
-			r = r.WithContext(ctxlog.WithLogger(r.Context(), reqLogger))
+			ctx := ctxlog.WithRequestID(r.Context(), requestID)
+			r = r.WithContext(ctxlog.WithLogger(ctx, reqLogger))
 
 			start := time.Now()
 			rw := &responseWriter{ResponseWriter: w}

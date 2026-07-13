@@ -140,10 +140,16 @@ All configuration is via environment variables.
 | `RETIRED_REFRESH_TOKEN_RETENTION` | `24h` | No | How long hashed retired refresh tokens are retained for refresh diagnostics. Must be at least the grace period. |
 | `UI_SESSION_IDLE_TTL` | `168h` | No | How long an inactive dashboard session remains valid. |
 | `UI_SESSION_TTL` | `720h` | No | Maximum lifetime of a dashboard session. Must be at least the idle lifetime. |
+| `EVENT_BUS_NAME` | (none) | No | EventBridge bus for privacy-safe core-flow events. Omit to use the no-op publisher. |
+| `ENVIRONMENT` | `local` | No | Deployment environment included in wide events. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | No | OTLP collector endpoint. Omit to disable telemetry entirely. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | (none) | No | e.g. `x-honeycomb-team=<key>` |
 | `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
 | `SENTRY_ENVIRONMENT` | (none) | No | Sentry environment tag, e.g. `production`, `staging`. |
+
+## Observability events
+
+When `EVENT_BUS_NAME` is configured, the server publishes one bounded, privacy-safe completion event for each core OAuth, UI session, and MCP tool flow. The event names, attributes, failure semantics, and CloudWatch query examples are documented in [spec/events.md](spec/events.md).
 
 ## Deploy to AWS
 
