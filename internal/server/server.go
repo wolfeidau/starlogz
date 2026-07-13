@@ -17,6 +17,7 @@ import (
 	"github.com/wolfeidau/starlogz/internal/middleware"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -38,6 +39,7 @@ type Config struct {
 	UISessionIdleTTL             time.Duration
 	UISessionTTL                 time.Duration
 	SentryHandler                func(http.Handler) http.Handler
+	Events                       *wideevent.Emitter
 }
 
 // Server is the configured HTTP server ready to serve requests.
@@ -48,6 +50,7 @@ type Server struct {
 	shutdownTimeout  time.Duration
 	uiSessionIdleTTL time.Duration
 	uiSessionTTL     time.Duration
+	events           *wideevent.Emitter
 }
 
 // New builds the mux, wires all handlers, and returns a Server.
@@ -76,6 +79,10 @@ func New(cfg Config) (*Server, error) {
 	if revocation == nil {
 		revocation = cfg.Store
 	}
+	eventEmitter := cfg.Events
+	if eventEmitter == nil {
+		eventEmitter = wideevent.NewNoopEmitter()
+	}
 	oidcServer, err := oidc.NewServer(oidc.Config{
 		BaseURL:                      cfg.BaseURL,
 		GitHubClientID:               cfg.GitHubClientID,
@@ -87,6 +94,7 @@ func New(cfg Config) (*Server, error) {
 		Revocation:                   revocation,
 		RefreshTokenGracePeriod:      cfg.RefreshTokenGracePeriod,
 		RetiredRefreshTokenRetention: cfg.RetiredRefreshTokenRetention,
+		Events:                       eventEmitter,
 	}, cfg.PrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oidc server: %w", err)
@@ -95,9 +103,10 @@ func New(cfg Config) (*Server, error) {
 	srv := &Server{
 		logger: cfg.Logger, store: cfg.Store, shutdownTimeout: shutdownTimeout,
 		uiSessionIdleTTL: uiSessionIdleTTL, uiSessionTTL: uiSessionTTL,
+		events: eventEmitter,
 	}
 
-	mcpSrv := newMCPServer(cfg.Store)
+	mcpSrv := newMCPServer(cfg.Store, eventEmitter)
 
 	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
 		Scopes:              []string{"insights:read"},

@@ -126,5 +126,5 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		sentryHandler = telemetry.NewSentryHTTPHandler()
 	}
 
-	return cmd.Run(&commands.Globals{Logger: child, SentryHandler: sentryHandler})
+	return cmd.Run(&commands.Globals{Logger: child, SentryHandler: sentryHandler, Version: version})
 }

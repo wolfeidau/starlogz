@@ -8,10 +8,13 @@ import (
 	"os"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/store/postgres"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
 
 type HTTPCmd struct {
@@ -27,6 +30,8 @@ type HTTPCmd struct {
 	RetiredRefreshTokenRetention time.Duration `help:"How long hashed retired refresh tokens are retained for refresh diagnostics." default:"24h" env:"RETIRED_REFRESH_TOKEN_RETENTION"`
 	UISessionIdleTTL             time.Duration `help:"How long an inactive web UI session remains valid." default:"168h" env:"UI_SESSION_IDLE_TTL"`
 	UISessionTTL                 time.Duration `help:"Maximum lifetime of a web UI session." default:"720h" env:"UI_SESSION_TTL"`
+	EventBusName                 string        `help:"EventBridge bus for privacy-safe wide events; empty disables publishing." env:"EVENT_BUS_NAME"`
+	Environment                  string        `help:"Deployment environment included in wide events." default:"local" env:"ENVIRONMENT"`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -58,6 +63,23 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	var eventPublisher wideevent.EventPublisher = wideevent.NoopPublisher{}
+	if c.EventBusName != "" {
+		awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to load AWS config for EventBridge: %w", err)
+		}
+		eventPublisher = wideevent.NewEventBridgePublisher(eventbridge.NewFromConfig(awsCfg), c.EventBusName)
+	}
+	serviceVersion := globals.Version
+	if serviceVersion == "" {
+		serviceVersion = "devel"
+	}
+	eventEmitter, err := wideevent.NewEmitter(eventPublisher, c.Environment, serviceVersion, globals.Logger)
+	if err != nil {
+		return fmt.Errorf("failed to configure wide events: %w", err)
+	}
+
 	srv, err := server.New(server.Config{
 		BaseURL:                      c.BaseServerURL,
 		GitHubClientID:               c.GitHubClientID,
@@ -71,6 +93,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		UISessionIdleTTL:             c.UISessionIdleTTL,
 		UISessionTTL:                 c.UISessionTTL,
 		SentryHandler:                globals.SentryHandler,
+		Events:                       eventEmitter,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)

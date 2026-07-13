@@ -6,6 +6,7 @@ import (
 )
 
 type loggerKey struct{}
+type requestIDKey struct{}
 
 // WithLogger returns a copy of ctx carrying l.
 func WithLogger(ctx context.Context, l *slog.Logger) context.Context {
@@ -18,4 +19,13 @@ func LoggerFrom(ctx context.Context) *slog.Logger {
 		return l
 	}
 	return slog.Default()
+}
+
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, requestID)
+}
+
+func RequestIDFrom(ctx context.Context) string {
+	requestID, _ := ctx.Value(requestIDKey{}).(string)
+	return requestID
 }

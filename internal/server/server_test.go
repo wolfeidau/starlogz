@@ -19,7 +19,17 @@ import (
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
+
+type captureEventPublisher struct {
+	events []wideevent.Event
+}
+
+func (p *captureEventPublisher) Publish(_ context.Context, event wideevent.Event) error {
+	p.events = append(p.events, event)
+	return nil
+}
 
 // memAuthState is a minimal in-memory AuthStateStore for tests.
 type memAuthState struct {
@@ -125,6 +135,103 @@ func TestNewRejectsUISessionIdleTTLAboveAbsoluteTTL(t *testing.T) {
 		UISessionIdleTTL: 2 * time.Hour, UISessionTTL: time.Hour,
 	})
 	require.EqualError(t, err, "UI session idle TTL must not exceed absolute TTL")
+}
+
+func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
+	publisher := &captureEventPublisher{}
+	emitter, err := wideevent.NewEmitter(publisher, "test", "devel", slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	ts, _ := testFixtureWithConfig(t, func(cfg *server.Config) {
+		cfg.Events = emitter
+	})
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+
+	tests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodGet, path: "/oauth2/authorize?response_type=invalid"},
+		{method: http.MethodGet, path: "/auth/github/callback"},
+		{method: http.MethodPost, path: "/oauth2/token", body: "grant_type=authorization_code"},
+		{method: http.MethodPost, path: "/oauth2/token", body: "grant_type=refresh_token"},
+		{method: http.MethodGet, path: "/login"},
+		{method: http.MethodGet, path: "/ui/auth/callback"},
+		{method: http.MethodPost, path: "/logout"},
+	}
+	for _, tc := range tests {
+		req, reqErr := http.NewRequest(tc.method, ts.URL+tc.path, strings.NewReader(tc.body))
+		require.NoError(t, reqErr)
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		resp, reqErr := client.Do(req)
+		require.NoError(t, reqErr)
+		require.NoError(t, resp.Body.Close())
+	}
+
+	require.Len(t, publisher.events, 7)
+	require.Equal(t, []wideevent.Name{
+		wideevent.OAuthAuthorizationCompleted,
+		wideevent.OAuthGitHubCallbackCompleted,
+		wideevent.OAuthTokenExchangeCompleted,
+		wideevent.OAuthRefreshCompleted,
+		wideevent.UILoginCompleted,
+		wideevent.UISessionCreated,
+		wideevent.UISessionRevoked,
+	}, eventNames(publisher.events))
+	for _, event := range publisher.events {
+		require.NoError(t, event.Validate())
+		require.NotEmpty(t, event.RequestID)
+	}
+	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[6].Outcome)
+}
+
+func TestUnclassifiedTokenRequestsDoNotEmitWideEvents(t *testing.T) {
+	publisher := &captureEventPublisher{}
+	emitter, err := wideevent.NewEmitter(publisher, "test", "devel", slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	ts, _ := testFixtureWithConfig(t, func(cfg *server.Config) {
+		cfg.Events = emitter
+	})
+
+	tests := []struct {
+		name       string
+		method     string
+		body       string
+		wantStatus int
+	}{
+		{name: "wrong method", method: http.MethodGet, wantStatus: http.StatusMethodNotAllowed},
+		{name: "unsupported grant", method: http.MethodPost, body: "grant_type=client_credentials", wantStatus: http.StatusBadRequest},
+		{name: "unparseable form", method: http.MethodPost, body: "%", wantStatus: http.StatusBadRequest},
+		{name: "oversized form", method: http.MethodPost, body: strings.Repeat("x", (1<<20)+1), wantStatus: http.StatusBadRequest},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req, reqErr := http.NewRequest(test.method, ts.URL+"/oauth2/token", strings.NewReader(test.body))
+			require.NoError(t, reqErr)
+			if test.method == http.MethodPost {
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			}
+			resp, reqErr := http.DefaultClient.Do(req)
+			require.NoError(t, reqErr)
+			defer func() { require.NoError(t, resp.Body.Close()) }()
+			require.Equal(t, test.wantStatus, resp.StatusCode)
+		})
+	}
+
+	require.Empty(t, publisher.events)
+}
+
+func eventNames(events []wideevent.Event) []wideevent.Name {
+	names := make([]wideevent.Name, len(events))
+	for i, event := range events {
+		names[i] = event.EventName
+	}
+	return names
 }
 
 // --- Health ---

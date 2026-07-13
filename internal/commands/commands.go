@@ -8,4 +8,5 @@ import (
 type Globals struct {
 	Logger        *slog.Logger
 	SentryHandler func(http.Handler) http.Handler
+	Version       string
 }

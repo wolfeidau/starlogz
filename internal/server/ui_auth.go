@@ -19,6 +19,7 @@ import (
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
 
 const (
@@ -34,7 +35,7 @@ const (
 )
 
 func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -78,11 +79,12 @@ func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
 			"code_challenge_method": {"S256"},
 		}
 		http.Redirect(w, r, "/oauth2/authorize?"+q.Encode(), http.StatusFound)
-	}
+	})
+	return s.events.HTTPHandler(wideevent.UILoginCompleted, handler).ServeHTTP
 }
 
 func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -146,11 +148,12 @@ func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http
 		clearCookie(w, r, uiStateCookie)
 		clearCookie(w, r, uiVerifierCookie)
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
-	}
+	})
+	return s.events.HTTPHandler(wideevent.UISessionCreated, handler).ServeHTTP
 }
 
 func (s *Server) uiLogoutHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -162,7 +165,8 @@ func (s *Server) uiLogoutHandler() http.HandlerFunc {
 		}
 		clearCookie(w, r, uiSessionCookie)
 		http.Redirect(w, r, "/", http.StatusFound)
-	}
+	})
+	return s.events.HTTPHandler(wideevent.UISessionRevoked, handler).ServeHTTP
 }
 
 func (s *Server) uiAuthMiddleware(next http.Handler) http.Handler {

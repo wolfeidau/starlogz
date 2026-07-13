@@ -127,6 +127,8 @@ Key env vars:
 | `RETIRED_REFRESH_TOKEN_RETENTION` | `24h` | How long hashed retired refresh tokens are retained for refresh diagnostics |
 | `UI_SESSION_IDLE_TTL` | `168h` | How long an inactive dashboard session remains valid |
 | `UI_SESSION_TTL` | `720h` | Maximum lifetime of a dashboard session |
+| `EVENT_BUS_NAME` | _(unset = disabled)_ | EventBridge bus for privacy-safe core-flow events |
+| `ENVIRONMENT` | `local` | Deployment environment included in wide events |
 | `SENTRY_DSN` | _(unset = disabled)_ | Sentry DSN; enables error reporting and structured log capture |
 | `SENTRY_ENVIRONMENT` | — | Sentry environment tag (e.g. `production`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = disabled)_ | OTLP collector endpoint |

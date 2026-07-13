@@ -16,6 +16,8 @@ resource "aws_lambda_function" "starlogz" {
       PORT                 = "8088"
       LOG_LEVEL            = "INFO"
       READINESS_CHECK_PATH = "/health"
+      EVENT_BUS_NAME       = aws_cloudwatch_event_bus.wide_events.name
+      ENVIRONMENT          = var.env
       SERVER_URL           = local.server_url
       GITHUB_CLIENT_ID     = var.github_client_id
       GITHUB_CLIENT_SECRET = var.github_client_secret

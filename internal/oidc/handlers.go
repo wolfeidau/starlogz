@@ -21,6 +21,7 @@ import (
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/telemetry"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 	"golang.org/x/oauth2"
 )
 
@@ -190,6 +191,7 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		// Requests that cannot be assigned to a supported grant remain in access logs; wide events never guess a flow name.
 		if err := r.ParseForm(); err != nil {
 			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: failed to parse form")
 			writeOAuthError(w, "invalid_request", "failed to parse request body", http.StatusBadRequest)
@@ -198,9 +200,13 @@ func (s *Server) TokenHandler() http.Handler {
 
 		switch r.PostForm.Get("grant_type") {
 		case oauthGrantAuthorizationCode:
-			s.handleAuthCodeGrant(w, r, r.PostForm)
+			s.events.HTTPHandler(wideevent.OAuthTokenExchangeCompleted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.handleAuthCodeGrant(w, r, r.PostForm)
+			})).ServeHTTP(w, r)
 		case oauthGrantRefreshToken:
-			s.handleRefreshGrant(w, r, r.PostForm)
+			s.events.HTTPHandler(wideevent.OAuthRefreshCompleted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.handleRefreshGrant(w, r, r.PostForm)
+			})).ServeHTTP(w, r)
 		default:
 			ctxlog.LoggerFrom(r.Context()).WarnContext(r.Context(), "token request: unsupported grant_type",
 				slog.String("grant_type", r.PostForm.Get("grant_type")),
@@ -706,7 +712,7 @@ func (s *Server) DCRHandler() http.Handler {
 }
 
 func (s *Server) GitHubCallbackHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -798,10 +804,11 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		// redirect_uri was validated against the registered client in AuthorizeHandler before being stored.
 		http.Redirect(w, r, redirectTo.String(), http.StatusFound) //nolint:gosec
 	})
+	return s.events.HTTPHandler(wideevent.OAuthGitHubCallbackCompleted, handler)
 }
 
 func (s *Server) AuthorizeHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -890,4 +897,5 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		authURL := s.github.AuthCodeURL(githubState)
 		http.Redirect(w, r, authURL, http.StatusFound)
 	})
+	return s.events.HTTPHandler(wideevent.OAuthAuthorizationCompleted, handler)
 }
