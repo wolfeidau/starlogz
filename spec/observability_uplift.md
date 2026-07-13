@@ -74,7 +74,7 @@ Do not include query strings, headers, authorization identity, raw IP addresses,
 
 ## 3. SNS notifications and basic alarms
 
-Create an encrypted `starlogz-${env}-operations` SNS topic. Add an `alarm_email_endpoints` Terraform variable and create an email subscription for each address. AWS requires recipients to confirm subscriptions.
+Create an unencrypted `starlogz-${env}-operations` SNS topic. Alarm notifications contain only bounded operational metadata and are delivered to email, so the initial implementation avoids a customer-managed KMS key. Revisit SNS encryption if notification content becomes sensitive or delivery expands beyond email. Add an `alarm_email_endpoints` Terraform variable and create an email subscription for each address. AWS requires recipients to confirm subscriptions.
 
 Initial alarms:
 
@@ -88,7 +88,7 @@ Initial alarms:
 
 Missing data does not breach. Send both `ALARM` and `OK` transitions to SNS. Do not alert on aggregate 4xx initially because authentication failures and internet scanning would create noise.
 
-Add a small CloudWatch dashboard for the same metrics. Database readiness and OAuth failure alarms are deferred until those signals are reliable.
+Do not add a CloudWatch dashboard in this change. A first-party Web UI service-status feature is deferred to separate design and implementation work. Database readiness and OAuth failure alarms are also deferred until those signals are reliable.
 
 ## 4. EventBridge wide events
 
@@ -165,6 +165,8 @@ After deployment:
 - a long-term event archive;
 - OpenTelemetry expansion;
 - synthetic health checks;
+- a CloudWatch dashboard;
+- a first-party Web UI service-status feature;
 - product analytics dashboards;
 - PagerDuty or Slack integration;
 - database performance instrumentation.

@@ -22,3 +22,8 @@ output "apigw_invoke_url" {
   description = "Raw API Gateway invoke URL (before custom domain). Useful for debugging."
   value       = aws_apigatewayv2_stage.default.invoke_url
 }
+
+output "operations_sns_topic_arn" {
+  description = "SNS topic receiving operational alarm state transitions."
+  value       = aws_sns_topic.operations.arn
+}
