@@ -977,6 +977,7 @@ func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*
 
 // GetInsight returns one live insight and its immediate project-local relationships.
 func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*store.InsightDetail, error) {
+	// Counts and bounded rows must come from one snapshot under concurrent writes.
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, fmt.Errorf("begin get insight tx: %w", err)
@@ -1006,7 +1007,7 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM insight_links WHERE source_insight_id = $1`, insight.ID).Scan(&detail.LinkCount); err != nil {
 		return nil, fmt.Errorf("count insight links: %w", err)
 	}
-	rows, err := tx.Query(ctx, `
+	linkRows, err := tx.Query(ctx, `
 		SELECT links.target_key, COALESCE(target.id::text, ''), COALESCE(target.category, ''), target.updated_at
 		FROM insight_links links
 		LEFT JOIN insights target
@@ -1019,18 +1020,17 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 	if err != nil {
 		return nil, fmt.Errorf("query insight links: %w", err)
 	}
-	for rows.Next() {
-		var link store.InsightLink
+	defer linkRows.Close()
+	for linkRows.Next() {
+		var link store.InsightLinkReference
 		var id string
 		var updatedAt *time.Time
-		if err := rows.Scan(&link.TargetKey, &id, &link.Category, &updatedAt); err != nil {
-			rows.Close()
+		if err := linkRows.Scan(&link.TargetKey, &id, &link.Category, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan insight link: %w", err)
 		}
 		if id != "" {
 			link.ID, err = uuid.Parse(id)
 			if err != nil {
-				rows.Close()
 				return nil, fmt.Errorf("parse insight link ID: %w", err)
 			}
 			link.Resolved = true
@@ -1038,13 +1038,12 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 		}
 		detail.Links = append(detail.Links, link)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+	if err := linkRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate insight links: %w", err)
 	}
-	rows.Close()
 	detail.LinksTruncated = detail.LinkCount > len(detail.Links)
 
+	// Keyless insights cannot be link targets, so they cannot have backlinks.
 	if insight.Key != "" {
 		if err := tx.QueryRow(ctx, `
 			SELECT count(*)
@@ -1055,7 +1054,7 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 			  AND source.deleted_at IS NULL`, insight.Key, p.ProjectID).Scan(&detail.BacklinkCount); err != nil {
 			return nil, fmt.Errorf("count insight backlinks: %w", err)
 		}
-		rows, err = tx.Query(ctx, `
+		backlinkRows, err := tx.Query(ctx, `
 			SELECT source.id, COALESCE(source.key, ''), source.category, source.updated_at
 			FROM insight_links links
 			JOIN insights source ON source.id = links.source_insight_id
@@ -1067,19 +1066,17 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 		if err != nil {
 			return nil, fmt.Errorf("query insight backlinks: %w", err)
 		}
-		for rows.Next() {
+		defer backlinkRows.Close()
+		for backlinkRows.Next() {
 			var backlink store.InsightBacklink
-			if err := rows.Scan(&backlink.ID, &backlink.Key, &backlink.Category, &backlink.UpdatedAt); err != nil {
-				rows.Close()
+			if err := backlinkRows.Scan(&backlink.ID, &backlink.Key, &backlink.Category, &backlink.UpdatedAt); err != nil {
 				return nil, fmt.Errorf("scan insight backlink: %w", err)
 			}
 			detail.Backlinks = append(detail.Backlinks, backlink)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
+		if err := backlinkRows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate insight backlinks: %w", err)
 		}
-		rows.Close()
 		detail.BacklinksTruncated = detail.BacklinkCount > len(detail.Backlinks)
 	}
 

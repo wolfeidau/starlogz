@@ -154,7 +154,7 @@ type GetInsightParams struct {
 	RelationLimit int
 }
 
-type InsightLink struct {
+type InsightLinkReference struct {
 	TargetKey string
 	Resolved  bool
 	ID        uuid.UUID
@@ -171,7 +171,7 @@ type InsightBacklink struct {
 
 type InsightDetail struct {
 	Insight            *Insight
-	Links              []InsightLink
+	Links              []InsightLinkReference
 	Backlinks          []InsightBacklink
 	LinkCount          int
 	BacklinkCount      int

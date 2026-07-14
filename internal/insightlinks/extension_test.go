@@ -72,7 +72,7 @@ func TestRender(t *testing.T) {
 	html, err := insightlinks.Render(content, "my project")
 	require.NoError(t, err)
 	require.Contains(t, html, "<h1>Title</h1>")
-	require.Contains(t, html, `href="?project=my+project&amp;insight_key=a%26b+c"`)
+	require.Contains(t, html, `href="?project=my%20project&amp;insight_key=a%26b%20c"`)
 	require.Contains(t, html, `class="insight-link"`)
 	require.Contains(t, html, `data-starlogz-action="open-insight"`)
 	require.Contains(t, html, `data-insight-key="a&amp;b c"`)

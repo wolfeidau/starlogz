@@ -399,7 +399,7 @@ func TestGetInsight_Relationships(t *testing.T) {
 	require.Equal(t, source.ID, detail.Insight.ID)
 	require.Equal(t, 4, detail.LinkCount)
 	require.True(t, detail.LinksTruncated)
-	require.Equal(t, []store.InsightLink{
+	require.Equal(t, []store.InsightLinkReference{
 		{TargetKey: "alpha", Resolved: true, ID: alpha.ID, Category: "fact", UpdatedAt: alpha.UpdatedAt},
 		{TargetKey: "beta", Resolved: true, ID: beta.ID, Category: "decision", UpdatedAt: beta.UpdatedAt},
 	}, detail.Links)
