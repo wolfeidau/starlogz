@@ -42,6 +42,17 @@ Never store secrets, credentials, access tokens, private keys, raw logs, specula
 
 Use a stable `key` for a single authoritative current value. Omit `key` for decisions, discoveries, incidents, and other history that should remain append-only. Correct stale insights with `insight_update`, or supersede them with a keyed write when the current authoritative value has changed.
 
+## Link related insights
+
+When writing insight content:
+
+- Add `[[insight:<key>]]` or `[[insight:<key>|<label>]]` only when the relationship materially improves future recall.
+- Link only to durable, keyed insights in the same project, preferring decisions, preferences, facts, and procedures.
+- Avoid linking insights merely because they share a tag or topic.
+- Use Markdown for readability, not as a substitute for categories, sources, tags, or other structured fields.
+- Treat unresolved-link warnings as review feedback, not write failures; keep useful content and fix the target key when appropriate.
+- Keep pull requests, commits, builds, deployment URLs, and other external evidence as ordinary content.
+
 Use the required `category` and `source` fields accurately:
 
 - `source: user` for explicit user preferences and decisions;
