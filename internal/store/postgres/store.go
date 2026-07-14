@@ -1011,6 +1011,9 @@ func syncInsightContentTx(ctx context.Context, db dbtx, insight *store.Insight) 
 	if err := syncInsightLinksTx(ctx, db, insight.ID, stored); err != nil {
 		return nil, err
 	}
+	if len(stored) == 0 {
+		return insight, nil
+	}
 	unresolved, err := unresolvedInsightLinksTx(ctx, db, insight.ID, insight.ProjectID)
 	if err != nil {
 		return nil, err

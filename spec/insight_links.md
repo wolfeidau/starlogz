@@ -2,6 +2,18 @@
 
 Status: proposed
 
+## Implementation status
+
+The initial backend slice implements the Goldmark insight-link AST extension,
+migration 17, atomic relationship synchronization for content mutations, and
+write warnings for unresolved and self-links.
+
+The following surfaces remain pending: `insight_get` relationship reads and
+backlinks, the Connect `GetInsight` RPC and `rendered_html` field, HTML
+sanitization, and dashboard detail/deep-link navigation. Until those land,
+links are stored structurally and reported during writes but cannot yet be
+traversed through MCP, Connect, or the dashboard.
+
 ## Summary
 
 Starlogz will support explicit, project-local links between insights using a

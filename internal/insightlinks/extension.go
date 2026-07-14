@@ -81,7 +81,7 @@ func (insightLinkParser) Parse(_ ast.Node, block text.Reader, pc parser.Context)
 	target, label, _ := bytes.Cut(body, []byte{'|'})
 	target = trimHorizontalSpace(target)
 	label = trimHorizontalSpace(label)
-	if len(target) == 0 || bytes.ContainsAny(target, "|]\r\n") || bytes.ContainsAny(label, "]\r\n") {
+	if len(target) == 0 || bytes.ContainsAny(target, "\r\n") || bytes.ContainsAny(label, "\r\n") {
 		length := len(prefix) + closing + 2
 		block.Advance(length)
 		return ast.NewTextSegment(segment.WithStop(segment.Start + length))

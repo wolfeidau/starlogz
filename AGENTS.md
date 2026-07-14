@@ -17,7 +17,7 @@ internal/server/                  HTTP mux, MCP tool handlers, health endpoint
 internal/server/public/           generated dashboard assets embedded in the server binary
 internal/store/                   store interface + types (Insight, WriteInsightParams, …)
 internal/store/postgres/          PostgreSQL implementation + migration runner
-internal/store/postgres/migrations/  embedded SQL migration files (1–16)
+internal/store/postgres/migrations/  embedded SQL migration files (1–17)
 internal/telemetry/               OTel init (traces + metrics via OTLP gRPC)
 spec/                             design specs (auth.md, persistence.md, refresh_tokens.md)
 ui/                               React dashboard source and generated Connect clients
@@ -53,10 +53,10 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `whoami`           | any           | Returns user ID and token scopes |
 | `project_ensure`   | `insights:read`  | Creates a project if missing; returns it either way |
 | `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
-| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. |
+| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. Returns link warnings as an additive array. |
 | `insight_search`   | `insights:read`  | Full-text search over live insights. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`. |
 | `insight_list`     | `insights:read`  | Lists live insights, newest first. Optional tag filter. |
-| `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight |
+| `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Content changes return link warnings; tag-only updates omit them. |
 | `insight_delete`   | `insights:write` | Soft-deletes an insight |
 | `insight_list_tags`| `insights:read`  | Returns tags ordered by usage frequency |
 
@@ -73,6 +73,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `github.com/jackc/pgx/v5` | PostgreSQL driver (pgxpool) |
 | `github.com/lmittmann/tint` | Coloured slog handler for interactive terminals |
 | `github.com/testcontainers/testcontainers-go` | Real Postgres containers for integration tests |
+| `github.com/yuin/goldmark` | CommonMark parsing and insight-link AST extension |
 | `go.opentelemetry.io/otel` | Traces and metrics via OTLP gRPC |
 
 ---
