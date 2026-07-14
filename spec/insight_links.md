@@ -4,15 +4,15 @@ Status: proposed
 
 ## Implementation status
 
-The initial backend slice implements the Goldmark insight-link AST extension,
-migration 17, atomic relationship synchronization for content mutations, and
-write warnings for unresolved and self-links.
+The backend implements the Goldmark insight-link AST extension, migration 17,
+atomic relationship synchronization for content mutations, write warnings,
+bounded `insight_get` relationship reads and backlinks, the Connect
+`GetInsight` RPC, and sanitized server-rendered `rendered_html` fragments.
 
-The following surfaces remain pending: `insight_get` relationship reads and
-backlinks, the Connect `GetInsight` RPC and `rendered_html` field, HTML
-sanitization, and dashboard detail/deep-link navigation. Until those land,
-links are stored structurally and reported during writes but cannot yet be
-traversed through MCP, Connect, or the dashboard.
+Dashboard consumption of `rendered_html`, detail/deep-link navigation, and the
+delegated action bridge remain pending. Until those land, links can be traversed
+through MCP and Connect but the first-party dashboard does not expose
+relationship navigation.
 
 ## Summary
 

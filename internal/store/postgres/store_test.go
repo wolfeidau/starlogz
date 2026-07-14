@@ -356,6 +356,87 @@ func TestInsightLinks_KeylessSourceAndProjectIsolation(t *testing.T) {
 	require.Equal(t, map[string]int{"INSERT": 1}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
 }
 
+func TestGetInsight_Relationships(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 29)
+	base := time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC)
+
+	root, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "root", Content: "root", CreatedBy: u.ID,
+		CreatedAt: base, UpdatedAt: base,
+	})
+	require.NoError(t, err)
+	alpha, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "alpha", Content: "alpha", Category: "fact", CreatedBy: u.ID,
+		CreatedAt: base, UpdatedAt: base,
+	})
+	require.NoError(t, err)
+	beta, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "beta", Content: "beta", Category: "decision", CreatedBy: u.ID,
+		CreatedAt: base, UpdatedAt: base,
+	})
+	require.NoError(t, err)
+
+	source, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "source", Content: "[[insight:missing]] [[insight:beta]] [[insight:alpha]] [[insight:root]]", CreatedBy: u.ID,
+		CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute),
+	})
+	require.NoError(t, err)
+	keyless, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: "[[insight:root]]", CreatedBy: u.ID,
+		CreatedAt: base.Add(2 * time.Minute), UpdatedAt: base.Add(2 * time.Minute),
+	})
+	require.NoError(t, err)
+	newest, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "newest", Content: "[[insight:root]]", CreatedBy: u.ID,
+		CreatedAt: base.Add(3 * time.Minute), UpdatedAt: base.Add(3 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	detail, err := st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, Key: "source", RelationLimit: 2})
+	require.NoError(t, err)
+	require.Equal(t, source.ID, detail.Insight.ID)
+	require.Equal(t, 4, detail.LinkCount)
+	require.True(t, detail.LinksTruncated)
+	require.Equal(t, []store.InsightLinkReference{
+		{TargetKey: "alpha", Resolved: true, ID: alpha.ID, Category: "fact", UpdatedAt: alpha.UpdatedAt},
+		{TargetKey: "beta", Resolved: true, ID: beta.ID, Category: "decision", UpdatedAt: beta.UpdatedAt},
+	}, detail.Links)
+	require.Zero(t, detail.BacklinkCount)
+	require.Empty(t, detail.Backlinks)
+
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, InsightID: source.ID, RelationLimit: 10})
+	require.NoError(t, err)
+	require.Equal(t, []string{"alpha", "beta", "missing", "root"}, []string{
+		detail.Links[0].TargetKey, detail.Links[1].TargetKey, detail.Links[2].TargetKey, detail.Links[3].TargetKey,
+	})
+	require.False(t, detail.Links[2].Resolved)
+	require.Equal(t, uuid.Nil, detail.Links[2].ID)
+
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, Key: "root", RelationLimit: 2})
+	require.NoError(t, err)
+	require.Equal(t, root.ID, detail.Insight.ID)
+	require.Equal(t, 3, detail.BacklinkCount)
+	require.True(t, detail.BacklinksTruncated)
+	require.Equal(t, []uuid.UUID{newest.ID, keyless.ID}, []uuid.UUID{detail.Backlinks[0].ID, detail.Backlinks[1].ID})
+	require.Equal(t, "", detail.Backlinks[1].Key)
+
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, alpha.ID))
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, Key: "source", RelationLimit: 10})
+	require.NoError(t, err)
+	require.False(t, detail.Links[0].Resolved)
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Key: "alpha", Content: "recreated", CreatedBy: u.ID})
+	require.NoError(t, err)
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, Key: "source", RelationLimit: 10})
+	require.NoError(t, err)
+	require.True(t, detail.Links[0].Resolved)
+
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, root.ID))
+	_, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, InsightID: root.ID, RelationLimit: 10})
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
 func TestImportProjects_SynchronizesInsightLinks(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()

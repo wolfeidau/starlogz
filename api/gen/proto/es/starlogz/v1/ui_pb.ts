@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file starlogz/v1/ui.proto.
  */
 export const file_starlogz_v1_ui: GenFile = /*@__PURE__*/
-  fileDesc("ChRzdGFybG9nei92MS91aS5wcm90bxILc3RhcmxvZ3oudjEiEwoRR2V0U2Vzc2lvblJlcXVlc3QiiAEKEkdldFNlc3Npb25SZXNwb25zZRIPCgd1c2VyX2lkGAEgASgJEg0KBWxvZ2luGAIgASgJEg0KBWVtYWlsGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgFIAEoCRISCgphdmF0YXJfdXJsGAYgASgJEhMKC3Byb2ZpbGVfdXJsGAcgASgJSgQIBBAFIhUKE0xpc3RQcm9qZWN0c1JlcXVlc3QiYQoHUHJvamVjdBIKCgJpZBgBIAEoCRIMCgRzbHVnGAIgASgJEgwKBG5hbWUYAyABKAkSLgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiPgoUTGlzdFByb2plY3RzUmVzcG9uc2USJgoIcHJvamVjdHMYASADKAsyFC5zdGFybG9nei52MS5Qcm9qZWN0Ii0KGkdldFByb2plY3REYXNoYm9hcmRSZXF1ZXN0Eg8KB3Byb2plY3QYASABKAkiKgoLQ291bnRCdWNrZXQSDAoEbmFtZRgBIAEoCRINCgVjb3VudBgCIAEoBSItCg5BY3Rpdml0eUJ1Y2tldBIMCgRkYXRlGAEgASgJEg0KBWNvdW50GAIgASgFItECChtHZXRQcm9qZWN0RGFzaGJvYXJkUmVzcG9uc2USJQoHcHJvamVjdBgBIAEoCzIULnN0YXJsb2d6LnYxLlByb2plY3QSFgoOdG90YWxfaW5zaWdodHMYAiABKAUSMQoPY2F0ZWdvcnlfY291bnRzGAMgAygLMhguc3RhcmxvZ3oudjEuQ291bnRCdWNrZXQSLwoNc291cmNlX2NvdW50cxgEIAMoCzIYLnN0YXJsb2d6LnYxLkNvdW50QnVja2V0EioKCHRvcF90YWdzGAUgAygLMhguc3RhcmxvZ3oudjEuQ291bnRCdWNrZXQSNAoPcmVjZW50X2FjdGl2aXR5GAYgAygLMhsuc3RhcmxvZ3oudjEuQWN0aXZpdHlCdWNrZXQSLQoPcmVjZW50X2luc2lnaHRzGAcgAygLMhQuc3RhcmxvZ3oudjEuSW5zaWdodCLDAQoHSW5zaWdodBIKCgJpZBgBIAEoCRILCgNrZXkYAiABKAkSDwoHY29udGVudBgDIAEoCRIMCgR0YWdzGAQgAygJEhAKCGNhdGVnb3J5GAUgASgJEg4KBnNvdXJjZRgGIAEoCRIuCgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJCChNMaXN0SW5zaWdodHNSZXF1ZXN0Eg8KB3Byb2plY3QYASABKAkSCwoDdGFnGAIgASgJEg0KBWxpbWl0GAMgASgFIj4KFExpc3RJbnNpZ2h0c1Jlc3BvbnNlEiYKCGluc2lnaHRzGAEgAygLMhQuc3RhcmxvZ3oudjEuSW5zaWdodCJUChVTZWFyY2hJbnNpZ2h0c1JlcXVlc3QSDwoHcHJvamVjdBgBIAEoCRINCgVxdWVyeRgCIAEoCRIMCgR0YWdzGAMgAygJEg0KBWxpbWl0GAQgASgFIkAKFlNlYXJjaEluc2lnaHRzUmVzcG9uc2USJgoIaW5zaWdodHMYASADKAsyFC5zdGFybG9nei52MS5JbnNpZ2h0IjEKD0xpc3RUYWdzUmVxdWVzdBIPCgdwcm9qZWN0GAEgASgJEg0KBWxpbWl0GAIgASgFIjoKEExpc3RUYWdzUmVzcG9uc2USJgoEdGFncxgBIAMoCzIYLnN0YXJsb2d6LnYxLkNvdW50QnVja2V0MrAECglVSVNlcnZpY2USUgoKR2V0U2Vzc2lvbhIeLnN0YXJsb2d6LnYxLkdldFNlc3Npb25SZXF1ZXN0Gh8uc3RhcmxvZ3oudjEuR2V0U2Vzc2lvblJlc3BvbnNlIgOQAgESWAoMTGlzdFByb2plY3RzEiAuc3RhcmxvZ3oudjEuTGlzdFByb2plY3RzUmVxdWVzdBohLnN0YXJsb2d6LnYxLkxpc3RQcm9qZWN0c1Jlc3BvbnNlIgOQAgESbQoTR2V0UHJvamVjdERhc2hib2FyZBInLnN0YXJsb2d6LnYxLkdldFByb2plY3REYXNoYm9hcmRSZXF1ZXN0Giguc3RhcmxvZ3oudjEuR2V0UHJvamVjdERhc2hib2FyZFJlc3BvbnNlIgOQAgESWAoMTGlzdEluc2lnaHRzEiAuc3RhcmxvZ3oudjEuTGlzdEluc2lnaHRzUmVxdWVzdBohLnN0YXJsb2d6LnYxLkxpc3RJbnNpZ2h0c1Jlc3BvbnNlIgOQAgESXgoOU2VhcmNoSW5zaWdodHMSIi5zdGFybG9nei52MS5TZWFyY2hJbnNpZ2h0c1JlcXVlc3QaIy5zdGFybG9nei52MS5TZWFyY2hJbnNpZ2h0c1Jlc3BvbnNlIgOQAgESTAoITGlzdFRhZ3MSHC5zdGFybG9nei52MS5MaXN0VGFnc1JlcXVlc3QaHS5zdGFybG9nei52MS5MaXN0VGFnc1Jlc3BvbnNlIgOQAgFCrgEKD2NvbS5zdGFybG9nei52MUIHVWlQcm90b1ABWkVnaXRodWIuY29tL3dvbGZlaWRhdS9zdGFybG9nei9hcGkvZ2VuL3Byb3RvL2dvL3N0YXJsb2d6L3YxO3N0YXJsb2d6djGiAgNTWFiqAgtTdGFybG9nei5WMcoCC1N0YXJsb2d6XFYx4gIXU3RhcmxvZ3pcVjFcR1BCTWV0YWRhdGHqAgxTdGFybG9nejo6VjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("ChRzdGFybG9nei92MS91aS5wcm90bxILc3RhcmxvZ3oudjEiEwoRR2V0U2Vzc2lvblJlcXVlc3QiiAEKEkdldFNlc3Npb25SZXNwb25zZRIPCgd1c2VyX2lkGAEgASgJEg0KBWxvZ2luGAIgASgJEg0KBWVtYWlsGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgFIAEoCRISCgphdmF0YXJfdXJsGAYgASgJEhMKC3Byb2ZpbGVfdXJsGAcgASgJSgQIBBAFIhUKE0xpc3RQcm9qZWN0c1JlcXVlc3QiYQoHUHJvamVjdBIKCgJpZBgBIAEoCRIMCgRzbHVnGAIgASgJEgwKBG5hbWUYAyABKAkSLgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiPgoUTGlzdFByb2plY3RzUmVzcG9uc2USJgoIcHJvamVjdHMYASADKAsyFC5zdGFybG9nei52MS5Qcm9qZWN0Ii0KGkdldFByb2plY3REYXNoYm9hcmRSZXF1ZXN0Eg8KB3Byb2plY3QYASABKAkiKgoLQ291bnRCdWNrZXQSDAoEbmFtZRgBIAEoCRINCgVjb3VudBgCIAEoBSItCg5BY3Rpdml0eUJ1Y2tldBIMCgRkYXRlGAEgASgJEg0KBWNvdW50GAIgASgFItECChtHZXRQcm9qZWN0RGFzaGJvYXJkUmVzcG9uc2USJQoHcHJvamVjdBgBIAEoCzIULnN0YXJsb2d6LnYxLlByb2plY3QSFgoOdG90YWxfaW5zaWdodHMYAiABKAUSMQoPY2F0ZWdvcnlfY291bnRzGAMgAygLMhguc3RhcmxvZ3oudjEuQ291bnRCdWNrZXQSLwoNc291cmNlX2NvdW50cxgEIAMoCzIYLnN0YXJsb2d6LnYxLkNvdW50QnVja2V0EioKCHRvcF90YWdzGAUgAygLMhguc3RhcmxvZ3oudjEuQ291bnRCdWNrZXQSNAoPcmVjZW50X2FjdGl2aXR5GAYgAygLMhsuc3RhcmxvZ3oudjEuQWN0aXZpdHlCdWNrZXQSLQoPcmVjZW50X2luc2lnaHRzGAcgAygLMhQuc3RhcmxvZ3oudjEuSW5zaWdodCLaAQoHSW5zaWdodBIKCgJpZBgBIAEoCRILCgNrZXkYAiABKAkSDwoHY29udGVudBgDIAEoCRIMCgR0YWdzGAQgAygJEhAKCGNhdGVnb3J5GAUgASgJEg4KBnNvdXJjZRgGIAEoCRIuCgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1yZW5kZXJlZF9odG1sGAkgASgJIn0KEUdldEluc2lnaHRSZXF1ZXN0Eg8KB3Byb2plY3QYASABKAkSDAoCaWQYAiABKAlIABINCgNrZXkYAyABKAlIABIbCg5yZWxhdGlvbl9saW1pdBgEIAEoBUgBiAEBQgoKCHNlbGVjdG9yQhEKD19yZWxhdGlvbl9saW1pdCKTAQoQSW5zaWdodFJlZmVyZW5jZRISCgp0YXJnZXRfa2V5GAEgASgJEhAKCHJlc29sdmVkGAIgASgIEgoKAmlkGAMgASgJEgsKA2tleRgEIAEoCRIQCghjYXRlZ29yeRgFIAEoCRIuCgp1cGRhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCL9AQoSR2V0SW5zaWdodFJlc3BvbnNlEiUKB2luc2lnaHQYASABKAsyFC5zdGFybG9nei52MS5JbnNpZ2h0EiwKBWxpbmtzGAIgAygLMh0uc3RhcmxvZ3oudjEuSW5zaWdodFJlZmVyZW5jZRIwCgliYWNrbGlua3MYAyADKAsyHS5zdGFybG9nei52MS5JbnNpZ2h0UmVmZXJlbmNlEhIKCmxpbmtfY291bnQYBCABKAUSFgoOYmFja2xpbmtfY291bnQYBSABKAUSFwoPbGlua3NfdHJ1bmNhdGVkGAYgASgIEhsKE2JhY2tsaW5rc190cnVuY2F0ZWQYByABKAgiQgoTTGlzdEluc2lnaHRzUmVxdWVzdBIPCgdwcm9qZWN0GAEgASgJEgsKA3RhZxgCIAEoCRINCgVsaW1pdBgDIAEoBSI+ChRMaXN0SW5zaWdodHNSZXNwb25zZRImCghpbnNpZ2h0cxgBIAMoCzIULnN0YXJsb2d6LnYxLkluc2lnaHQiVAoVU2VhcmNoSW5zaWdodHNSZXF1ZXN0Eg8KB3Byb2plY3QYASABKAkSDQoFcXVlcnkYAiABKAkSDAoEdGFncxgDIAMoCRINCgVsaW1pdBgEIAEoBSJAChZTZWFyY2hJbnNpZ2h0c1Jlc3BvbnNlEiYKCGluc2lnaHRzGAEgAygLMhQuc3RhcmxvZ3oudjEuSW5zaWdodCIxCg9MaXN0VGFnc1JlcXVlc3QSDwoHcHJvamVjdBgBIAEoCRINCgVsaW1pdBgCIAEoBSI6ChBMaXN0VGFnc1Jlc3BvbnNlEiYKBHRhZ3MYASADKAsyGC5zdGFybG9nei52MS5Db3VudEJ1Y2tldDKEBQoJVUlTZXJ2aWNlElIKCkdldFNlc3Npb24SHi5zdGFybG9nei52MS5HZXRTZXNzaW9uUmVxdWVzdBofLnN0YXJsb2d6LnYxLkdldFNlc3Npb25SZXNwb25zZSIDkAIBElgKDExpc3RQcm9qZWN0cxIgLnN0YXJsb2d6LnYxLkxpc3RQcm9qZWN0c1JlcXVlc3QaIS5zdGFybG9nei52MS5MaXN0UHJvamVjdHNSZXNwb25zZSIDkAIBEm0KE0dldFByb2plY3REYXNoYm9hcmQSJy5zdGFybG9nei52MS5HZXRQcm9qZWN0RGFzaGJvYXJkUmVxdWVzdBooLnN0YXJsb2d6LnYxLkdldFByb2plY3REYXNoYm9hcmRSZXNwb25zZSIDkAIBElgKDExpc3RJbnNpZ2h0cxIgLnN0YXJsb2d6LnYxLkxpc3RJbnNpZ2h0c1JlcXVlc3QaIS5zdGFybG9nei52MS5MaXN0SW5zaWdodHNSZXNwb25zZSIDkAIBEl4KDlNlYXJjaEluc2lnaHRzEiIuc3RhcmxvZ3oudjEuU2VhcmNoSW5zaWdodHNSZXF1ZXN0GiMuc3RhcmxvZ3oudjEuU2VhcmNoSW5zaWdodHNSZXNwb25zZSIDkAIBElIKCkdldEluc2lnaHQSHi5zdGFybG9nei52MS5HZXRJbnNpZ2h0UmVxdWVzdBofLnN0YXJsb2d6LnYxLkdldEluc2lnaHRSZXNwb25zZSIDkAIBEkwKCExpc3RUYWdzEhwuc3RhcmxvZ3oudjEuTGlzdFRhZ3NSZXF1ZXN0Gh0uc3RhcmxvZ3oudjEuTGlzdFRhZ3NSZXNwb25zZSIDkAIBQq4BCg9jb20uc3RhcmxvZ3oudjFCB1VpUHJvdG9QAVpFZ2l0aHViLmNvbS93b2xmZWlkYXUvc3RhcmxvZ3ovYXBpL2dlbi9wcm90by9nby9zdGFybG9nei92MTtzdGFybG9nenYxogIDU1hYqgILU3RhcmxvZ3ouVjHKAgtTdGFybG9nelxWMeICF1N0YXJsb2d6XFYxXEdQQk1ldGFkYXRh6gIMU3RhcmxvZ3o6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message starlogz.v1.GetSessionRequest
@@ -282,6 +282,11 @@ export type Insight = Message<"starlogz.v1.Insight"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 8;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string rendered_html = 9;
+   */
+  renderedHtml: string;
 };
 
 /**
@@ -290,6 +295,134 @@ export type Insight = Message<"starlogz.v1.Insight"> & {
  */
 export const InsightSchema: GenMessage<Insight> = /*@__PURE__*/
   messageDesc(file_starlogz_v1_ui, 9);
+
+/**
+ * @generated from message starlogz.v1.GetInsightRequest
+ */
+export type GetInsightRequest = Message<"starlogz.v1.GetInsightRequest"> & {
+  /**
+   * @generated from field: string project = 1;
+   */
+  project: string;
+
+  /**
+   * @generated from oneof starlogz.v1.GetInsightRequest.selector
+   */
+  selector: {
+    /**
+     * @generated from field: string id = 2;
+     */
+    value: string;
+    case: "id";
+  } | {
+    /**
+     * @generated from field: string key = 3;
+     */
+    value: string;
+    case: "key";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * @generated from field: optional int32 relation_limit = 4;
+   */
+  relationLimit?: number | undefined;
+};
+
+/**
+ * Describes the message starlogz.v1.GetInsightRequest.
+ * Use `create(GetInsightRequestSchema)` to create a new message.
+ */
+export const GetInsightRequestSchema: GenMessage<GetInsightRequest> = /*@__PURE__*/
+  messageDesc(file_starlogz_v1_ui, 10);
+
+/**
+ * @generated from message starlogz.v1.InsightReference
+ */
+export type InsightReference = Message<"starlogz.v1.InsightReference"> & {
+  /**
+   * @generated from field: string target_key = 1;
+   */
+  targetKey: string;
+
+  /**
+   * @generated from field: bool resolved = 2;
+   */
+  resolved: boolean;
+
+  /**
+   * @generated from field: string id = 3;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string key = 4;
+   */
+  key: string;
+
+  /**
+   * @generated from field: string category = 5;
+   */
+  category: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp updated_at = 6;
+   */
+  updatedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message starlogz.v1.InsightReference.
+ * Use `create(InsightReferenceSchema)` to create a new message.
+ */
+export const InsightReferenceSchema: GenMessage<InsightReference> = /*@__PURE__*/
+  messageDesc(file_starlogz_v1_ui, 11);
+
+/**
+ * @generated from message starlogz.v1.GetInsightResponse
+ */
+export type GetInsightResponse = Message<"starlogz.v1.GetInsightResponse"> & {
+  /**
+   * @generated from field: starlogz.v1.Insight insight = 1;
+   */
+  insight?: Insight | undefined;
+
+  /**
+   * @generated from field: repeated starlogz.v1.InsightReference links = 2;
+   */
+  links: InsightReference[];
+
+  /**
+   * @generated from field: repeated starlogz.v1.InsightReference backlinks = 3;
+   */
+  backlinks: InsightReference[];
+
+  /**
+   * @generated from field: int32 link_count = 4;
+   */
+  linkCount: number;
+
+  /**
+   * @generated from field: int32 backlink_count = 5;
+   */
+  backlinkCount: number;
+
+  /**
+   * @generated from field: bool links_truncated = 6;
+   */
+  linksTruncated: boolean;
+
+  /**
+   * @generated from field: bool backlinks_truncated = 7;
+   */
+  backlinksTruncated: boolean;
+};
+
+/**
+ * Describes the message starlogz.v1.GetInsightResponse.
+ * Use `create(GetInsightResponseSchema)` to create a new message.
+ */
+export const GetInsightResponseSchema: GenMessage<GetInsightResponse> = /*@__PURE__*/
+  messageDesc(file_starlogz_v1_ui, 12);
 
 /**
  * @generated from message starlogz.v1.ListInsightsRequest
@@ -316,7 +449,7 @@ export type ListInsightsRequest = Message<"starlogz.v1.ListInsightsRequest"> & {
  * Use `create(ListInsightsRequestSchema)` to create a new message.
  */
 export const ListInsightsRequestSchema: GenMessage<ListInsightsRequest> = /*@__PURE__*/
-  messageDesc(file_starlogz_v1_ui, 10);
+  messageDesc(file_starlogz_v1_ui, 13);
 
 /**
  * @generated from message starlogz.v1.ListInsightsResponse
@@ -333,7 +466,7 @@ export type ListInsightsResponse = Message<"starlogz.v1.ListInsightsResponse"> &
  * Use `create(ListInsightsResponseSchema)` to create a new message.
  */
 export const ListInsightsResponseSchema: GenMessage<ListInsightsResponse> = /*@__PURE__*/
-  messageDesc(file_starlogz_v1_ui, 11);
+  messageDesc(file_starlogz_v1_ui, 14);
 
 /**
  * @generated from message starlogz.v1.SearchInsightsRequest
@@ -365,7 +498,7 @@ export type SearchInsightsRequest = Message<"starlogz.v1.SearchInsightsRequest">
  * Use `create(SearchInsightsRequestSchema)` to create a new message.
  */
 export const SearchInsightsRequestSchema: GenMessage<SearchInsightsRequest> = /*@__PURE__*/
-  messageDesc(file_starlogz_v1_ui, 12);
+  messageDesc(file_starlogz_v1_ui, 15);
 
 /**
  * @generated from message starlogz.v1.SearchInsightsResponse
@@ -382,7 +515,7 @@ export type SearchInsightsResponse = Message<"starlogz.v1.SearchInsightsResponse
  * Use `create(SearchInsightsResponseSchema)` to create a new message.
  */
 export const SearchInsightsResponseSchema: GenMessage<SearchInsightsResponse> = /*@__PURE__*/
-  messageDesc(file_starlogz_v1_ui, 13);
+  messageDesc(file_starlogz_v1_ui, 16);
 
 /**
  * @generated from message starlogz.v1.ListTagsRequest
@@ -404,7 +537,7 @@ export type ListTagsRequest = Message<"starlogz.v1.ListTagsRequest"> & {
  * Use `create(ListTagsRequestSchema)` to create a new message.
  */
 export const ListTagsRequestSchema: GenMessage<ListTagsRequest> = /*@__PURE__*/
-  messageDesc(file_starlogz_v1_ui, 14);
+  messageDesc(file_starlogz_v1_ui, 17);
 
 /**
  * @generated from message starlogz.v1.ListTagsResponse
@@ -421,7 +554,7 @@ export type ListTagsResponse = Message<"starlogz.v1.ListTagsResponse"> & {
  * Use `create(ListTagsResponseSchema)` to create a new message.
  */
 export const ListTagsResponseSchema: GenMessage<ListTagsResponse> = /*@__PURE__*/
-  messageDesc(file_starlogz_v1_ui, 15);
+  messageDesc(file_starlogz_v1_ui, 18);
 
 /**
  * @generated from service starlogz.v1.UIService
@@ -466,6 +599,14 @@ export const UIService: GenService<{
     methodKind: "unary";
     input: typeof SearchInsightsRequestSchema;
     output: typeof SearchInsightsResponseSchema;
+  },
+  /**
+   * @generated from rpc starlogz.v1.UIService.GetInsight
+   */
+  getInsight: {
+    methodKind: "unary";
+    input: typeof GetInsightRequestSchema;
+    output: typeof GetInsightResponseSchema;
   },
   /**
    * @generated from rpc starlogz.v1.UIService.ListTags

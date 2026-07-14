@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	starlogzv1 "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1"
+	"github.com/wolfeidau/starlogz/internal/insightlinks"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -72,6 +73,10 @@ func (s *uiService) GetProjectDashboard(ctx context.Context, req *connect.Reques
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get project dashboard: %w", err))
 	}
+	recentInsights, err := toProtoInsights(dashboard.RecentInsights, project.Slug)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 	return connect.NewResponse(&starlogzv1.GetProjectDashboardResponse{
 		Project:        toProtoProject(project),
 		TotalInsights:  int32Count(dashboard.TotalInsights),
@@ -79,7 +84,7 @@ func (s *uiService) GetProjectDashboard(ctx context.Context, req *connect.Reques
 		SourceCounts:   toProtoCountBuckets(dashboard.SourceCounts),
 		TopTags:        toProtoCountBuckets(dashboard.TopTags),
 		RecentActivity: toProtoActivityBuckets(dashboard.RecentActivity),
-		RecentInsights: toProtoInsights(dashboard.RecentInsights),
+		RecentInsights: recentInsights,
 	}), nil
 }
 
@@ -100,7 +105,11 @@ func (s *uiService) ListInsights(ctx context.Context, req *connect.Request[starl
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list insights: %w", err))
 	}
-	return connect.NewResponse(&starlogzv1.ListInsightsResponse{Insights: toProtoInsights(insights)}), nil
+	protoInsights, err := toProtoInsights(insights, project.Slug)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&starlogzv1.ListInsightsResponse{Insights: protoInsights}), nil
 }
 
 func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[starlogzv1.SearchInsightsRequest]) (*connect.Response[starlogzv1.SearchInsightsResponse], error) {
@@ -123,7 +132,80 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("search insights: %w", err))
 	}
-	return connect.NewResponse(&starlogzv1.SearchInsightsResponse{Insights: toProtoInsights(insights)}), nil
+	protoInsights, err := toProtoInsights(insights, project.Slug)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&starlogzv1.SearchInsightsResponse{Insights: protoInsights}), nil
+}
+
+func (s *uiService) GetInsight(ctx context.Context, req *connect.Request[starlogzv1.GetInsightRequest]) (*connect.Response[starlogzv1.GetInsightResponse], error) {
+	_, _, org, err := s.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	relationLimit := 50
+	if req.Msg.RelationLimit != nil {
+		relationLimit = int(req.Msg.GetRelationLimit())
+		if relationLimit < 1 || relationLimit > 100 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("relation_limit must be between 1 and 100"))
+		}
+	}
+	params := store.GetInsightParams{RelationLimit: relationLimit}
+	switch selector := req.Msg.GetSelector().(type) {
+	case *starlogzv1.GetInsightRequest_Id:
+		if selector.Id == "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id must not be empty"))
+		}
+		params.InsightID, err = uuid.Parse(selector.Id)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid insight ID: %w", err))
+		}
+	case *starlogzv1.GetInsightRequest_Key:
+		if selector.Key == "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("key must not be empty"))
+		}
+		params.Key = selector.Key
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("exactly one of id or key is required"))
+	}
+	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	if err != nil {
+		return nil, err
+	}
+	params.ProjectID = project.ID
+	detail, err := s.store.GetInsight(ctx, params)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("insight not found"))
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get insight: %w", err))
+	}
+	insight, err := toProtoInsight(detail.Insight, project.Slug)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	links := make([]*starlogzv1.InsightReference, len(detail.Links))
+	for i, link := range detail.Links {
+		links[i] = &starlogzv1.InsightReference{TargetKey: link.TargetKey, Resolved: link.Resolved}
+		if link.Resolved {
+			links[i].Id = link.ID.String()
+			links[i].Category = link.Category
+			links[i].UpdatedAt = timestamppb.New(link.UpdatedAt)
+		}
+	}
+	backlinks := make([]*starlogzv1.InsightReference, len(detail.Backlinks))
+	for i, backlink := range detail.Backlinks {
+		backlinks[i] = &starlogzv1.InsightReference{
+			Id: backlink.ID.String(), Key: backlink.Key, Category: backlink.Category,
+			UpdatedAt: timestamppb.New(backlink.UpdatedAt),
+		}
+	}
+	return connect.NewResponse(&starlogzv1.GetInsightResponse{
+		Insight: insight, Links: links, Backlinks: backlinks,
+		LinkCount: int32Count(detail.LinkCount), BacklinkCount: int32Count(detail.BacklinkCount),
+		LinksTruncated: detail.LinksTruncated, BacklinksTruncated: detail.BacklinksTruncated,
+	}), nil
 }
 
 func (s *uiService) ListTags(ctx context.Context, req *connect.Request[starlogzv1.ListTagsRequest]) (*connect.Response[starlogzv1.ListTagsResponse], error) {
@@ -199,21 +281,28 @@ func toProtoProject(p *store.Project) *starlogzv1.Project {
 	}
 }
 
-func toProtoInsights(insights []*store.Insight) []*starlogzv1.Insight {
+func toProtoInsights(insights []*store.Insight, project string) ([]*starlogzv1.Insight, error) {
 	out := make([]*starlogzv1.Insight, len(insights))
 	for i, in := range insights {
-		out[i] = &starlogzv1.Insight{
-			Id:        in.ID.String(),
-			Key:       in.Key,
-			Content:   in.Content,
-			Tags:      in.Tags,
-			Category:  in.Category,
-			Source:    in.Source,
-			CreatedAt: timestamppb.New(in.CreatedAt),
-			UpdatedAt: timestamppb.New(in.UpdatedAt),
+		var err error
+		out[i], err = toProtoInsight(in, project)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return out
+	return out, nil
+}
+
+func toProtoInsight(in *store.Insight, project string) (*starlogzv1.Insight, error) {
+	rendered, err := insightlinks.Render(in.Content, project)
+	if err != nil {
+		return nil, fmt.Errorf("render insight %s: %w", in.ID, err)
+	}
+	return &starlogzv1.Insight{
+		Id: in.ID.String(), Key: in.Key, Content: in.Content, Tags: in.Tags,
+		Category: in.Category, Source: in.Source, CreatedAt: timestamppb.New(in.CreatedAt),
+		UpdatedAt: timestamppb.New(in.UpdatedAt), RenderedHtml: rendered,
+	}, nil
 }
 
 func toProtoCountBuckets(buckets []store.CountBucket) []*starlogzv1.CountBucket {
