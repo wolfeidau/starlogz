@@ -45,6 +45,8 @@ const (
 	// UIServiceSearchInsightsProcedure is the fully-qualified name of the UIService's SearchInsights
 	// RPC.
 	UIServiceSearchInsightsProcedure = "/starlogz.v1.UIService/SearchInsights"
+	// UIServiceGetInsightProcedure is the fully-qualified name of the UIService's GetInsight RPC.
+	UIServiceGetInsightProcedure = "/starlogz.v1.UIService/GetInsight"
 	// UIServiceListTagsProcedure is the fully-qualified name of the UIService's ListTags RPC.
 	UIServiceListTagsProcedure = "/starlogz.v1.UIService/ListTags"
 )
@@ -56,6 +58,7 @@ type UIServiceClient interface {
 	GetProjectDashboard(context.Context, *connect.Request[v1.GetProjectDashboardRequest]) (*connect.Response[v1.GetProjectDashboardResponse], error)
 	ListInsights(context.Context, *connect.Request[v1.ListInsightsRequest]) (*connect.Response[v1.ListInsightsResponse], error)
 	SearchInsights(context.Context, *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error)
+	GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error)
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
 }
 
@@ -105,6 +108,13 @@ func NewUIServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getInsight: connect.NewClient[v1.GetInsightRequest, v1.GetInsightResponse](
+			httpClient,
+			baseURL+UIServiceGetInsightProcedure,
+			connect.WithSchema(uIServiceMethods.ByName("GetInsight")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		listTags: connect.NewClient[v1.ListTagsRequest, v1.ListTagsResponse](
 			httpClient,
 			baseURL+UIServiceListTagsProcedure,
@@ -122,6 +132,7 @@ type uIServiceClient struct {
 	getProjectDashboard *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
 	listInsights        *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
 	searchInsights      *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
+	getInsight          *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
 	listTags            *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
 }
 
@@ -150,6 +161,11 @@ func (c *uIServiceClient) SearchInsights(ctx context.Context, req *connect.Reque
 	return c.searchInsights.CallUnary(ctx, req)
 }
 
+// GetInsight calls starlogz.v1.UIService.GetInsight.
+func (c *uIServiceClient) GetInsight(ctx context.Context, req *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error) {
+	return c.getInsight.CallUnary(ctx, req)
+}
+
 // ListTags calls starlogz.v1.UIService.ListTags.
 func (c *uIServiceClient) ListTags(ctx context.Context, req *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error) {
 	return c.listTags.CallUnary(ctx, req)
@@ -162,6 +178,7 @@ type UIServiceHandler interface {
 	GetProjectDashboard(context.Context, *connect.Request[v1.GetProjectDashboardRequest]) (*connect.Response[v1.GetProjectDashboardResponse], error)
 	ListInsights(context.Context, *connect.Request[v1.ListInsightsRequest]) (*connect.Response[v1.ListInsightsResponse], error)
 	SearchInsights(context.Context, *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error)
+	GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error)
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
 }
 
@@ -207,6 +224,13 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	uIServiceGetInsightHandler := connect.NewUnaryHandler(
+		UIServiceGetInsightProcedure,
+		svc.GetInsight,
+		connect.WithSchema(uIServiceMethods.ByName("GetInsight")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	uIServiceListTagsHandler := connect.NewUnaryHandler(
 		UIServiceListTagsProcedure,
 		svc.ListTags,
@@ -226,6 +250,8 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 			uIServiceListInsightsHandler.ServeHTTP(w, r)
 		case UIServiceSearchInsightsProcedure:
 			uIServiceSearchInsightsHandler.ServeHTTP(w, r)
+		case UIServiceGetInsightProcedure:
+			uIServiceGetInsightHandler.ServeHTTP(w, r)
 		case UIServiceListTagsProcedure:
 			uIServiceListTagsHandler.ServeHTTP(w, r)
 		default:
@@ -255,6 +281,10 @@ func (UnimplementedUIServiceHandler) ListInsights(context.Context, *connect.Requ
 
 func (UnimplementedUIServiceHandler) SearchInsights(context.Context, *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.SearchInsights is not implemented"))
+}
+
+func (UnimplementedUIServiceHandler) GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetInsight is not implemented"))
 }
 
 func (UnimplementedUIServiceHandler) ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error) {

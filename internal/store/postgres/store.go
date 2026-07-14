@@ -975,6 +975,120 @@ func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*
 	return insight, nil
 }
 
+// GetInsight returns one live insight and its immediate project-local relationships.
+func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*store.InsightDetail, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("begin get insight tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var row pgx.Row
+	if p.InsightID != uuid.Nil {
+		row = tx.QueryRow(ctx, `
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			FROM insights
+			WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`,
+			p.ProjectID, p.InsightID)
+	} else {
+		row = tx.QueryRow(ctx, `
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			FROM insights
+			WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL`,
+			p.ProjectID, p.Key)
+	}
+	insight, err := scanInsight(row)
+	if err != nil {
+		return nil, err
+	}
+
+	detail := &store.InsightDetail{Insight: insight}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM insight_links WHERE source_insight_id = $1`, insight.ID).Scan(&detail.LinkCount); err != nil {
+		return nil, fmt.Errorf("count insight links: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT links.target_key, COALESCE(target.id::text, ''), COALESCE(target.category, ''), target.updated_at
+		FROM insight_links links
+		LEFT JOIN insights target
+		  ON target.project_id = $2
+		 AND target.key = links.target_key
+		 AND target.deleted_at IS NULL
+		WHERE links.source_insight_id = $1
+		ORDER BY links.target_key COLLATE "C" ASC
+		LIMIT $3`, insight.ID, p.ProjectID, p.RelationLimit)
+	if err != nil {
+		return nil, fmt.Errorf("query insight links: %w", err)
+	}
+	for rows.Next() {
+		var link store.InsightLink
+		var id string
+		var updatedAt *time.Time
+		if err := rows.Scan(&link.TargetKey, &id, &link.Category, &updatedAt); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan insight link: %w", err)
+		}
+		if id != "" {
+			link.ID, err = uuid.Parse(id)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("parse insight link ID: %w", err)
+			}
+			link.Resolved = true
+			link.UpdatedAt = *updatedAt
+		}
+		detail.Links = append(detail.Links, link)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate insight links: %w", err)
+	}
+	rows.Close()
+	detail.LinksTruncated = detail.LinkCount > len(detail.Links)
+
+	if insight.Key != "" {
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*)
+			FROM insight_links links
+			JOIN insights source ON source.id = links.source_insight_id
+			WHERE links.target_key = $1
+			  AND source.project_id = $2
+			  AND source.deleted_at IS NULL`, insight.Key, p.ProjectID).Scan(&detail.BacklinkCount); err != nil {
+			return nil, fmt.Errorf("count insight backlinks: %w", err)
+		}
+		rows, err = tx.Query(ctx, `
+			SELECT source.id, COALESCE(source.key, ''), source.category, source.updated_at
+			FROM insight_links links
+			JOIN insights source ON source.id = links.source_insight_id
+			WHERE links.target_key = $1
+			  AND source.project_id = $2
+			  AND source.deleted_at IS NULL
+			ORDER BY source.updated_at DESC, source.id DESC
+			LIMIT $3`, insight.Key, p.ProjectID, p.RelationLimit)
+		if err != nil {
+			return nil, fmt.Errorf("query insight backlinks: %w", err)
+		}
+		for rows.Next() {
+			var backlink store.InsightBacklink
+			if err := rows.Scan(&backlink.ID, &backlink.Key, &backlink.Category, &backlink.UpdatedAt); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan insight backlink: %w", err)
+			}
+			detail.Backlinks = append(detail.Backlinks, backlink)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate insight backlinks: %w", err)
+		}
+		rows.Close()
+		detail.BacklinksTruncated = detail.BacklinkCount > len(detail.Backlinks)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit get insight tx: %w", err)
+	}
+	return detail, nil
+}
+
 func writeInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
 	var insight *store.Insight
 	var err error

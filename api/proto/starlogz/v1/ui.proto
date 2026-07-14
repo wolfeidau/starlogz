@@ -25,6 +25,10 @@ service UIService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  rpc GetInsight(GetInsightRequest) returns (GetInsightResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -88,6 +92,35 @@ message Insight {
   string source = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  string rendered_html = 9;
+}
+
+message GetInsightRequest {
+  string project = 1;
+  oneof selector {
+    string id = 2;
+    string key = 3;
+  }
+  optional int32 relation_limit = 4;
+}
+
+message InsightReference {
+  string target_key = 1;
+  bool resolved = 2;
+  string id = 3;
+  string key = 4;
+  string category = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message GetInsightResponse {
+  Insight insight = 1;
+  repeated InsightReference links = 2;
+  repeated InsightReference backlinks = 3;
+  int32 link_count = 4;
+  int32 backlink_count = 5;
+  bool links_truncated = 6;
+  bool backlinks_truncated = 7;
 }
 
 message ListInsightsRequest {

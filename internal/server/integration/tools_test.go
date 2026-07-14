@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -198,6 +199,110 @@ func TestUIWebSession(t *testing.T) {
 	require.Equal(t, "web-user", body["login"])
 }
 
+func TestUIGetInsightAndRenderedHTML(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "render-user")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	project, err := f.store.EnsureProject(ctx, org.ID, user.ID, "render-project", "Render Project")
+	require.NoError(t, err)
+	target, err := f.store.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: project.ID, Key: "target", Content: "Target", Category: "fact", Source: "repo", CreatedBy: user.ID,
+	})
+	require.NoError(t, err)
+	source, err := f.store.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: project.ID, Key: "source",
+		Content:  "# Source\n\nFollow [[insight:target|Target <safe>]]. <script>alert(1)</script>",
+		Category: "context", Source: "agent", CreatedBy: user.ID,
+	})
+	require.NoError(t, err)
+	_, err = f.store.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: project.ID, Key: "backlink", Content: "[[insight:source]]", CreatedBy: user.ID,
+	})
+	require.NoError(t, err)
+
+	rawToken := "render-browser-session"
+	now := time.Now()
+	_, err = f.store.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(2 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	type protoInsight struct {
+		ID           string `json:"id"`
+		Content      string `json:"content"`
+		RenderedHTML string `json:"renderedHtml"`
+	}
+	var got struct {
+		Insight protoInsight `json:"insight"`
+		Links   []struct {
+			TargetKey string `json:"targetKey"`
+			Resolved  bool   `json:"resolved"`
+			ID        string `json:"id"`
+		} `json:"links"`
+		Backlinks     []map[string]any `json:"backlinks"`
+		LinkCount     int              `json:"linkCount"`
+		BacklinkCount int              `json:"backlinkCount"`
+	}
+	resp := f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetInsight", map[string]any{
+		"project": "render-project", "key": "source", "relationLimit": 10,
+	})
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	require.Equal(t, source.ID.String(), got.Insight.ID)
+	require.Equal(t, source.Content, got.Insight.Content)
+	require.Contains(t, got.Insight.RenderedHTML, "<h1>Source</h1>")
+	require.Contains(t, got.Insight.RenderedHTML, `href="?project=render-project&amp;insight_key=target"`)
+	require.Contains(t, got.Insight.RenderedHTML, "Target &lt;safe&gt;")
+	require.NotContains(t, got.Insight.RenderedHTML, "<script")
+	require.Equal(t, 1, got.LinkCount)
+	require.Equal(t, 1, got.BacklinkCount)
+	require.Equal(t, target.ID.String(), got.Links[0].ID)
+	require.True(t, got.Links[0].Resolved)
+	require.Len(t, got.Backlinks, 1)
+
+	resp = f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetInsight", map[string]any{
+		"project": "render-project", "id": source.ID.String(),
+	})
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	for path, input := range map[string]map[string]any{
+		"/starlogz.v1.UIService/GetProjectDashboard": {"project": "render-project"},
+		"/starlogz.v1.UIService/ListInsights":        {"project": "render-project", "limit": 10},
+		"/starlogz.v1.UIService/SearchInsights":      {"project": "render-project", "query": "Source", "limit": 10},
+	} {
+		resp = f.uiRequest(t, rawToken, path, input)
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+		_ = resp.Body.Close()
+		require.Contains(t, fmt.Sprint(body), "renderedHtml", path)
+	}
+
+	for _, input := range []map[string]any{
+		{"project": "render-project"},
+		{"project": "render-project", "key": ""},
+		{"project": "render-project", "id": "not-a-uuid"},
+		{"project": "render-project", "key": "source", "relationLimit": 0},
+		{"project": "render-project", "key": "source", "relationLimit": 101},
+	} {
+		resp = f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetInsight", input)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, input)
+	}
+	for _, key := range []string{"missing", " source "} {
+		resp = f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetInsight", map[string]any{
+			"project": "render-project", "key": key,
+		})
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	}
+}
+
 func TestUIWebSessionRejectsInvalidCookieAndClearsIt(t *testing.T) {
 	f := newToolFixture(t)
 	user := f.makeUser(t, t.Context(), "invalid-session-user")
@@ -312,6 +417,19 @@ func (f *toolFixture) uiSessionRequest(t *testing.T, rawToken string) *http.Resp
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		f.ts.URL+"/starlogz.v1.UIService/GetSession", strings.NewReader("{}"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func (f *toolFixture) uiRequest(t *testing.T, rawToken, path string, body any) *http.Response {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.ts.URL+path, strings.NewReader(string(payload)))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
@@ -504,6 +622,16 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	requireSchemaNumber(t, 1, schemaProperty(t, insightWrite, "content")["minLength"])
 	require.ElementsMatch(t, []any{"fact", "decision", "insight", "preference", "context", "general"}, schemaProperty(t, insightWrite, "category")["enum"])
 	require.ElementsMatch(t, []any{"user", "repo", "agent", "command"}, schemaProperty(t, insightWrite, "source")["enum"])
+
+	insightGet := inputSchemaMap(t, list.Tools, "insight_get")
+	require.ElementsMatch(t, []string{"project"}, schemaRequired(t, insightGet))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightGet, "project")["minLength"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightGet, "id")["minLength"])
+	require.Equal(t, "uuid", schemaProperty(t, insightGet, "id")["format"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightGet, "key")["minLength"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightGet, "relation_limit")["minimum"])
+	requireSchemaNumber(t, 100, schemaProperty(t, insightGet, "relation_limit")["maximum"])
+	require.Len(t, insightGet["oneOf"], 2)
 
 	insightSearch := inputSchemaMap(t, list.Tools, "insight_search")
 	require.ElementsMatch(t, []string{"project", "query"}, schemaRequired(t, insightSearch))
@@ -794,6 +922,100 @@ func TestInsightWriteAndUpdate_ReturnLinkWarnings(t *testing.T) {
 	})
 	require.False(t, tagOnly.IsError, "insight_update failed: %s", resultText(t, tagOnly))
 	require.NotContains(t, resultText(t, tagOnly), `"warnings"`)
+}
+
+func TestInsightGet_ReturnsBoundedRelationships(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	var target struct {
+		ID string `json:"id"`
+	}
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "target", map[string]any{"key": "target"}))
+	require.False(t, res.IsError, "insight_write failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &target))
+
+	var source struct {
+		ID string `json:"id"`
+	}
+	res = callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+		"demo", "[[insight:target]] [[insight:missing]]", map[string]any{"key": "source"},
+	))
+	require.False(t, res.IsError, "insight_write failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &source))
+
+	res = callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "[[insight:source]]", map[string]any{"key": "backlink"}))
+	require.False(t, res.IsError, "insight_write failed: %s", resultText(t, res))
+
+	type reference struct {
+		TargetKey string `json:"target_key"`
+		Resolved  bool   `json:"resolved"`
+		ID        string `json:"id"`
+		Key       string `json:"key"`
+	}
+	var got struct {
+		Insight struct {
+			ID      string `json:"id"`
+			Key     string `json:"key"`
+			Content string `json:"content"`
+		} `json:"insight"`
+		Links              []reference `json:"links"`
+		Backlinks          []reference `json:"backlinks"`
+		LinkCount          int         `json:"link_count"`
+		BacklinkCount      int         `json:"backlink_count"`
+		LinksTruncated     bool        `json:"links_truncated"`
+		BacklinksTruncated bool        `json:"backlinks_truncated"`
+	}
+	res = callTool(t, ctx, sess, "insight_get", map[string]any{"project": "demo", "key": "source", "relation_limit": 1})
+	require.False(t, res.IsError, "insight_get failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Equal(t, source.ID, got.Insight.ID)
+	require.Equal(t, "source", got.Insight.Key)
+	require.Equal(t, "[[insight:target]] [[insight:missing]]", got.Insight.Content)
+	require.Equal(t, 2, got.LinkCount)
+	require.Equal(t, 1, got.BacklinkCount)
+	require.True(t, got.LinksTruncated)
+	require.False(t, got.BacklinksTruncated)
+	require.Equal(t, []reference{{TargetKey: "missing"}}, got.Links)
+	require.Len(t, got.Backlinks, 1)
+	require.Equal(t, "backlink", got.Backlinks[0].Key)
+	readOnly := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read"))
+	res = callTool(t, ctx, readOnly, "insight_get", map[string]any{"project": "demo", "key": "source"})
+	require.False(t, res.IsError, "read-scoped insight_get failed: %s", resultText(t, res))
+
+	res = callTool(t, ctx, sess, "insight_get", map[string]any{"project": "demo", "id": source.ID})
+	require.False(t, res.IsError, "insight_get by ID failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.Len(t, got.Links, 2)
+	require.Equal(t, reference{TargetKey: "target", Resolved: true, ID: target.ID}, got.Links[1])
+
+	res = callTool(t, ctx, sess, "insight_delete", map[string]any{"id": target.ID})
+	require.False(t, res.IsError, "insight_delete failed: %s", resultText(t, res))
+	res = callTool(t, ctx, sess, "insight_get", map[string]any{"project": "demo", "key": "source"})
+	require.False(t, res.IsError, "insight_get failed: %s", resultText(t, res))
+	got.Links = nil
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &got))
+	require.False(t, got.Links[1].Resolved)
+	require.Empty(t, got.Links[1].ID)
+
+	for _, input := range []map[string]any{
+		{"project": "demo"},
+		{"project": "demo", "id": source.ID, "key": "source"},
+		{"project": "demo", "id": "not-a-uuid"},
+		{"project": "demo", "key": "source", "relation_limit": 0},
+		{"project": "demo", "key": "source", "relation_limit": 101},
+	} {
+		res = callTool(t, ctx, sess, "insight_get", input)
+		require.True(t, res.IsError, "invalid insight_get input succeeded: %#v", input)
+	}
+
+	bob := f.makeUser(t, ctx, "bob")
+	bobSess := f.connect(t, ctx, f.tokenFor(t, bob.ID, "insights:read"))
+	res = callTool(t, ctx, bobSess, "insight_get", map[string]any{"project": "demo", "key": "source"})
+	require.True(t, res.IsError)
+	require.NotContains(t, resultText(t, res), source.ID)
 }
 
 // --- insight_list / insight_search / insight_list_tags org scoping ---

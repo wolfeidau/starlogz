@@ -50,6 +50,7 @@ type Store interface {
 	IsTokenRevoked(ctx context.Context, jti string) (bool, error)
 
 	WriteInsight(ctx context.Context, p WriteInsightParams) (*Insight, error)
+	GetInsight(ctx context.Context, p GetInsightParams) (*InsightDetail, error)
 	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
@@ -144,6 +145,38 @@ type Insight struct {
 type InsightLinkWarning struct {
 	Code      string
 	TargetKey string
+}
+
+type GetInsightParams struct {
+	ProjectID     uuid.UUID
+	InsightID     uuid.UUID
+	Key           string
+	RelationLimit int
+}
+
+type InsightLink struct {
+	TargetKey string
+	Resolved  bool
+	ID        uuid.UUID
+	Category  string
+	UpdatedAt time.Time
+}
+
+type InsightBacklink struct {
+	ID        uuid.UUID
+	Key       string
+	Category  string
+	UpdatedAt time.Time
+}
+
+type InsightDetail struct {
+	Insight            *Insight
+	Links              []InsightLink
+	Backlinks          []InsightBacklink
+	LinkCount          int
+	BacklinkCount      int
+	LinksTruncated     bool
+	BacklinksTruncated bool
 }
 
 const (

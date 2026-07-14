@@ -52,6 +52,11 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 		InputSchema: insightWriteSchema,
 	}, trackTool(ms, wideevent.ToolInsightWrite, ms.insightWrite))
 	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "insight_get",
+		Description: "Retrieves one insight by ID or key with bounded outgoing links and backlinks.",
+		InputSchema: insightGetSchema,
+	}, trackTool(ms, wideevent.ToolInsightGet, ms.insightGet))
+	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
 		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance.",
 		InputSchema: insightSearchSchema,
@@ -156,6 +161,13 @@ type insightSearchInput struct {
 	Limit     int      `json:"limit"`
 }
 
+type insightGetInput struct {
+	Project       string `json:"project"`
+	ID            string `json:"id"`
+	Key           string `json:"key"`
+	RelationLimit int    `json:"relation_limit"`
+}
+
 type insightListInput struct {
 	Project string `json:"project"`
 	Tag     string `json:"tag"`
@@ -187,7 +199,10 @@ func inputSchemaFor[T any]() *jsonschema.Schema {
 	return s
 }
 
-const projectSchemaProperty = "project"
+const (
+	projectSchemaProperty = "project"
+	uuidSchemaFormat      = "uuid"
+)
 
 var (
 	projectEnsureSchema = func() *jsonschema.Schema {
@@ -204,6 +219,22 @@ var (
 		s.Properties["category"].Enum = []any{"fact", "decision", "insight", "preference", "context", "general"}
 		s.Properties["source"].Enum = []any{"user", "repo", "agent", "command"}
 		s.Required = []string{projectSchemaProperty, "content", "category", "source"}
+		return s
+	}()
+
+	insightGetSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightGetInput]()
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].Format = uuidSchemaFormat
+		s.Properties["key"].MinLength = jsonschema.Ptr(1)
+		s.Properties["relation_limit"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["relation_limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Required = []string{projectSchemaProperty}
+		s.OneOf = []*jsonschema.Schema{
+			{Required: []string{"id"}, Not: &jsonschema.Schema{Required: []string{"key"}}},
+			{Required: []string{"key"}, Not: &jsonschema.Schema{Required: []string{"id"}}},
+		}
 		return s
 	}()
 
@@ -231,7 +262,7 @@ var (
 	insightDeleteSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightDeleteInput]()
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
-		s.Properties["id"].Format = "uuid"
+		s.Properties["id"].Format = uuidSchemaFormat
 		s.Required = []string{"id"}
 		return s
 	}()
@@ -248,7 +279,7 @@ var (
 	insightUpdateSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightUpdateInput]()
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
-		s.Properties["id"].Format = "uuid"
+		s.Properties["id"].Format = uuidSchemaFormat
 		s.Required = []string{"id"}
 		return s
 	}()
@@ -281,6 +312,31 @@ type insightResponse struct {
 type insightLinkWarningResponse struct {
 	Code      string `json:"code"`
 	TargetKey string `json:"target_key"`
+}
+
+type insightLinkResponse struct {
+	TargetKey string `json:"target_key"`
+	Resolved  bool   `json:"resolved"`
+	ID        string `json:"id,omitempty"`
+	Category  string `json:"category,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+type insightBacklinkResponse struct {
+	ID        string `json:"id"`
+	Key       string `json:"key,omitempty"`
+	Category  string `json:"category"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type insightGetResponse struct {
+	Insight            insightResponse           `json:"insight"`
+	Links              []insightLinkResponse     `json:"links"`
+	Backlinks          []insightBacklinkResponse `json:"backlinks"`
+	LinkCount          int                       `json:"link_count"`
+	BacklinkCount      int                       `json:"backlink_count"`
+	LinksTruncated     bool                      `json:"links_truncated"`
+	BacklinksTruncated bool                      `json:"backlinks_truncated"`
 }
 
 func toInsightLinkWarningResponses(warnings []store.InsightLinkWarning) []insightLinkWarningResponse {
@@ -350,6 +406,79 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 		"updated":  !insight.CreatedAt.Equal(insight.UpdatedAt),
 		"warnings": warnings,
 	})
+}
+
+func (ms *mcpServer) insightGet(ctx context.Context, req *mcp.CallToolRequest, in insightGetInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_get call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+	if ms.store == nil {
+		return nil, nil, fmt.Errorf("database not configured")
+	}
+	if (in.ID == "") == (in.Key == "") {
+		return nil, nil, fmt.Errorf("exactly one of id or key is required")
+	}
+	relationLimit := in.RelationLimit
+	if relationLimit == 0 {
+		relationLimit = 50
+	}
+	if relationLimit < 1 || relationLimit > 100 {
+		return nil, nil, fmt.Errorf("relation_limit must be between 1 and 100")
+	}
+	params := store.GetInsightParams{Key: in.Key, RelationLimit: relationLimit}
+	var err error
+	if in.ID != "" {
+		params.InsightID, err = uuid.Parse(in.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
+		}
+	}
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	project, err := ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("project %q not found", in.Project)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get project: %w", err)
+	}
+	params.ProjectID = project.ID
+	detail, err := ms.store.GetInsight(ctx, params)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("insight not found")
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get insight: %w", err)
+	}
+	return jsonResult(toInsightGetResponse(detail))
+}
+
+func toInsightGetResponse(detail *store.InsightDetail) insightGetResponse {
+	insight := detail.Insight
+	links := make([]insightLinkResponse, len(detail.Links))
+	for i, link := range detail.Links {
+		links[i] = insightLinkResponse{TargetKey: link.TargetKey, Resolved: link.Resolved}
+		if link.Resolved {
+			links[i].ID = link.ID.String()
+			links[i].Category = link.Category
+			links[i].UpdatedAt = link.UpdatedAt.Format(time.RFC3339)
+		}
+	}
+	backlinks := make([]insightBacklinkResponse, len(detail.Backlinks))
+	for i, backlink := range detail.Backlinks {
+		backlinks[i] = insightBacklinkResponse{
+			ID: backlink.ID.String(), Key: backlink.Key, Category: backlink.Category,
+			UpdatedAt: backlink.UpdatedAt.Format(time.RFC3339),
+		}
+	}
+	return insightGetResponse{
+		Insight: insightResponse{
+			ID: insight.ID.String(), Key: insight.Key, Content: insight.Content, Tags: insight.Tags,
+			Category: insight.Category, Source: insight.Source, UpdatedAt: insight.UpdatedAt.Format(time.RFC3339),
+		},
+		Links: links, Backlinks: backlinks, LinkCount: detail.LinkCount, BacklinkCount: detail.BacklinkCount,
+		LinksTruncated: detail.LinksTruncated, BacklinksTruncated: detail.BacklinksTruncated,
+	}
 }
 
 func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest, in insightSearchInput) (*mcp.CallToolResult, any, error) {

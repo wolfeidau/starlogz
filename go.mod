@@ -16,6 +16,7 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.0.13
 	github.com/lmittmann/tint v1.1.3
 	github.com/medama-io/go-useragent v1.2.3
+	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
@@ -67,6 +68,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.37.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.44.1 // indirect
 	github.com/aws/smithy-go v1.27.3 // indirect
+	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/boyter/go-string v1.0.5 // indirect
 	github.com/bufbuild/buf v1.71.0 // indirect
 	github.com/bufbuild/protocompile v0.14.2-0.20260605203730-cd7c3c124e10 // indirect
@@ -97,6 +99,7 @@ require (
 	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/google/cel-go v0.28.1 // indirect
 	github.com/google/go-containerregistry v0.21.6 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
