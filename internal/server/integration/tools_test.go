@@ -750,6 +750,52 @@ func TestInsightWrite_UpsertsByKey(t *testing.T) {
 	require.True(t, result2.Updated, "second write with same key should be an update")
 }
 
+func TestInsightWriteAndUpdate_ReturnLinkWarnings(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	type warning struct {
+		Code      string `json:"code"`
+		TargetKey string `json:"target_key"`
+	}
+	var written struct {
+		ID       string    `json:"id"`
+		Warnings []warning `json:"warnings"`
+	}
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+		"demo",
+		"[[insight:missing]] [[insight:source]]",
+		map[string]any{"key": "source"},
+	))
+	require.False(t, res.IsError, "insight_write failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &written))
+	require.Equal(t, []warning{
+		{Code: "unresolved_insight_link", TargetKey: "missing"},
+		{Code: "self_insight_link", TargetKey: "source"},
+	}, written.Warnings)
+
+	upd := callTool(t, ctx, sess, "insight_update", map[string]any{
+		"id":      written.ID,
+		"content": "[[insight:still-missing]]",
+	})
+	require.False(t, upd.IsError, "insight_update failed: %s", resultText(t, upd))
+	var updated struct {
+		Warnings []warning `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, upd)), &updated))
+	require.Equal(t, []warning{{Code: "unresolved_insight_link", TargetKey: "still-missing"}}, updated.Warnings)
+
+	tagOnly := callTool(t, ctx, sess, "insight_update", map[string]any{
+		"id":   written.ID,
+		"tags": []string{"tag-only"},
+	})
+	require.False(t, tagOnly.IsError, "insight_update failed: %s", resultText(t, tagOnly))
+	require.NotContains(t, resultText(t, tagOnly), `"warnings"`)
+}
+
 // --- insight_list / insight_search / insight_list_tags org scoping ---
 
 func TestInsightList_ScopedToCallerOrg(t *testing.T) {

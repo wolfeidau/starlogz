@@ -268,13 +268,27 @@ type tagCountResponse struct {
 }
 
 type insightResponse struct {
-	ID        string   `json:"id"`
-	Key       string   `json:"key,omitempty"`
-	Content   string   `json:"content"`
-	Tags      []string `json:"tags"`
-	Category  string   `json:"category"`
-	Source    string   `json:"source"`
-	UpdatedAt string   `json:"updated_at"`
+	ID           string                        `json:"id"`
+	Key          string                        `json:"key,omitempty"`
+	Content      string                        `json:"content"`
+	Tags         []string                      `json:"tags"`
+	Category     string                        `json:"category"`
+	Source       string                        `json:"source"`
+	UpdatedAt    string                        `json:"updated_at"`
+	LinkWarnings *[]insightLinkWarningResponse `json:"warnings,omitempty"`
+}
+
+type insightLinkWarningResponse struct {
+	Code      string `json:"code"`
+	TargetKey string `json:"target_key"`
+}
+
+func toInsightLinkWarningResponses(warnings []store.InsightLinkWarning) []insightLinkWarningResponse {
+	out := make([]insightLinkWarningResponse, len(warnings))
+	for i, warning := range warnings {
+		out[i] = insightLinkWarningResponse{Code: warning.Code, TargetKey: warning.TargetKey}
+	}
+	return out
 }
 
 func (ms *mcpServer) projectEnsure(ctx context.Context, req *mcp.CallToolRequest, in projectEnsureInput) (*mcp.CallToolResult, any, error) {
@@ -330,9 +344,11 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	if err != nil {
 		return nil, nil, fmt.Errorf("write insight: %w", err)
 	}
+	warnings := toInsightLinkWarningResponses(insight.LinkWarnings)
 	return jsonResult(map[string]any{
-		"id":      insight.ID.String(),
-		"updated": !insight.CreatedAt.Equal(insight.UpdatedAt),
+		"id":       insight.ID.String(),
+		"updated":  !insight.CreatedAt.Equal(insight.UpdatedAt),
+		"warnings": warnings,
 	})
 }
 
@@ -519,7 +535,7 @@ func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return nil, nil, fmt.Errorf("update insight: %w", err)
 	}
-	return jsonResult(insightResponse{
+	response := insightResponse{
 		ID:        insight.ID.String(),
 		Key:       insight.Key,
 		Content:   insight.Content,
@@ -527,7 +543,12 @@ func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest
 		Category:  insight.Category,
 		Source:    insight.Source,
 		UpdatedAt: insight.UpdatedAt.Format(time.RFC3339),
-	})
+	}
+	if in.Content != "" {
+		warnings := toInsightLinkWarningResponses(insight.LinkWarnings)
+		response.LinkWarnings = &warnings
+	}
+	return jsonResult(response)
 }
 
 func requireScope(req *mcp.CallToolRequest, scope string) error {

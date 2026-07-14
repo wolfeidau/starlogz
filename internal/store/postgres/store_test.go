@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -250,6 +251,180 @@ func TestWriteInsight_InsertWithoutKey(t *testing.T) {
 	require.NotEqual(t, f1.ID, f2.ID, "keyless insights get distinct IDs")
 	require.Empty(t, f1.Key)
 	require.Empty(t, f2.Key)
+}
+
+func TestInsightLinks_WarningsAndSynchronization(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 25)
+	baseline := insightLinkAuditOperations(t, st)
+
+	_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "target-a", Content: "target", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	source, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "source",
+		Content:   "[[insight:target-a]] [[insight:missing]] [[insight:source]] [[insight:missing|again]]",
+		CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []store.InsightLinkWarning{
+		{Code: store.InsightLinkWarningUnresolved, TargetKey: "missing"},
+		{Code: store.InsightLinkWarningSelf, TargetKey: "source"},
+	}, source.LinkWarnings)
+	require.Equal(t, map[string]int{"INSERT": 2}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "source",
+		Content:   source.Content,
+		CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{"INSERT": 2}, operationDelta(baseline, insightLinkAuditOperations(t, st)), "unchanged links must be preserved")
+
+	targets, err := st.ListInsights(ctx, p.ID, "", 10)
+	require.NoError(t, err)
+	var targetID uuid.UUID
+	for _, insight := range targets {
+		if insight.Key == "target-a" {
+			targetID = insight.ID
+		}
+	}
+	require.NotEqual(t, uuid.Nil, targetID)
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, targetID))
+
+	source, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "source",
+		Content:   source.Content,
+		CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []store.InsightLinkWarning{
+		{Code: store.InsightLinkWarningUnresolved, TargetKey: "missing"},
+		{Code: store.InsightLinkWarningSelf, TargetKey: "source"},
+		{Code: store.InsightLinkWarningUnresolved, TargetKey: "target-a"},
+	}, source.LinkWarnings)
+
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "target-a", Content: "recreated", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	source, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: source.ID, Content: "[[insight:target-a]]",
+	})
+	require.NoError(t, err)
+	require.Empty(t, source.LinkWarnings)
+	require.Equal(t, map[string]int{"INSERT": 2, "DELETE": 1}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+
+	_, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: source.ID, Tags: []string{"preserved"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{"INSERT": 2, "DELETE": 1}, operationDelta(baseline, insightLinkAuditOperations(t, st)), "tag-only updates must not touch links")
+
+	_, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: source.ID, Content: "no links",
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{"INSERT": 2, "DELETE": 2}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+}
+
+func TestInsightLinks_KeylessSourceAndProjectIsolation(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 26)
+	baseline := insightLinkAuditOperations(t, st)
+	other, err := st.EnsureProject(ctx, p.OrgID, u.ID, "other", "Other")
+	require.NoError(t, err)
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: other.ID, Key: "other-target", Content: "target", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+
+	source, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: "[[insight:other-target]]", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Empty(t, source.Key)
+	require.Equal(t, []store.InsightLinkWarning{{
+		Code: store.InsightLinkWarningUnresolved, TargetKey: "other-target",
+	}}, source.LinkWarnings)
+	require.Equal(t, map[string]int{"INSERT": 1}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+}
+
+func TestImportProjects_SynchronizesInsightLinks(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 27)
+	baseline := insightLinkAuditOperations(t, st)
+
+	projectCount, insightCount, err := st.ImportProjects(ctx, p.OrgID, u.ID, []store.ImportProject{{
+		Slug: "imported",
+		Name: "Imported",
+		Insights: []store.ImportInsight{
+			{Key: "source", Content: "[[insight:target]]"},
+			{Key: "target", Content: "target"},
+		},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 1, projectCount)
+	require.Equal(t, 2, insightCount)
+	require.Equal(t, map[string]int{"INSERT": 1}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+}
+
+func TestImportProjects_RollsBackInsightLinks(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 28)
+	baseline := insightLinkAuditOperations(t, st)
+
+	_, _, err := st.ImportProjects(ctx, p.OrgID, u.ID, []store.ImportProject{{
+		Slug: "rollback-links",
+		Name: "Rollback Links",
+		Insights: []store.ImportInsight{
+			{Key: "source", Content: "[[insight:target]]"},
+			{Key: "invalid", Content: "invalid", Category: "not-a-category"},
+		},
+	}})
+	require.Error(t, err)
+	require.Empty(t, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+	_, err = st.GetProjectBySlug(ctx, p.OrgID, "rollback-links")
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func operationDelta(before, after map[string]int) map[string]int {
+	delta := make(map[string]int)
+	for operation, count := range after {
+		if count -= before[operation]; count != 0 {
+			delta[operation] = count
+		}
+	}
+	return delta
+}
+
+func insightLinkAuditOperations(t *testing.T, st *postgres.Store) map[string]int {
+	t.Helper()
+	entries, err := st.ListAuditLog(t.Context(), store.AuditLogFilter{TableName: "insight_links", Limit: 500})
+	require.NoError(t, err)
+
+	operations := make(map[string]int)
+	for _, entry := range entries {
+		operations[entry.Operation]++
+		data := entry.NewData
+		if entry.Operation == "DELETE" {
+			data = entry.OldData
+		}
+		var row struct {
+			TargetKey string `json:"target_key"`
+		}
+		require.NoError(t, json.Unmarshal(data, &row))
+		require.NotEmpty(t, row.TargetKey)
+	}
+	return operations
 }
 
 func TestSearchInsights(t *testing.T) {
