@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
+	"github.com/wolfeidau/starlogz/internal/insightlinks"
 	"github.com/wolfeidau/starlogz/internal/store"
 )
 
@@ -957,20 +959,132 @@ func (s *Store) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 // project it is updated in place; otherwise a new row is inserted.
 func (s *Store) WriteInsight(ctx context.Context, p store.WriteInsightParams) (*store.Insight, error) {
 	s.logger(ctx).DebugContext(ctx, "writing insight", slog.String("project_id", p.ProjectID.String()), slog.String("key", p.Key), slog.String("category", p.Category), slog.String("source", p.Source), slog.String("created_by", p.CreatedBy.String()))
-	return writeInsightTx(ctx, s.pool, p)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	insight, err := writeInsightTx(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return insight, nil
 }
 
 func writeInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
+	var insight *store.Insight
+	var err error
 	if p.Key != "" {
-		f, err := updateInsightByKeyTx(ctx, db, p)
+		insight, err = updateInsightByKeyTx(ctx, db, p)
 		if err == nil {
-			return f, nil
+			return syncInsightContentTx(ctx, db, insight)
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
 	}
-	return insertInsightTx(ctx, db, p)
+	insight, err = insertInsightTx(ctx, db, p)
+	if err != nil {
+		return nil, err
+	}
+	return syncInsightContentTx(ctx, db, insight)
+}
+
+func syncInsightContentTx(ctx context.Context, db dbtx, insight *store.Insight) (*store.Insight, error) {
+	targets := insightlinks.Targets(insight.Content)
+	stored := targets[:0]
+	for _, target := range targets {
+		if target == insight.Key && insight.Key != "" {
+			insight.LinkWarnings = append(insight.LinkWarnings, store.InsightLinkWarning{
+				Code:      store.InsightLinkWarningSelf,
+				TargetKey: target,
+			})
+			continue
+		}
+		stored = append(stored, target)
+	}
+
+	if err := syncInsightLinksTx(ctx, db, insight.ID, stored); err != nil {
+		return nil, err
+	}
+	if len(stored) == 0 {
+		return insight, nil
+	}
+	unresolved, err := unresolvedInsightLinksTx(ctx, db, insight.ID, insight.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, target := range unresolved {
+		insight.LinkWarnings = append(insight.LinkWarnings, store.InsightLinkWarning{
+			Code:      store.InsightLinkWarningUnresolved,
+			TargetKey: target,
+		})
+	}
+	sort.Slice(insight.LinkWarnings, func(i, j int) bool {
+		if insight.LinkWarnings[i].TargetKey == insight.LinkWarnings[j].TargetKey {
+			return insight.LinkWarnings[i].Code < insight.LinkWarnings[j].Code
+		}
+		return insight.LinkWarnings[i].TargetKey < insight.LinkWarnings[j].TargetKey
+	})
+	return insight, nil
+}
+
+func syncInsightLinksTx(ctx context.Context, db dbtx, sourceID uuid.UUID, targets []string) error {
+	_, err := db.Exec(ctx, `
+		WITH desired AS (
+		    SELECT unnest($2::text[]) AS target_key
+		), deleted AS (
+		    DELETE FROM insight_links
+		    WHERE source_insight_id = $1
+		      AND NOT EXISTS (
+		          SELECT 1 FROM desired WHERE desired.target_key = insight_links.target_key
+		      )
+		)
+		INSERT INTO insight_links (source_insight_id, target_key)
+		SELECT $1, target_key FROM desired
+		ON CONFLICT (source_insight_id, target_key) DO NOTHING`,
+		sourceID, targets)
+	if err != nil {
+		return fmt.Errorf("sync insight links: %w", err)
+	}
+	return nil
+}
+
+func unresolvedInsightLinksTx(ctx context.Context, db dbtx, sourceID, projectID uuid.UUID) ([]string, error) {
+	rows, err := db.Query(ctx, `
+		SELECT links.target_key
+		FROM insight_links links
+		WHERE links.source_insight_id = $1
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM insights target
+		      WHERE target.project_id = $2
+		        AND target.key = links.target_key
+		        AND target.deleted_at IS NULL
+		  )
+		ORDER BY links.target_key COLLATE "C" ASC`,
+		sourceID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("query unresolved insight links: %w", err)
+	}
+	defer rows.Close()
+
+	var targets []string
+	for rows.Next() {
+		var target string
+		if err := rows.Scan(&target); err != nil {
+			return nil, fmt.Errorf("scan unresolved insight link: %w", err)
+		}
+		targets = append(targets, target)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unresolved insight links: %w", err)
+	}
+	return targets, nil
 }
 
 func updateInsightByKeyTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
@@ -1264,11 +1378,17 @@ func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID) ([]sto
 func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) (*store.Insight, error) {
 	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.Int("tag_count", len(p.Tags)), slog.String("org_id", p.OrgID.String()))
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
 	}
-	row := s.pool.QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		UPDATE insights SET
 		  content    = CASE WHEN $2 <> '' THEN $2 ELSE content END,
 		  tags       = CASE WHEN $3 THEN $4 ELSE tags END,
@@ -1277,11 +1397,23 @@ func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) 
 		  AND project_id IN (SELECT id FROM projects WHERE org_id = $5)
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
 		p.InsightID, p.Content, p.Tags != nil, tags, p.OrgID)
-	f, err := scanInsight(row)
+	insight, err := scanInsight(row)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, store.ErrNotFound
 	}
-	return f, err
+	if err != nil {
+		return nil, err
+	}
+	if p.Content != "" {
+		insight, err = syncInsightContentTx(ctx, tx, insight)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return insight, nil
 }
 
 // DeleteInsight soft-deletes an insight, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.

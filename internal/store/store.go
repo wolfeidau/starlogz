@@ -128,17 +128,28 @@ type Project struct {
 
 // Insight is a text assertion stored against a project.
 type Insight struct {
-	ID        uuid.UUID
-	ProjectID uuid.UUID
-	Key       string // empty string when no key
-	Content   string
-	Tags      []string
-	Category  string
-	Source    string
-	CreatedBy uuid.UUID
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID           uuid.UUID
+	ProjectID    uuid.UUID
+	Key          string // empty string when no key
+	Content      string
+	Tags         []string
+	Category     string
+	Source       string
+	CreatedBy    uuid.UUID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	LinkWarnings []InsightLinkWarning
 }
+
+type InsightLinkWarning struct {
+	Code      string
+	TargetKey string
+}
+
+const (
+	InsightLinkWarningUnresolved = "unresolved_insight_link"
+	InsightLinkWarningSelf       = "self_insight_link"
+)
 
 type SearchQueryMode string
 
