@@ -6,6 +6,7 @@
       "name": "starlogz",
       "dependencies": {
         "@bufbuild/protobuf": "^2.10.2",
+        "@connectrpc/connect": "^2.1.2",
         "@connectrpc/connect-query": "^2.2.0",
         "@connectrpc/connect-web": "^2.1.1",
         "@tanstack/react-query": "^5.90.14",
