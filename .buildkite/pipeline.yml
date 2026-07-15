@@ -60,9 +60,10 @@ steps:
               context: go-tests
               max-failures: 20
 
-      - label: ":bun: lint"
-        command:
-          - bun install
+      - label: ":bun: test and lint"
+        commands:
+          - bun install --frozen-lockfile
+          - bun run test
           - bun run lint
         plugins:
           - mise#v1.1.1: ~
