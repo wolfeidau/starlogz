@@ -1,16 +1,8 @@
-import { Code, ConnectError } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { TransportProvider, useQuery } from "@connectrpc/connect-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type MouseEvent,
-} from "react";
+import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import {
   getInsight,
   getProjectDashboard,
@@ -23,35 +15,16 @@ import {
 import type {
   ActivityBucket,
   CountBucket,
-  GetInsightResponse,
   Insight,
-  InsightReference,
   Project,
 } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { useDashboardNavigation } from "./dashboard_navigation";
 import {
-  dashboardURL,
-  isUnmodifiedPrimaryClick,
-  openInsightKeyForClick,
-  readDashboardLocation,
-  type InsightSelector,
-} from "./insight_navigation";
+  formatTimestamp,
+  InsightDetail,
+  RenderedMarkdown,
+} from "./insight_detail";
 import "./dashboard.css";
-
-function timestampToDate(ts?: Timestamp): Date | null {
-  if (!ts) return null;
-  return new Date(Number(ts.seconds) * 1000 + Math.floor(ts.nanos / 1_000_000));
-}
-
-function formatTimestamp(ts?: Timestamp): string {
-  const date = timestampToDate(ts);
-  if (!date) return "-";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function LoginView() {
   return (
@@ -129,31 +102,6 @@ function ActivityStrip({ buckets }: { buckets: ActivityBucket[] }) {
   );
 }
 
-function RenderedMarkdown({
-  html,
-  onOpenInsight,
-}: {
-  html: string;
-  onOpenInsight: (key: string) => void;
-}) {
-  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
-    const key = openInsightKeyForClick(event, event.target);
-    if (!key) return;
-    event.preventDefault();
-    onOpenInsight(key);
-  };
-
-  return (
-    // biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: interaction is delegated to sanitized anchors, whose keyboard behavior remains native.
-    <div
-      className="markdown-preview"
-      onClick={handleClick}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: the server returns allowlist-sanitized HTML.
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
-
 function InsightTable({
   insights,
   onOpenInsight,
@@ -207,217 +155,6 @@ function InsightTable({
   );
 }
 
-function DetailRelation({
-  label,
-  reference,
-  project,
-  selector,
-  onNavigate,
-}: {
-  label: string;
-  reference: InsightReference;
-  project: string;
-  selector: InsightSelector;
-  onNavigate: (selector: InsightSelector) => void;
-}) {
-  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!isUnmodifiedPrimaryClick(event)) return;
-    event.preventDefault();
-    onNavigate(selector);
-  };
-
-  return (
-    <li className="relationship-item">
-      <a
-        href={dashboardURL(window.location.href, project, selector)}
-        onClick={handleClick}
-      >
-        {label}
-      </a>
-      {reference.category && <span className="pill">{reference.category}</span>}
-      {reference.updatedAt && (
-        <span className="muted">{formatTimestamp(reference.updatedAt)}</span>
-      )}
-    </li>
-  );
-}
-
-function RelationshipSection({
-  title,
-  references,
-  total,
-  truncated,
-  kind,
-  project,
-  onNavigate,
-}: {
-  title: string;
-  references: InsightReference[];
-  total: number;
-  truncated: boolean;
-  kind: "links" | "backlinks";
-  project: string;
-  onNavigate: (selector: InsightSelector) => void;
-}) {
-  return (
-    <section className="relationship-section">
-      <div className="relationship-heading">
-        <h3>{title}</h3>
-        <span>{total}</span>
-      </div>
-      {references.length === 0 ? (
-        <p className="muted">No {title.toLowerCase()}.</p>
-      ) : (
-        <ul className="relationship-list">
-          {references.map((reference) => {
-            if (kind === "links" && !reference.resolved) {
-              return (
-                <li
-                  className="relationship-item relationship-unresolved"
-                  key={reference.targetKey}
-                >
-                  <span>{reference.targetKey}</span>
-                  <span className="status-label">Unresolved</span>
-                </li>
-              );
-            }
-
-            const selector: InsightSelector =
-              kind === "links" || reference.key
-                ? {
-                    case: "key",
-                    value:
-                      kind === "links" ? reference.targetKey : reference.key,
-                  }
-                : { case: "id", value: reference.id };
-            const label =
-              kind === "links"
-                ? reference.targetKey
-                : reference.key || reference.id;
-            return (
-              <DetailRelation
-                key={`${selector.case}:${selector.value}`}
-                label={label}
-                reference={reference}
-                project={project}
-                selector={selector}
-                onNavigate={onNavigate}
-              />
-            );
-          })}
-        </ul>
-      )}
-      {truncated && (
-        <p className="relationship-truncated">
-          Showing the first {references.length} of {total}.
-        </p>
-      )}
-    </section>
-  );
-}
-
-function InsightDetail({
-  project,
-  selector,
-  detail,
-  error,
-  loading,
-  onClose,
-  onNavigate,
-}: {
-  project: string;
-  selector: InsightSelector;
-  detail?: GetInsightResponse;
-  error: Error | null;
-  loading: boolean;
-  onClose: () => void;
-  onNavigate: (selector: InsightSelector) => void;
-}) {
-  const insight = detail?.insight;
-  const notFound =
-    error instanceof ConnectError && error.code === Code.NotFound;
-
-  return (
-    <div className="detail-backdrop">
-      <section
-        aria-labelledby="insight-detail-title"
-        aria-modal="true"
-        className="detail-panel"
-        role="dialog"
-      >
-        <header className="detail-header">
-          <div>
-            <p className="eyebrow">Insight detail</p>
-            <h2 id="insight-detail-title">{insight?.key || selector.value}</h2>
-          </div>
-          <button
-            aria-label="Close insight detail"
-            className="detail-close"
-            onClick={onClose}
-            type="button"
-          >
-            Close
-          </button>
-        </header>
-
-        {loading ? (
-          <div className="detail-state">Loading insight</div>
-        ) : error ? (
-          <div className="detail-state detail-error">
-            <h3>{notFound ? "Insight not found" : "Unable to load insight"}</h3>
-            <p>
-              {notFound
-                ? "The insight is missing, deleted, or unavailable in this project."
-                : "The request failed. Close the panel and try again."}
-            </p>
-          </div>
-        ) : insight ? (
-          <>
-            <div className="detail-metadata">
-              <span className="pill">{insight.category}</span>
-              <span>{insight.source}</span>
-              <span>{formatTimestamp(insight.updatedAt)}</span>
-            </div>
-            <RenderedMarkdown
-              html={insight.renderedHtml}
-              onOpenInsight={(key) => onNavigate({ case: "key", value: key })}
-            />
-            <div className="detail-tags">
-              {insight.tags.map((tag) => (
-                <span className="tag" key={tag}>
-                  {tag}
-                </span>
-              ))}
-            </div>
-            <div className="relationships-grid">
-              <RelationshipSection
-                title="Outgoing links"
-                references={detail?.links ?? []}
-                total={detail?.linkCount ?? 0}
-                truncated={detail?.linksTruncated ?? false}
-                kind="links"
-                project={project}
-                onNavigate={onNavigate}
-              />
-              <RelationshipSection
-                title="Backlinks"
-                references={detail?.backlinks ?? []}
-                total={detail?.backlinkCount ?? 0}
-                truncated={detail?.backlinksTruncated ?? false}
-                kind="backlinks"
-                project={project}
-                onNavigate={onNavigate}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="detail-state detail-error">Insight not found.</div>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function ProjectSelector({
   projects,
   selected,
@@ -445,10 +182,6 @@ function ProjectSelector({
 }
 
 function DashboardView() {
-  const initialLocation = useMemo(
-    () => readDashboardLocation(window.location.search),
-    [],
-  );
   const session = useQuery(getSession, {});
   const isAuthenticated = Boolean(session.data) && !session.error;
   const projectsQuery = useQuery(
@@ -457,51 +190,10 @@ function DashboardView() {
     { enabled: isAuthenticated },
   );
   const projects = projectsQuery.data?.projects ?? [];
-  const [selectedProject, setSelectedProject] = useState(
-    initialLocation.project,
-  );
-  const [detailSelector, setDetailSelector] = useState<InsightSelector | null>(
-    initialLocation.selector,
-  );
+  const { activeProject, detailSelector, navigate } =
+    useDashboardNavigation(projects);
   const [query, setQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
-
-  const activeProject = projects.some(
-    (project) => project.slug === selectedProject,
-  )
-    ? selectedProject
-    : projects[0]?.slug || "";
-  const navigate = useCallback(
-    (project: string, selector: InsightSelector | null, replace = false) => {
-      const url = dashboardURL(window.location.href, project, selector);
-      if (replace) window.history.replaceState({}, "", url);
-      else window.history.pushState({}, "", url);
-      setSelectedProject(project);
-      setDetailSelector(selector);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!activeProject) return;
-    const current = readDashboardLocation(window.location.search);
-    if (
-      selectedProject !== activeProject ||
-      current.project !== activeProject
-    ) {
-      navigate(activeProject, null, true);
-    }
-  }, [activeProject, navigate, selectedProject]);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      const location = readDashboardLocation(window.location.search);
-      setSelectedProject(location.project);
-      setDetailSelector(location.selector);
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
 
   const dashboard = useQuery(
     getProjectDashboard,
