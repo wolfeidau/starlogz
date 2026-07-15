@@ -1,10 +1,10 @@
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { TransportProvider, useQuery } from "@connectrpc/connect-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import {
+  getInsight,
   getProjectDashboard,
   getSession,
   listInsights,
@@ -18,23 +18,13 @@ import type {
   Insight,
   Project,
 } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { useDashboardNavigation } from "./dashboard_navigation";
+import {
+  formatTimestamp,
+  InsightDetail,
+  RenderedMarkdown,
+} from "./insight_detail";
 import "./dashboard.css";
-
-function timestampToDate(ts?: Timestamp): Date | null {
-  if (!ts) return null;
-  return new Date(Number(ts.seconds) * 1000 + Math.floor(ts.nanos / 1_000_000));
-}
-
-function formatTimestamp(ts?: Timestamp): string {
-  const date = timestampToDate(ts);
-  if (!date) return "-";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function LoginView() {
   return (
@@ -112,158 +102,13 @@ function ActivityStrip({ buckets }: { buckets: ActivityBucket[] }) {
   );
 }
 
-function InlineMarkdown({ text }: { text: string }) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
-  let offset = 0;
-  const keyedParts = parts.map((part) => {
-    const start = text.indexOf(part, offset);
-    offset = start + part.length;
-    return { key: `${start}:${part}`, part };
-  });
-  return (
-    <>
-      {keyedParts.map(({ key, part }) => {
-        if (part.startsWith("`") && part.endsWith("`")) {
-          return <code key={key}>{part.slice(1, -1)}</code>;
-        }
-        if (part.startsWith("**") && part.endsWith("**")) {
-          return <strong key={key}>{part.slice(2, -2)}</strong>;
-        }
-        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-        if (link) {
-          return (
-            <a key={key} href={link[2]} rel="noreferrer" target="_blank">
-              {link[1]}
-            </a>
-          );
-        }
-        return <Fragment key={key}>{part}</Fragment>;
-      })}
-    </>
-  );
-}
-
-function MarkdownPreview({ content }: { content: string }) {
-  const blocks: ReactNode[] = [];
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.trim() === "") {
-      i += 1;
-      continue;
-    }
-
-    if (line.startsWith("```")) {
-      const codeLines: string[] = [];
-      i += 1;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i += 1;
-      }
-      i += lines[i]?.startsWith("```") ? 1 : 0;
-      blocks.push(
-        <pre key={blocks.length}>
-          <code>{codeLines.join("\n")}</code>
-        </pre>,
-      );
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      const level = heading[1].length;
-      const Tag = `h${level + 2}` as "h3" | "h4" | "h5";
-      blocks.push(
-        <Tag key={blocks.length}>
-          <InlineMarkdown text={heading[2]} />
-        </Tag>,
-      );
-      i += 1;
-      continue;
-    }
-
-    if (line.startsWith("> ")) {
-      const quoteLines: string[] = [];
-      while (i < lines.length && lines[i].startsWith("> ")) {
-        quoteLines.push(lines[i].slice(2));
-        i += 1;
-      }
-      blocks.push(
-        <blockquote key={blocks.length}>
-          <InlineMarkdown text={quoteLines.join(" ")} />
-        </blockquote>,
-      );
-      continue;
-    }
-
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: Array<{ key: string; text: string }> = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        items.push({
-          key: `line-${i}`,
-          text: lines[i].replace(/^\s*[-*]\s+/, ""),
-        });
-        i += 1;
-      }
-      blocks.push(
-        <ul key={blocks.length}>
-          {items.map((item) => (
-            <li key={item.key}>
-              <InlineMarkdown text={item.text} />
-            </li>
-          ))}
-        </ul>,
-      );
-      continue;
-    }
-
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: Array<{ key: string; text: string }> = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push({
-          key: `line-${i}`,
-          text: lines[i].replace(/^\s*\d+\.\s+/, ""),
-        });
-        i += 1;
-      }
-      blocks.push(
-        <ol key={blocks.length}>
-          {items.map((item) => (
-            <li key={item.key}>
-              <InlineMarkdown text={item.text} />
-            </li>
-          ))}
-        </ol>,
-      );
-      continue;
-    }
-
-    const paragraph: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() !== "" &&
-      !lines[i].startsWith("```") &&
-      !/^(#{1,3})\s+/.test(lines[i]) &&
-      !lines[i].startsWith("> ") &&
-      !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i])
-    ) {
-      paragraph.push(lines[i]);
-      i += 1;
-    }
-    blocks.push(
-      <p key={blocks.length}>
-        <InlineMarkdown text={paragraph.join(" ")} />
-      </p>,
-    );
-  }
-
-  return <div className="markdown-preview">{blocks}</div>;
-}
-
-function InsightTable({ insights }: { insights: Insight[] }) {
+function InsightTable({
+  insights,
+  onOpenInsight,
+}: {
+  insights: Insight[];
+  onOpenInsight: (key: string) => void;
+}) {
   return (
     <div className="table-wrap">
       <table>
@@ -281,7 +126,10 @@ function InsightTable({ insights }: { insights: Insight[] }) {
             <tr key={insight.id}>
               <td>
                 <div className="insight-content">
-                  <MarkdownPreview content={insight.content} />
+                  <RenderedMarkdown
+                    html={insight.renderedHtml}
+                    onOpenInsight={onOpenInsight}
+                  />
                 </div>
                 {insight.key && <code>{insight.key}</code>}
               </td>
@@ -317,7 +165,13 @@ function ProjectSelector({
   onSelect: (slug: string) => void;
 }) {
   return (
-    <select value={selected} onChange={(event) => onSelect(event.target.value)}>
+    <select
+      aria-label="Project"
+      id="project-selector"
+      name="project"
+      value={selected}
+      onChange={(event) => onSelect(event.target.value)}
+    >
       {projects.map((project) => (
         <option key={project.id} value={project.slug}>
           {project.name || project.slug}
@@ -336,16 +190,10 @@ function DashboardView() {
     { enabled: isAuthenticated },
   );
   const projects = projectsQuery.data?.projects ?? [];
-  const [selectedProject, setSelectedProject] = useState("");
+  const { activeProject, detailSelector, navigate } =
+    useDashboardNavigation(projects);
   const [query, setQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
-
-  const activeProject = selectedProject || projects[0]?.slug || "";
-  useEffect(() => {
-    if (!selectedProject && activeProject) {
-      setSelectedProject(activeProject);
-    }
-  }, [activeProject, selectedProject]);
 
   const dashboard = useQuery(
     getProjectDashboard,
@@ -371,6 +219,18 @@ function DashboardView() {
     listInsights,
     { project: activeProject, tag: selectedTag, limit: 100 },
     { enabled: isAuthenticated && activeProject !== "" && query.trim() === "" },
+  );
+  const detail = useQuery(
+    getInsight,
+    {
+      project: activeProject,
+      selector: detailSelector ?? { case: undefined },
+      relationLimit: 50,
+    },
+    {
+      enabled:
+        isAuthenticated && activeProject !== "" && detailSelector !== null,
+    },
   );
 
   if (session.error) {
@@ -411,17 +271,23 @@ function DashboardView() {
           projects={projects}
           selected={activeProject}
           onSelect={(slug) => {
-            setSelectedProject(slug);
+            navigate(slug, null);
             setSelectedTag("");
             setQuery("");
           }}
         />
         <input
+          aria-label="Search insights"
+          id="insight-search"
+          name="query"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search insights"
         />
         <select
+          aria-label="Filter by tag"
+          id="tag-filter"
+          name="tag"
           value={selectedTag}
           onChange={(event) => setSelectedTag(event.target.value)}
         >
@@ -476,9 +342,26 @@ function DashboardView() {
         ) : insights.length === 0 ? (
           <div className="empty-panel">No matching insights.</div>
         ) : (
-          <InsightTable insights={insights} />
+          <InsightTable
+            insights={insights}
+            onOpenInsight={(key) =>
+              navigate(activeProject, { case: "key", value: key })
+            }
+          />
         )}
       </section>
+
+      {detailSelector && (
+        <InsightDetail
+          project={activeProject}
+          selector={detailSelector}
+          detail={detail.data}
+          error={detail.error}
+          loading={detail.isLoading}
+          onClose={() => navigate(activeProject, null)}
+          onNavigate={(selector) => navigate(activeProject, selector)}
+        />
+      )}
     </main>
   );
 }

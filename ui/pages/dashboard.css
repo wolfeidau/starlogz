@@ -336,9 +336,12 @@ code {
   gap: 8px;
 }
 
+.markdown-preview h1,
+.markdown-preview h2,
 .markdown-preview h3,
 .markdown-preview h4,
 .markdown-preview h5,
+.markdown-preview h6,
 .markdown-preview p,
 .markdown-preview ul,
 .markdown-preview ol,
@@ -347,9 +350,12 @@ code {
   margin: 0;
 }
 
+.markdown-preview h1,
+.markdown-preview h2,
 .markdown-preview h3,
 .markdown-preview h4,
-.markdown-preview h5 {
+.markdown-preview h5,
+.markdown-preview h6 {
   font-size: 14px;
   line-height: 1.3;
 }
@@ -399,6 +405,14 @@ code {
   font-weight: 650;
 }
 
+.markdown-preview .insight-link {
+  border-radius: 4px;
+  background: var(--primary-soft);
+  padding: 1px 4px;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
 .pill,
 .tag {
   display: inline-flex;
@@ -434,6 +448,182 @@ code {
   color: var(--muted);
 }
 
+.detail-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 42%);
+  backdrop-filter: blur(2px);
+}
+
+.detail-panel {
+  width: min(760px, 100%);
+  min-height: 100%;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: -24px 0 64px rgb(15 23 42 / 18%);
+  padding: 24px;
+}
+
+.detail-header {
+  position: sticky;
+  z-index: 1;
+  top: -24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin: -24px -24px 24px;
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 96%);
+  padding: 24px;
+}
+
+.detail-header h2,
+.detail-state h3,
+.relationship-heading h3 {
+  margin: 0;
+}
+
+.detail-close {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.detail-close:hover {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+}
+
+.detail-state {
+  padding: 48px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.detail-error h3 {
+  color: var(--ink);
+}
+
+.detail-metadata,
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.detail-panel > .markdown-preview {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.detail-panel > .markdown-preview h1 {
+  font-size: 24px;
+}
+
+.detail-panel > .markdown-preview h2 {
+  font-size: 20px;
+}
+
+.detail-panel > .markdown-preview h3 {
+  font-size: 17px;
+}
+
+.detail-tags {
+  margin: 20px 0 0;
+}
+
+.relationships-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.relationship-section {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 16px;
+}
+
+.relationship-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.relationship-heading h3 {
+  font-size: 14px;
+}
+
+.relationship-heading span,
+.status-label {
+  border-radius: 999px;
+  background: var(--line-soft);
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.relationship-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relationship-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.relationship-item a,
+.relationship-item > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.relationship-item a {
+  color: var(--primary-strong);
+  font-weight: 650;
+}
+
+.relationship-unresolved {
+  color: var(--muted);
+}
+
+.status-label {
+  background: var(--accent-soft);
+  color: #92400e;
+}
+
+.relationship-truncated {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .summary-grid,
   .dashboard-grid {
@@ -457,6 +647,20 @@ code {
 
   .summary-grid,
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-panel {
+    padding: 18px;
+  }
+
+  .detail-header {
+    top: -18px;
+    margin: -18px -18px 20px;
+    padding: 18px;
+  }
+
+  .relationships-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "bun build ./ui/pages/dashboard.tsx --outdir ./internal/server/public --target browser --format esm",
+    "test": "bun test ui",
     "lint": "biome lint ui api/gen/proto/es",
     "format": "biome format --write ui api/gen/proto/es",
     "proto:generate": "cd api && go tool buf generate"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.10.2",
+    "@connectrpc/connect": "^2.1.2",
     "@connectrpc/connect-query": "^2.2.0",
     "@connectrpc/connect-web": "^2.1.1",
     "@tanstack/react-query": "^5.90.14",
@@ -21,6 +23,9 @@
     "@biomejs/biome": "2.3.10",
     "@bufbuild/protoc-gen-es": "^2.10.2",
     "@connectrpc/protoc-gen-connect-query": "^2.2.0",
+    "@happy-dom/global-registrator": "^20.10.6",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3"
   }

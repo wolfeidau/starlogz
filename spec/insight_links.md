@@ -1,18 +1,18 @@
 # Linked insights
 
-Status: proposed
+Status: implemented
 
 ## Implementation status
 
 The backend implements the Goldmark insight-link AST extension, migration 17,
 atomic relationship synchronization for content mutations, write warnings,
 bounded `insight_get` relationship reads and backlinks, the Connect
-`GetInsight` RPC, and sanitized server-rendered `rendered_html` fragments.
+`GetInsight` RPC, and sanitized server-rendered `rendered_html` fragments. The
+dashboard consumes those fragments through one delegated-action component and
+provides URL-synchronized detail, outgoing-link, and backlink navigation.
 
-Dashboard consumption of `rendered_html`, detail/deep-link navigation, and the
-delegated action bridge remain pending. Until those land, links can be traversed
-through MCP and Connect but the first-party dashboard does not expose
-relationship navigation.
+The implementation and automated validation are complete. Rollout validation
+still requires an authenticated browser pass after deployment.
 
 ## Summary
 
@@ -564,6 +564,7 @@ Final verification runs:
 ```bash
 mise exec -- bun install --frozen-lockfile
 mise exec -- bun run proto:generate
+mise exec -- bun run test
 mise exec -- bun run lint
 mise exec -- bun run build
 mise exec -- go test ./...
