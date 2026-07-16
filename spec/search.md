@@ -1,5 +1,9 @@
 # Insight search
 
+> Status: Current contract
+> Last reviewed: 2026-07-16
+> Authority: Behavioral contract; current code and tests provide implementation evidence.
+
 `insight_search` provides project-scoped PostgreSQL full-text search over live
 insight content and tags. Results are ordered by text-search rank.
 

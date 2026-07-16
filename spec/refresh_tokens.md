@@ -1,320 +1,151 @@
-# Refresh Token Grant — OAuth2 Spec
+# OAuth2 refresh-token grant
 
-> Version 0.2 · Draft · April 2026
-
-## Contents
-
-1. [Overview](#overview)
-2. [Refresh token format](#refresh-token-format)
-3. [Issuance](#issuance)
-4. [Refresh grant flow](#refresh-grant-flow)
-5. [Token rotation](#token-rotation)
-6. [GitHub token rotation](#github-token-rotation)
-7. [Expiry and revocation](#expiry-and-revocation)
-8. [Error reference](#error-reference)
-9. [Discovery changes](#discovery-changes)
-10. [Database schema changes](#database-schema-changes)
-11. [v0.2 constraints](#v02-constraints)
-
----
+> Status: Current contract
+> Last reviewed: 2026-07-16
+> Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Overview
 
-v0.1 required users to complete a full GitHub OAuth2 round-trip every time their
-7-day JWT expired. v0.2 adds a server-issued opaque refresh token that lets MCP
-clients obtain a new JWT silently, without redirecting the user to GitHub again.
+Eligible MCP clients receive a Starlogz-issued opaque refresh token with their
+access-token JWT. The refresh token allows the client to obtain another
+15-minute JWT without repeating the interactive GitHub authorization flow.
 
-**Prerequisite — persistence migration.** This spec assumes
-`spec/persistence.md` has been applied first. In particular, it depends on:
-- migration 4 (the `our_refresh_token` and `client_id` columns on `grants`),
-- the `RevocationStore` interface backed by the `revoked_tokens` table (so JWT
-  revocation survives restarts and is visible across instances), and
-- the `RotateGrant` / `GetGrantByRefreshToken` / `DeleteGrant` operations on
-  the expanded `GrantStore` interface.
+The grant depends on an upstream GitHub App refresh token. Starlogz does not
+issue its own refresh token when GitHub did not supply one or when the registered
+client does not support the `refresh_token` grant.
 
-**Prerequisite — GitHub App with expiring tokens.** This flow depends on GitHub
-issuing a refresh token alongside the initial access token. This only happens
-when the server is configured with a **GitHub App** (not an OAuth App) that has
-**Expire user authorization tokens** enabled in its settings. Without this,
-GitHub returns a non-expiring access token and no refresh token; the `grants`
-table will store an empty refresh token and all refresh grant requests will
-return `invalid_grant`.
+## Token and response
 
-The refresh token is tied to a single authorization grant (`grants` table row,
-keyed by `jti`). It is single-use: each successful refresh rotates both the
-refresh token and the underlying GitHub App tokens. If the GitHub refresh token
-expires (up to 6 months after issuance), the refresh fails and the user must
-re-authenticate via the full GitHub flow.
+A Starlogz refresh token is 32 cryptographically random bytes encoded as
+unpadded base64url. It is opaque to clients and bound to one persisted grant,
+client ID, user, scope, access-token `jti`, and upstream GitHub token chain.
 
----
-
-## Refresh token format
-
-An opaque, cryptographically random 32-byte value encoded as base64url (no
-padding). Example:
-
-```
-YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY
-```
-
-Stored in `grants.our_refresh_token`. A UNIQUE constraint prevents reuse of
-any token value across rows. Not a JWT — clients must treat it as an opaque
-string.
-
----
-
-## Issuance
-
-The refresh token is issued alongside the JWT at the token endpoint, for both
-the authorization code grant (initial login) and the refresh grant (subsequent
-renewals).
-
-### Token endpoint response (updated)
+Token responses use `Cache-Control: no-store`:
 
 ```json
 {
   "access_token": "<signed-jwt>",
   "token_type": "Bearer",
-  "expires_in": 604800,
+  "expires_in": 900,
   "scope": "insights:read insights:write",
-  "refresh_token": "<opaque-32-byte-base64url>",
+  "refresh_token": "<opaque-token>",
   "refresh_token_expires_in": 15897600
 }
 ```
 
-`refresh_token_expires_in` reflects the remaining lifetime of the underlying
-GitHub refresh token (GitHub App user-to-server tokens: up to ~184 days). It is
-recalculated on each rotation so the client always knows the exact remaining
-window.
+`refresh_token_expires_in` is derived from the remaining upstream GitHub
+refresh-token lifetime. The Starlogz token has no independent expiry clock.
 
----
+## Refresh request
 
-## Refresh grant flow
+The client sends a form-encoded request:
 
-```
-MCP Client                     Starlogz                      GitHub
-    |                              |                            |
-    | POST /oauth2/token           |                            |
-    | grant_type=refresh_token     |                            |
-    | &refresh_token=<opaque>      |                            |
-    | &client_id=<id> ------------>|                            |
-    |                              |-- look up grant by         |
-    |                              |   our_refresh_token        |
-    |                              |-- check GitHub refresh     |
-    |                              |   token not expired        |
-    |                              |-- POST /login/oauth/access_token
-    |                              |   grant_type=refresh_token |
-    |                              |   &refresh_token=<gh-rt> ->|
-    |                              |<-- new gh access_token ----|
-    |                              |    + new gh refresh_token  |
-    |                              |-- GET /user + /emails ---->|
-    |                              |<-- identity ---------------|
-    |                              |   (upsert user row)        |
-    |                              |-- generate new jti,        |
-    |                              |   new our_refresh_token    |
-    |                              |-- UPDATE grants row        |
-    |                              |   (rotate all tokens)      |
-    |                              |-- revoke old JWT jti       |
-    |                              |   (revoked_tokens table)   |
-    |<-- new JWT + new             |                            |
-    |    refresh_token ------------|                            |
-    |                              |                            |
-    | POST /mcp                    |                            |
-    | Authorization: Bearer <jwt> >|                            |
-    |<-- MCP response -------------|                            |
-```
-
-### Request
-
-```
+```text
 POST /oauth2/token
-Content-Type: application/x-www-form-urlencoded
 
 grant_type=refresh_token
 &refresh_token=<opaque-token>
 &client_id=<registered-client-id>
 ```
 
-`client_id` is required and must match the `client_id` stored on the grant row.
-Dynamic client registrations do not expire, so a client can retain the same
-`client_id` for the full lifetime of its authorization and subsequent reauthorization
-flows. Refresh-token expiry remains independent and is governed by the upstream
-GitHub refresh-token lifetime.
+Both values are required. A stored client ID must match the request. The
+original scope is preserved; the refresh grant cannot expand or reduce it.
 
-### Response (200 OK)
+For a current token, Starlogz:
 
-```json
-{
-  "access_token": "<new-signed-jwt>",
-  "token_type": "Bearer",
-  "expires_in": 604800,
-  "scope": "insights:read insights:write",
-  "refresh_token": "<new-opaque-token>",
-  "refresh_token_expires_in": 14400000
-}
-```
+1. Loads and decrypts the associated GitHub refresh token.
+2. Rejects and removes the grant if the upstream token is already expired.
+3. Calls GitHub to rotate its access and refresh tokens and refreshes the user
+   profile.
+4. Generates a new `jti`, access-token JWT, and Starlogz refresh token.
+5. Atomically replaces the grant, revokes the previous `jti`, and records a
+   hash of the consumed refresh token.
+6. Returns the new token pair with the unchanged scope.
 
-The `scope` in the response matches the scope of the original grant unchanged.
-Clients cannot request a different scope via the refresh grant.
+Once GitHub rotation starts, the upstream call and database update use a
+non-cancelable child context. Client disconnection must not leave GitHub's new
+token unrecorded after GitHub has invalidated the old one.
 
----
+If GitHub rejects the stored refresh token, reports that it has expired, or
+returns no replacement refresh token, Starlogz revokes the current JWT, deletes
+the grant, retains bounded diagnostic metadata, and requires interactive
+authentication again. Transient GitHub or storage failures return
+`server_error` without intentionally deleting a still-valid grant.
 
-## Token rotation
+## Rotation and retry grace
 
-Each successful refresh atomically:
+Normal refresh tokens are single-use. Concurrent rotation is serialized by an
+atomic conditional update: only a request matching the current token can
+replace the grant.
 
-1. Invalidates the old refresh token (UPDATE clears the old value).
-2. Invalidates the old JWT by calling `RevocationStore.RevokeToken(jti, exp)`,
-   which inserts into `revoked_tokens` with the original `exp` (so the entry
-   self-prunes when the old JWT would have expired anyway). Because the
-   table is shared, every instance sees the revocation immediately.
-3. Issues a new `jti`, new JWT, and new opaque refresh token.
-4. Updates the `grants` row in a single transaction: new `jti`, new
-   `our_refresh_token`, new GitHub tokens, new `jwt_expiry`.
+The consumed token is stored only as a SHA-256 hash in
+`retired_refresh_tokens`. By default, a rotated token remains eligible for a
+30-second retry grace period. An accepted retry:
 
-A race condition where two requests simultaneously use the same refresh token
-is handled by the UNIQUE constraint on `our_refresh_token` — the second UPDATE
-will find no matching row and returns `invalid_grant`.
+- verifies the same client ID;
+- loads the replacement grant;
+- reissues the replacement grant's existing JWT and refresh token;
+- preserves the same `jti`, scope, and expiries;
+- does not call GitHub or rotate again.
 
-The rotated token is retained as a SHA-256 hash for diagnostics and can be
-accepted for a short grace retry window. The default grace period is 30 seconds
-and can be overridden with `REFRESH_TOKEN_GRACE_PERIOD` / `--refresh-token-grace-period`.
-Set it to `0s` to disable accepted grace retries. Values above 60 seconds are
-rejected.
+This supports clients that did not receive or persist the first successful
+response. After the grace period, reuse returns `invalid_grant`.
 
-On a grace retry the server re-issues the replacement grant's existing JWT (same
-`jti`, scope, and expiry) without calling GitHub or rotating again.
+`REFRESH_TOKEN_GRACE_PERIOD` controls the window. `0s` disables grace retries;
+values above 60 seconds are rejected. Retired token hashes are retained for
+24 hours by default for bounded diagnostics and lazy cleanup.
+`RETIRED_REFRESH_TOKEN_RETENTION` must be positive and at least as long as the
+grace period.
 
----
-
-## GitHub token rotation
-
-GitHub App user-to-server tokens must themselves be rotated (they expire in 8
-hours). The refresh grant handles this transparently:
-
-1. Read the stored (encrypted) GitHub refresh token from the grants row.
-2. Call the GitHub token refresh endpoint with `grant_type=refresh_token`.
-3. GitHub returns a new access token (8h TTL) and a new refresh token (~184 days).
-4. Update the grants row with the newly encrypted GitHub tokens and updated
-   expiry times.
-
-The MCP client is unaware of GitHub token rotation — it only sees Starlogz
-JWTs and opaque refresh tokens.
-
----
+Retired records contain a token hash, bounded reason, client and grant
+references, grace expiry, and retention expiry. They never contain the raw
+Starlogz or GitHub refresh token.
 
 ## Expiry and revocation
 
-### Refresh token lifetime
+A refresh token stops being usable when:
 
-A refresh token is valid until:
+- it is successfully rotated and its retry grace expires;
+- the upstream GitHub refresh token expires or is rejected;
+- GitHub fails to return a replacement refresh token;
+- its grant is deleted; or
+- the stored grant or replacement grant no longer exists.
 
-- It is used (rotation invalidates it immediately), or
-- The underlying GitHub refresh token expires, or
-- The user's grant row is deleted (e.g. user logs out from all sessions via a
-  future account management endpoint).
+Access-token revocation is persistent. Successful rotation records the old
+`jti` in the same transaction as the new grant. Broken-grant teardown revokes
+the current `jti` and removes the grant. Revocation records remain relevant only
+until the corresponding JWT expiry.
 
-There is no separate expiry clock on the Starlogz refresh token itself — its
-validity is entirely determined by the GitHub refresh token's remaining lifetime.
-`refresh_token_expires_in` in each response reflects this remaining window.
+## Error contract
 
-### Expired GitHub refresh token
-
-When a refresh is attempted and the stored GitHub refresh token is expired:
-
-1. Call `RevocationStore.RevokeToken(jti, exp)` for the grant's current `jti`
-   so any in-flight MCP calls with the old JWT also fail immediately.
-2. Call `GrantStore.DeleteGrant(jti)` to remove the grant row.
-3. Return `invalid_grant`.
-
-The user must complete a full GitHub OAuth2 flow to obtain a new grant.
-
-### Lazy cleanup
-
-Grants whose `jwt_expiry` is in the past are pruned from the database when a
-new grant is inserted for the same `github_id` (existing behaviour). This
-removes rows for sessions where the user never used their refresh token.
-
-Retired refresh token hashes are retained for refresh diagnostics for 24 hours
-by default. Operators can override this with
-`RETIRED_REFRESH_TOKEN_RETENTION` / `--retired-refresh-token-retention`. The
-retention value must be positive and at least as long as the grace period.
-
----
-
-## Error reference
-
-All errors use the standard OAuth2 error response format:
+Errors use the OAuth2 JSON shape:
 
 ```json
 {
-  "error": "<error_code>",
-  "error_description": "<human-readable message>"
+  "error": "invalid_grant",
+  "error_description": "refresh token not found or already used"
 }
 ```
 
-| Error code | HTTP status | Cause |
-|------------|-------------|-------|
-| `unsupported_grant_type` | 400 | `grant_type` is not `refresh_token` or `authorization_code` |
-| `invalid_request` | 400 | `refresh_token` or `client_id` parameter missing |
-| `invalid_grant` | 400 | Refresh token not found, already used, or GitHub refresh token expired |
-| `invalid_client` | 400 | `client_id` does not match the grant |
-| `server_error` | 500 | GitHub token refresh API call failed (transient) |
+| Error | HTTP status | Meaning |
+|---|---:|---|
+| `unsupported_grant_type` | 400 | The token endpoint does not recognize the requested grant. |
+| `invalid_request` | 400 | `refresh_token` or `client_id` is missing. |
+| `invalid_client` | 400 | The client ID does not match the current or retired grant. |
+| `invalid_grant` | 400 | The token is unknown, already used outside grace, removed, expired, or invalid upstream. |
+| `server_error` | 500 | GitHub or internal persistence failed transiently. |
 
-The public token endpoint intentionally keeps this standard OAuth2 error shape.
-Server logs and the `starlogz.oauth.refresh_token_grants` metric expose more
-specific operator-facing reason labels: `rotated`, `grace_retry`,
-`recently_rotated_grace_expired`, `recently_removed`, `github_expired`,
-`github_invalid`, `github_missing_refresh`, `client_mismatch`, `never_seen`, and
-`server_error`. Clients must not depend on these internal reason labels.
+Public errors intentionally avoid disclosing detailed grant history. Bounded
+operator telemetry distinguishes successful rotation and grace retry from
+unknown, expired, removed, mismatched, upstream-invalid, and server-error
+outcomes. Clients must not depend on those internal reason labels.
 
----
+## Discovery and constraints
 
-## Discovery changes
+Authorization-server metadata advertises both `authorization_code` and
+`refresh_token` grant types.
 
-The authorization server metadata document (`/.well-known/oauth-authorization-server`)
-must be updated to advertise the refresh token grant type:
-
-```json
-{
-  "grant_types_supported": ["authorization_code", "refresh_token"]
-}
-```
-
-MCP clients that read the discovery document before initiating a refresh will
-see that `refresh_token` is supported and use the standard flow.
-
----
-
-## Database schema changes
-
-The `grants` table additions (`our_refresh_token`, `client_id`, the unique
-index) are owned by `spec/persistence.md` migration 4. See that spec for
-the SQL.
-
-Migration 9 (`9_grants_scope.sql`) adds a `scope TEXT NOT NULL DEFAULT ''`
-column so the refresh grant can echo the original grant's scope back to the
-client without re-deriving it from a consumed auth code.
-
-`our_refresh_token` and `client_id` are nullable to accommodate grants
-created without a GitHub refresh token (test/CLI scenarios with no
-GitHub App configured). The refresh handler treats either being null as
-"this grant cannot participate in the refresh flow".
-
----
-
-## v0.2 constraints
-
-- **No refresh token introspection** — there is no endpoint to check whether
-  a refresh token is still valid without consuming it.
-- **No refresh token revocation endpoint** — users cannot individually revoke
-  a session's refresh token; they must wait for the GitHub refresh token to
-  expire (up to ~184 days). A session management endpoint
-  (`DELETE /sessions/:id`) is planned for v0.3.
-- **`client_id` validation best-effort** — `client_id` is validated only when
-  present on the grant row. Grants written without a `client_id` (e.g. via
-  a flow that did not carry one through) skip the check.
-- **Refresh path is synchronous to GitHub** — each refresh blocks on the
-  GitHub token endpoint and the `/user`/`/emails` calls. A GitHub outage
-  fails refreshes with `server_error`. Caching identity briefly across
-  refreshes is a v0.3 candidate.
+There is no refresh-token introspection or standalone revocation endpoint.
+Refresh requests synchronously depend on GitHub. Client binding is enforced
+when the grant contains a client ID; legacy or test grants without one retain
+the existing best-effort compatibility behavior.

@@ -228,11 +228,14 @@ starlogz implements a standards-compliant OAuth2 authorization server:
 - **Discovery** `/.well-known/oauth-authorization-server` (RFC 8414)
 - **Dynamic Client Registration** `/oauth2/register` (RFC 7591, unauthenticated)
 - **Authorization** `/oauth2/authorize` — PKCE required (S256 only)
-- **Token** `/oauth2/token` — `authorization_code` grant only
+- **Token** `/oauth2/token` — `authorization_code` and `refresh_token` grants
 - **JWKS** `/.well-known/jwks` — public key set, cached 24 h
-- **Logout** `/auth/logout` — revokes the bearer token; JTI added to in-memory blocklist
+- **Logout** `/auth/logout` — persistently revokes the bearer token by JTI
 
-Tokens are ES384-signed JWTs with a 7-day expiry. Every token includes a `jti` (UUID v4) checked against the revocation blocklist on each request.
+Access tokens are ES384-signed JWTs with a 15-minute expiry. Every token includes
+a `jti` (UUID v4) checked against the persistent revocation store on each
+request. Eligible MCP clients also receive a rotating opaque refresh token with
+a short retry grace period.
 
 **GitHub App required.** starlogz uses a GitHub App (not an OAuth App) as its identity provider. Create one at [github.com/settings/apps](https://github.com/settings/apps) and enable **Expire user authorization tokens** in its settings — this causes GitHub to issue short-lived access tokens (8 h) alongside a long-lived refresh token (~184 days), which starlogz stores encrypted in the `grants` table for future silent renewal.
 

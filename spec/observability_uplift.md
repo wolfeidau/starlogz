@@ -1,174 +1,86 @@
 # AWS logging and wide-event uplift
 
-## Objective
+> Status: Implemented decision
+> Last reviewed: 2026-07-16
+> Authority: Historical rationale and lasting constraints; current code, Terraform, tests, and the event contract define implementation details.
 
-Improve production logging and basic operational detection without introducing a general analytics platform. The uplift covers secure structured logs, privacy-safe core-flow events, API Gateway access logs, CloudWatch alarms, and SNS notifications.
+## Context
 
-## Target architecture
+The service needed production diagnostics and basic operational alerting without
+creating a general analytics platform or increasing exposure of OAuth and
+insight data. Existing access and debug logs could contain sensitive request
+values, while AWS infrastructure lacked bounded API access logs and core service
+alarms.
+
+## Decision
+
+The implemented observability model has four bounded channels:
 
 ```text
 Application stdout ----------------> CloudWatch Lambda logs
 API Gateway access events ---------> CloudWatch API access logs
-Core-flow events -> EventBridge bus -> CloudWatch event log group
-CloudWatch alarms -----------------> SNS operations topic
-                                          `-> email subscriptions
+Core-flow events -> EventBridge ----> CloudWatch event log group
+CloudWatch alarms -----------------> SNS email notifications
 ```
 
-EventBridge is the routing plane, not the analytics store. A future rule can deliver the same events through Firehose to S3/Athena or another consumer without changing producers.
+### Application logging
 
-## 1. Secure application logging
+Production defaults to `INFO`; development defaults to `DEBUG`. HTTP access
+records use route templates and bounded fields rather than raw URLs or request
+data. A shared `slog.Handler` privacy boundary removes prohibited attribute keys
+before JSON, OpenTelemetry, or Sentry sinks receive them.
 
-Add a configurable `LOG_LEVEL`:
+Logs must not contain raw query strings, OAuth codes or state, PKCE values,
+tokens, authorization or cookie headers, insight content, search queries,
+emails, redirect URIs, raw client IPs, or raw user-agent strings. Call sites
+remain responsible for safe messages and values; the privacy handler is a
+defense-in-depth key filter.
 
-- AWS defaults explicitly to `INFO`.
-- Local development defaults to `DEBUG`.
+### AWS access logs and alarms
 
-Never log:
+API Gateway writes bounded JSON access records without headers, query strings,
+bodies, authorization identity, or raw IP addresses. The log group retains
+records for 30 days.
 
-- raw query strings;
-- OAuth codes, state, PKCE values, or tokens;
-- authorization or cookie headers;
-- insight content or search queries;
-- email addresses or redirect URIs;
-- raw client IP addresses.
+An environment-scoped SNS topic receives both `ALARM` and `OK` transitions for:
 
-Enforce these exclusions both at the log call site and with an outer `slog.Handler` privacy guard shared by JSON, OpenTelemetry, and Sentry sinks. Do not emit token hashes or other stable secret-derived correlators.
+- Lambda errors and throttles;
+- Lambda p95 duration;
+- API Gateway 5xx responses;
+- API Gateway p95 integration latency.
 
-Do not log the raw `User-Agent` header. Parse it with `medama-io/go-useragent` and emit only Starlogz-owned bounded classifications: `client_kind`, `client_family`, `client_major`, `os_family`, and `device_class`. Unknown or malformed values map to `other`; never fall back to header text or arbitrary parser output.
+Missing data does not breach. Aggregate 4xx alarms were excluded because normal
+authentication failures and internet scanning would create noise.
 
-Replace the existing access record with one bounded structured event per request:
+The SNS topic is intentionally unencrypted while it carries only bounded
+operational metadata and delivers through email. Reconsider encryption if
+notification content becomes sensitive or delivery expands.
 
-```json
-{
-  "level": "INFO",
-  "msg": "http_request",
-  "request_id": "...",
-  "trace_id": "...",
-  "method": "POST",
-  "route": "/oauth2/token",
-  "status": 200,
-  "duration_ms": 387,
-  "response_bytes": 412,
-  "client_kind": "browser",
-  "client_family": "chrome",
-  "client_major": 126,
-  "os_family": "macos",
-  "device_class": "desktop"
-}
-```
+### Wide events
 
-Use the route template where possible, never the raw URL. Express durations in milliseconds. Omit `trace_id` when no valid trace context exists. Add tests that capture log output and assert that known OAuth secrets, query values, and raw user-agent strings are absent.
+Core OAuth, dashboard-session, and MCP flows publish versioned completion events
+to a custom EventBridge bus. Delivery is synchronous with a short timeout and
+best effort: publication failure logs one warning and never changes the user
+response. A no-op publisher is used when events are disabled.
 
-## 2. API Gateway access logs
+The current event schema, privacy boundary, delivery behavior, and operator
+queries are maintained in [events.md](events.md). EventBridge is a routing
+plane; the initial consumer is a 90-day CloudWatch log group.
 
-Create `/aws/apigateway/starlogz-${env}` with 30-day retention. Use JSON records containing only:
+## Tradeoffs
 
-- API Gateway request ID;
-- route key and HTTP method;
-- status and response length;
-- response and integration latency;
-- integration status;
-- domain name and protocol.
+- Synchronous best-effort publishing can lose events but avoids unreliable
+  background goroutines in a frozen Lambda environment.
+- A transactional outbox was disproportionate for operational counts.
+- Native AWS metrics and alarms were preferred over a new dashboard or
+  analytics store.
+- Firehose, long-term archives, product analytics, synthetic checks, database
+  performance telemetry, PagerDuty, Slack, and a first-party service-status UI
+  were deferred.
 
-Do not include query strings, headers, authorization identity, raw IP addresses, or request and response bodies. These logs provide an independent signal when a request fails before reaching Lambda.
+## Outcome
 
-## 3. SNS notifications and basic alarms
-
-Create an unencrypted `starlogz-${env}-operations` SNS topic. Alarm notifications contain only bounded operational metadata and are delivered to email, so the initial implementation avoids a customer-managed KMS key. Revisit SNS encryption if notification content becomes sensitive or delivery expands beyond email. Add an `alarm_email_endpoints` Terraform variable and create an email subscription for each address. AWS requires recipients to confirm subscriptions.
-
-Initial alarms:
-
-| Alarm | Initial threshold |
-|---|---|
-| Lambda errors | At least 1 in 5 minutes |
-| Lambda throttles | At least 1 in 5 minutes |
-| Lambda p95 duration | Over 2 seconds for 3 periods |
-| API Gateway 5xx | At least 1 for 2 consecutive periods |
-| API Gateway p95 integration latency | Over 2 seconds for 3 periods |
-
-Missing data does not breach. Send both `ALARM` and `OK` transitions to SNS. Do not alert on aggregate 4xx initially because authentication failures and internet scanning would create noise.
-
-Do not add a CloudWatch dashboard in this change. A first-party Web UI service-status feature is deferred to separate design and implementation work. Database readiness and OAuth failure alarms are also deferred until those signals are reliable.
-
-## 4. EventBridge wide events
-
-The implemented event contract and operator guidance are maintained in [events.md](events.md).
-
-Create:
-
-- custom bus `starlogz-${env}`;
-- log group `/aws/events/starlogz-${env}` with 90-day retention;
-- a rule matching `source = "starlogz.service"` and targeting the event log group;
-- least-privilege Lambda permission for `events:PutEvents` on this bus only.
-
-Use a versioned, bounded envelope:
-
-```json
-{
-  "schema_version": 1,
-  "event_id": "...",
-  "event_name": "mcp.tool_call.completed",
-  "occurred_at": "...",
-  "environment": "dev",
-  "service_version": "...",
-  "request_id": "...",
-  "trace_id": "...",
-  "outcome": "success",
-  "reason": "completed",
-  "duration_ms": 18,
-  "attributes": {
-    "tool": "insight_search",
-    "result_count_bucket": "1-10"
-  }
-}
-```
-
-Initial event names:
-
-- `oauth.authorization.completed`;
-- `oauth.github_callback.completed`;
-- `oauth.token_exchange.completed`;
-- `oauth.refresh.completed`;
-- `ui.login.completed`;
-- `ui.session.created`;
-- `ui.session.revoked`;
-- `mcp.tool_call.completed`.
-
-Each flow emits exactly one completion event with an outcome, bounded reason, duration, safe operational attributes, and correlation identifiers. Events never contain content, queries, tags, emails, tokens, OAuth parameters, arbitrary error strings, or raw IP addresses.
-
-### Delivery behavior
-
-Introduce a small `EventPublisher` interface with EventBridge and no-op implementations. The EventBridge publisher uses a short bounded timeout, initially 250-500 milliseconds. A publish failure produces one warning but never changes the user response.
-
-Use synchronous best-effort delivery initially. Background goroutines are unreliable when Lambda freezes an execution environment, while a durable queue or transactional outbox is disproportionate for this uplift.
-
-## Verification
-
-Before deployment:
-
-- test log redaction and event schemas;
-- test successful and failed wide events;
-- run `terraform fmt` and `terraform validate`;
-- review the Terraform plan for IAM scope, destinations, and secret exposure.
-
-After deployment:
-
-1. Confirm SNS subscriptions.
-2. Exercise health, OAuth, UI, and MCP flows.
-3. Confirm API Gateway JSON access events.
-4. Confirm EventBridge events contain no sensitive fields.
-5. Trigger a temporary test alarm and verify `ALARM` and `OK` notifications.
-6. Run a CloudWatch Logs Insights scan for forbidden OAuth field patterns.
-7. Confirm production application logs contain no `DEBUG` records.
-
-## Out of scope
-
-- Firehose, S3, Athena, or ClickHouse delivery;
-- a long-term event archive;
-- OpenTelemetry expansion;
-- synthetic health checks;
-- a CloudWatch dashboard;
-- a first-party Web UI service-status feature;
-- product analytics dashboards;
-- PagerDuty or Slack integration;
-- database performance instrumentation.
+Production has privacy-filtered structured logs, bounded API Gateway access
+logs, environment-scoped alarms and notifications, and content-free core-flow
+events. Current implementation evidence is in `internal/logattr/`,
+`internal/middleware/`, `internal/wideevent/`, and `infra/terraform/`.
