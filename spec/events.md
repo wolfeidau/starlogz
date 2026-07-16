@@ -1,5 +1,9 @@
 # Wide event contract
 
+> Status: Current contract
+> Last reviewed: 2026-07-16
+> Authority: Behavioral contract; current code, tests, and Terraform provide implementation evidence.
+
 Starlogz emits one bounded completion event for each recognized core OAuth, UI session, and MCP tool flow. These events provide operational counts and failure rates without storing user content or authentication material.
 
 ## Delivery

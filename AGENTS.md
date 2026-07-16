@@ -1,8 +1,15 @@
 # AGENTS.md — starlogz
 
-Remote MCP server that lets developers and agents store and retrieve persistent insights about projects. GitHub OAuth2 for humans, scoped API keys for agents. Backing store is PostgreSQL.
+Remote MCP server that lets developers and agents store and retrieve persistent
+insights about projects. GitHub-backed OAuth2 with DCR authenticates MCP clients;
+the dashboard uses opaque database-backed sessions. PostgreSQL is the backing
+store.
 
-Specs live in `spec/` — read them before adding endpoints. `spec/auth.md` covers the OAuth2 flow in detail.
+Specifications and implemented decision records live in `spec/`. Read
+`spec/README.md` and check each document's lifecycle status before using it.
+Current contracts define behavior that code and tests must preserve;
+implemented decisions retain historical rationale, not implementation detail.
+Read `spec/auth.md` before changing the OAuth2 flow or adding related endpoints.
 
 ---
 
@@ -19,7 +26,7 @@ internal/store/                   store interface + types (Insight, WriteInsight
 internal/store/postgres/          PostgreSQL implementation + migration runner
 internal/store/postgres/migrations/  embedded SQL migration files (1–17)
 internal/telemetry/               OTel init (traces + metrics via OTLP gRPC)
-spec/                             design specs (auth.md, persistence.md, refresh_tokens.md)
+spec/                             current contracts and implemented decision records
 ui/                               React dashboard source and generated Connect clients
 ```
 

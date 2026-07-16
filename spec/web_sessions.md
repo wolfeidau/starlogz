@@ -1,5 +1,9 @@
 # Web UI sessions
 
+> Status: Current contract
+> Last reviewed: 2026-07-16
+> Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
+
 The dashboard uses GitHub OAuth2 to establish identity, then replaces the OAuth
 credential with a server-side browser session. MCP clients continue to use the
 OAuth2 bearer-token and refresh-token flow described in `auth.md` and
@@ -23,7 +27,7 @@ revoked session is rejected and its cookie is cleared.
 Database failures return 500 without clearing the cookie so transient
 infrastructure faults do not force users to authenticate again.
 
-Initial policy:
+Default policy:
 
 - idle lifetime: 7 days
 - absolute lifetime: 30 days
