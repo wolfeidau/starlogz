@@ -85,6 +85,10 @@ func TestAccessLogClassifiesUserAgentWithoutLoggingRawValue(t *testing.T) {
 	require.Equal(t, float64(126), event["client_major"])
 	require.Equal(t, "macos", event["os_family"])
 	require.Equal(t, "desktop", event["device_class"])
+	require.Equal(t, "other", event["client_product"])
+	require.Equal(t, "unknown", event["client_identity_source"])
+	require.Equal(t, "unknown", event["client_identity_confidence"])
+	require.NotContains(t, event, "client_product_major")
 	require.NotContains(t, output.String(), rawUserAgent)
 }
 
@@ -102,6 +106,9 @@ func TestAccessLogBoundsUnknownUserAgent(t *testing.T) {
 	require.Equal(t, "other", event["client_family"])
 	require.Equal(t, "other", event["os_family"])
 	require.Equal(t, "other", event["device_class"])
+	require.Equal(t, "other", event["client_product"])
+	require.Equal(t, "unknown", event["client_identity_source"])
+	require.Equal(t, "unknown", event["client_identity_confidence"])
 	require.NotContains(t, event, "client_major")
 	require.NotContains(t, output.String(), "private-client")
 	require.NotContains(t, output.String(), "secret-value")

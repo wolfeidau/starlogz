@@ -15,9 +15,16 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/wideevent"
+)
+
+const (
+	claimClientProduct    = "slz_client_product"
+	claimClientMajor      = "slz_client_product_major"
+	claimClientConfidence = "slz_client_identity_confidence"
 )
 
 // UserUpserter persists user identity on successful GitHub login.
@@ -276,18 +283,28 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	}
 
 	ctxlog.LoggerFrom(ctx).DebugContext(ctx, "token verified", slog.String("scope", scope))
+	identity := clientIdentityFromJWT(verifiedToken)
+	extra := map[string]any{
+		clientclass.TokenInfoProductKey:    identity.Product,
+		clientclass.TokenInfoConfidenceKey: identity.Confidence,
+	}
+	if identity.HasMajor {
+		extra[clientclass.TokenInfoMajorKey] = identity.Major
+	}
 	return &auth.TokenInfo{
 		UserID:     sub,
 		Scopes:     strings.Fields(scope),
 		Expiration: expiresAt,
+		Extra:      extra,
 	}, nil
 }
 
 // IssueJWT signs and returns a new ES384 JWT for the given subject, scope,
 // JWT ID and expiration. The caller owns expiration so the value matches what's
 // recorded in the grant row and the revoked_tokens entry.
-func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time) (string, error) {
-	tok, err := jwt.NewBuilder().
+func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time, identity clientclass.Classification) (string, error) {
+	identity = clientclass.Normalize(identity)
+	builder := jwt.NewBuilder().
 		Issuer(s.baseURL.String()).
 		Subject(sub).
 		IssuedAt(time.Now()).
@@ -295,7 +312,12 @@ func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time) (string, error)
 		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
 		Claim("scope", scope).
 		Claim("jti", jti).
-		Build()
+		Claim(claimClientProduct, identity.Product).
+		Claim(claimClientConfidence, identity.Confidence)
+	if identity.HasMajor {
+		builder = builder.Claim(claimClientMajor, identity.Major)
+	}
+	tok, err := builder.Build()
 	if err != nil {
 		return "", fmt.Errorf("build token: %w", err)
 	}
@@ -306,4 +328,44 @@ func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time) (string, error)
 	}
 
 	return string(signed), nil
+}
+
+func clientIdentityFromJWT(token jwt.Token) clientclass.Classification {
+	var product, confidence string
+	if err := token.Get(claimClientProduct, &product); err != nil {
+		return clientclass.Unknown()
+	}
+	if err := token.Get(claimClientConfidence, &confidence); err != nil {
+		return clientclass.Unknown()
+	}
+	identity := clientclass.Classification{
+		Product: product, Source: clientclass.SourceOAuthRegistration, Confidence: confidence,
+	}
+	if product == clientclass.ProductStarlogzUI && confidence == clientclass.ConfidenceFirstParty {
+		identity.Source = clientclass.SourceFirstParty
+	}
+	var rawMajor any
+	if err := token.Get(claimClientMajor, &rawMajor); err == nil {
+		if major, ok := numericClaim(rawMajor); ok {
+			identity.Major = major
+			identity.HasMajor = true
+		}
+	}
+	return clientclass.Normalize(identity)
+}
+
+func numericClaim(value any) (int, bool) {
+	switch value := value.(type) {
+	case int:
+		return value, true
+	case int64:
+		return int(value), int64(int(value)) == value
+	case float64:
+		return int(value), float64(int(value)) == value
+	case json.Number:
+		parsed, err := value.Int64()
+		return int(parsed), err == nil && int64(int(parsed)) == parsed
+	default:
+		return 0, false
+	}
 }

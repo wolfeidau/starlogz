@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -25,6 +26,14 @@ type capturePublisher struct {
 
 type deadlinePublisher struct {
 	remaining time.Duration
+}
+
+func withTestIdentity(attributes map[string]string) map[string]string {
+	result := ClientIdentityAttributes(clientclass.Unknown())
+	for key, value := range attributes {
+		result[key] = value
+	}
+	return result
 }
 
 func (p *deadlinePublisher) Publish(ctx context.Context, _ Event) error {
@@ -52,10 +61,10 @@ func TestEmitterBuildsBoundedCorrelatedEvent(t *testing.T) {
 	})
 	ctx := ctxlog.WithRequestID(t.Context(), requestID)
 	ctx = trace.ContextWithSpanContext(ctx, spanContext)
-	emitter.Completion(ctx, MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{
+	emitter.Completion(ctx, MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), withTestIdentity(map[string]string{
 		AttributeTool:              ToolInsightSearch,
 		AttributeResultCountBucket: ResultCountOneToTen,
-	})
+	}))
 
 	require.Len(t, publisher.events, 1)
 	event := publisher.events[0]
@@ -65,10 +74,10 @@ func TestEmitterBuildsBoundedCorrelatedEvent(t *testing.T) {
 	require.Equal(t, "v1.2.3", event.ServiceVersion)
 	require.Equal(t, requestID, event.RequestID)
 	require.Equal(t, spanContext.TraceID().String(), event.TraceID)
-	require.Equal(t, map[string]string{
+	require.Equal(t, withTestIdentity(map[string]string{
 		AttributeTool:              ToolInsightSearch,
 		AttributeResultCountBucket: ResultCountOneToTen,
-	}, event.Attributes)
+	}), event.Attributes)
 	require.NoError(t, event.Validate())
 
 	encoded, err := json.Marshal(event)
@@ -98,6 +107,21 @@ func TestHTTPHandlerEmitsSuccessfulAndFailedCompletions(t *testing.T) {
 	require.Equal(t, ReasonCompleted, publisher.events[0].Reason)
 	require.Equal(t, OutcomeFailure, publisher.events[1].Outcome)
 	require.Equal(t, ReasonInvalidRequest, publisher.events[1].Reason)
+}
+
+func TestHTTPHandlerCollectsBoundedClientIdentity(t *testing.T) {
+	publisher := &capturePublisher{}
+	emitter, err := NewEmitter(publisher, "test", "devel", slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+
+	handler := emitter.HTTPHandler(OAuthAuthorizationCompleted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		SetClientIdentity(r.Context(), clientclass.FromFirstParty("starlogz-ui"))
+		w.WriteHeader(http.StatusFound)
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/oauth2/authorize", nil))
+
+	require.Len(t, publisher.events, 1)
+	require.Equal(t, ClientIdentityAttributes(clientclass.FromFirstParty("starlogz-ui")), publisher.events[0].Attributes)
 }
 
 func TestHTTPHandlerEmitsFailureAndRepanics(t *testing.T) {
@@ -155,16 +179,19 @@ func TestEmitterBoundsPublishTimeout(t *testing.T) {
 
 func TestAllEventNamesValidate(t *testing.T) {
 	names := []Name{
-		OAuthAuthorizationCompleted, OAuthGitHubCallbackCompleted,
+		OAuthAuthorizationCompleted, OAuthClientRegistrationCompleted, OAuthGitHubCallbackCompleted,
 		OAuthTokenExchangeCompleted, OAuthRefreshCompleted,
 		UILoginCompleted, UISessionCreated, UISessionRevoked,
-		MCPToolCallCompleted,
+		MCPClientInitialized, MCPToolCallCompleted,
 	}
 	for _, name := range names {
 		t.Run(string(name), func(t *testing.T) {
-			attributes := map[string]string(nil)
+			var attributes map[string]string
+			if eventRequiresIdentity(name) {
+				attributes = withTestIdentity(nil)
+			}
 			if name == MCPToolCallCompleted {
-				attributes = map[string]string{AttributeTool: ToolWhoami}
+				attributes[AttributeTool] = ToolWhoami
 			}
 			event := Event{
 				SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: name,
@@ -242,7 +269,7 @@ func TestResultCountBucketValidation(t *testing.T) {
 				SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: MCPToolCallCompleted,
 				OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
 				ServiceVersion: "devel", Outcome: test.outcome, Reason: reason,
-				Attributes: test.attributes,
+				Attributes: withTestIdentity(test.attributes),
 			}
 			err := event.Validate()
 			if test.wantError == "" {
@@ -250,6 +277,39 @@ func TestResultCountBucketValidation(t *testing.T) {
 				return
 			}
 			require.ErrorContains(t, err, test.wantError)
+		})
+	}
+}
+
+func TestClientIdentityValidation(t *testing.T) {
+	valid := Event{
+		SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: MCPClientInitialized,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
+		ServiceVersion: "devel", Outcome: OutcomeSuccess, Reason: ReasonCompleted,
+		Attributes: ClientIdentityAttributes(clientclass.FromMCP("codex-mcp-client", "144.4.0")),
+	}
+	require.NoError(t, valid.Validate())
+
+	tests := map[string]map[string]string{
+		"unbounded product": {
+			AttributeClientProduct: "private", AttributeClientIdentitySource: clientclass.SourceMCPInitialize,
+			AttributeClientIdentityConfidence: clientclass.ConfidenceDeclared,
+		},
+		"invalid combination": {
+			AttributeClientProduct: clientclass.ProductCodex, AttributeClientIdentitySource: clientclass.SourceUnknown,
+			AttributeClientIdentityConfidence: clientclass.ConfidenceDeclared,
+		},
+		"noncanonical major": {
+			AttributeClientProduct: clientclass.ProductCodex, AttributeClientProductMajor: "0144",
+			AttributeClientIdentitySource:     clientclass.SourceMCPInitialize,
+			AttributeClientIdentityConfidence: clientclass.ConfidenceDeclared,
+		},
+	}
+	for name, attributes := range tests {
+		t.Run(name, func(t *testing.T) {
+			event := valid
+			event.Attributes = attributes
+			require.Error(t, event.Validate())
 		})
 	}
 }

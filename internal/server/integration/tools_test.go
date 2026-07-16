@@ -20,6 +20,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -150,7 +151,7 @@ func (f *toolFixture) makeUser(t *testing.T, ctx context.Context, login string) 
 // is the supplied space-separated string.
 func (f *toolFixture) tokenFor(t *testing.T, userID uuid.UUID, scopes string) string {
 	t.Helper()
-	tok, err := f.oidcSrv.IssueJWT(userID.String(), scopes, uuid.New().String(), time.Now().Add(time.Hour))
+	tok, err := f.oidcSrv.IssueJWT(userID.String(), scopes, uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 	return tok
 }

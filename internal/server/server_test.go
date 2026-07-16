@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -149,10 +150,12 @@ func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 	}}
 
 	tests := []struct {
-		method string
-		path   string
-		body   string
+		method      string
+		path        string
+		body        string
+		contentType string
 	}{
+		{method: http.MethodPost, path: "/oauth2/register", body: `{"redirect_uris":["https://client.example.com/callback"],"client_name":"Codex"}`, contentType: "application/json"},
 		{method: http.MethodGet, path: "/oauth2/authorize?response_type=invalid"},
 		{method: http.MethodGet, path: "/auth/github/callback"},
 		{method: http.MethodPost, path: "/oauth2/token", body: "grant_type=authorization_code"},
@@ -165,15 +168,20 @@ func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 		req, reqErr := http.NewRequest(tc.method, ts.URL+tc.path, strings.NewReader(tc.body))
 		require.NoError(t, reqErr)
 		if tc.body != "" {
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			contentType := tc.contentType
+			if contentType == "" {
+				contentType = "application/x-www-form-urlencoded"
+			}
+			req.Header.Set("Content-Type", contentType)
 		}
 		resp, reqErr := client.Do(req)
 		require.NoError(t, reqErr)
 		require.NoError(t, resp.Body.Close())
 	}
 
-	require.Len(t, publisher.events, 7)
+	require.Len(t, publisher.events, 8)
 	require.Equal(t, []wideevent.Name{
+		wideevent.OAuthClientRegistrationCompleted,
 		wideevent.OAuthAuthorizationCompleted,
 		wideevent.OAuthGitHubCallbackCompleted,
 		wideevent.OAuthTokenExchangeCompleted,
@@ -182,11 +190,15 @@ func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 		wideevent.UISessionCreated,
 		wideevent.UISessionRevoked,
 	}, eventNames(publisher.events))
+	require.Equal(t, "codex", publisher.events[0].Attributes[wideevent.AttributeClientProduct])
+	encodedRegistration, err := json.Marshal(publisher.events[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedRegistration), "Codex")
 	for _, event := range publisher.events {
 		require.NoError(t, event.Validate())
 		require.NotEmpty(t, event.RequestID)
 	}
-	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[6].Outcome)
+	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[7].Outcome)
 }
 
 func TestUnclassifiedTokenRequestsDoNotEmitWideEvents(t *testing.T) {
@@ -396,7 +408,7 @@ func TestMCP_NoAuth_Returns401(t *testing.T) {
 func TestMCP_ValidJWT_PassesAuth(t *testing.T) {
 	ts, oidcSrv := testFixture(t)
 
-	tokenString, err := oidcSrv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := oidcSrv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{}`))

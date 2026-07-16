@@ -18,6 +18,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/telemetry"
@@ -227,7 +228,6 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		writeOAuthError(w, "invalid_request", "code, code_verifier, and client_id are required", http.StatusBadRequest)
 		return
 	}
-
 	pc, err := s.authState.ConsumeAuthCode(r.Context(), code)
 	if errors.Is(err, storepkg.ErrNotFound) {
 		log.WarnContext(r.Context(), "auth code invalid or expired")
@@ -247,6 +247,8 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		writeOAuthError(w, "invalid_grant", "authorization code was not issued to this client", http.StatusBadRequest)
 		return
 	}
+	identity := s.clientClassification(r.Context(), clientID, nil)
+	wideevent.SetClientIdentity(r.Context(), identity)
 
 	// RFC 6749 §4.1.3: redirect_uri must be present and identical.
 	if form.Get("redirect_uri") != pc.RedirectURI {
@@ -272,7 +274,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	)
 	ctx := ctxlog.WithLogger(r.Context(), log)
 
-	tokenString, err := s.IssueJWT(pc.Sub, pc.Scope, jti, jwtExpiry)
+	tokenString, err := s.IssueJWT(pc.Sub, pc.Scope, jti, jwtExpiry, identity)
 	if err != nil {
 		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
@@ -382,6 +384,8 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		writeOAuthError(w, "invalid_client", "client_id does not match grant", http.StatusBadRequest)
 		return
 	}
+	clientIdentity := s.clientClassification(ctx, clientID, nil)
+	wideevent.SetClientIdentity(ctx, clientIdentity)
 
 	if grant.RefreshToken == "" {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "github_missing_refresh")
@@ -509,7 +513,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		slog.String("reason", "rotated"),
 	)
 
-	tokenString, err := s.IssueJWT(sub, grant.Scope, newJTI, newJWTExpiry)
+	tokenString, err := s.IssueJWT(sub, grant.Scope, newJTI, newJWTExpiry, clientIdentity)
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
@@ -617,7 +621,9 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 		return
 	}
 
-	tokenString, err := s.IssueJWT(grant.UserID.String(), grant.Scope, grant.JTI, grant.JWTExpiry)
+	identity := s.clientClassification(ctx, clientID, nil)
+	wideevent.SetClientIdentity(ctx, identity)
+	tokenString, err := s.IssueJWT(grant.UserID.String(), grant.Scope, grant.JTI, grant.JWTExpiry, identity)
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "JWT issuance failed for grace retry", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
@@ -653,62 +659,74 @@ func (s *Server) DCRHandler() http.Handler {
 			return
 		}
 
-		log.InfoContext(r.Context(), "DCR request",
-			slog.Int("grant_type_count", len(req.GrantTypes)),
-			slog.Int("response_type_count", len(req.ResponseTypes)),
-			slog.Int("redirect_uri_count", len(req.RedirectURIs)),
-		)
-
-		if err := validateClientRegistrationMetadata(&req); err != nil {
-			log.WarnContext(r.Context(), "DCR: invalid client metadata")
-			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		normalizeClientRegistrationMetadata(&req)
-		req.Scope = normalizeScope(req.Scope, defaultRegisteredClientScope)
-		if err := validateSupportedScope(req.Scope); err != nil {
-			log.WarnContext(r.Context(), "DCR: invalid scope")
-			writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		now := time.Now()
-		clientID := uuid.New().String()
-		ctx := r.Context()
-
-		rec := storepkg.OAuthClient{
-			ClientID:                clientID,
-			ClientName:              req.ClientName,
-			TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
-			Scope:                   req.Scope,
-			RedirectURIs:            req.RedirectURIs,
-			GrantTypes:              req.GrantTypes,
-			ResponseTypes:           req.ResponseTypes,
-			IssuedAt:                now,
-		}
-		if err := s.saveRegisteredClient(ctx, rec); err != nil {
-			log.ErrorContext(ctx, "failed to persist DCR client", slog.String("client_id", clientID), slog.Any("error", err))
-			writeOAuthError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
-			return
-		}
-		log.InfoContext(ctx, "DCR client registered",
-			slog.String("client_id", clientID),
-			slog.String("registered_scope", req.Scope),
-		)
-
-		resp := &oauthex.ClientRegistrationResponse{
-			ClientRegistrationMetadata: req,
-			ClientID:                   clientID,
-			ClientIDIssuedAt:           now,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(resp); err != nil { //nolint:gosec // intentional: DCR response includes client_secret by spec
-			log.ErrorContext(ctx, "failed to write DCR response", slog.String("client_id", clientID), slog.Any("error", err))
-		}
+		s.events.HTTPHandler(wideevent.OAuthClientRegistrationCompleted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.handleClientRegistration(w, r, req)
+		})).ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) handleClientRegistration(w http.ResponseWriter, r *http.Request, req oauthex.ClientRegistrationMetadata) {
+	log := ctxlog.LoggerFrom(r.Context())
+	log.InfoContext(r.Context(), "DCR request",
+		slog.Int("grant_type_count", len(req.GrantTypes)),
+		slog.Int("response_type_count", len(req.ResponseTypes)),
+		slog.Int("redirect_uri_count", len(req.RedirectURIs)),
+	)
+
+	if err := validateClientRegistrationMetadata(&req); err != nil {
+		log.WarnContext(r.Context(), "DCR: invalid client metadata")
+		writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	normalizeClientRegistrationMetadata(&req)
+	req.Scope = normalizeScope(req.Scope, defaultRegisteredClientScope)
+	if err := validateSupportedScope(req.Scope); err != nil {
+		log.WarnContext(r.Context(), "DCR: invalid scope")
+		writeOAuthError(w, "invalid_client_metadata", err.Error(), http.StatusBadRequest)
+		return
+	}
+	identity := clientclass.FromOAuth(req.ClientName)
+	if !clientclass.Recognized(identity) {
+		identity = clientclass.FromUserAgent(r.UserAgent())
+	}
+	wideevent.SetClientIdentity(r.Context(), identity)
+
+	now := time.Now()
+	clientID := uuid.New().String()
+	ctx := r.Context()
+
+	rec := storepkg.OAuthClient{
+		ClientID:                clientID,
+		ClientName:              req.ClientName,
+		TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
+		Scope:                   req.Scope,
+		RedirectURIs:            req.RedirectURIs,
+		GrantTypes:              req.GrantTypes,
+		ResponseTypes:           req.ResponseTypes,
+		IssuedAt:                now,
+	}
+	if err := s.saveRegisteredClient(ctx, rec); err != nil {
+		log.ErrorContext(ctx, "failed to persist DCR client", slog.String("client_id", clientID), slog.Any("error", err))
+		writeOAuthError(w, "server_error", "failed to save client registration", http.StatusInternalServerError)
+		return
+	}
+	log.InfoContext(ctx, "DCR client registered",
+		slog.String("client_id", clientID),
+		slog.String("registered_scope", req.Scope),
+	)
+
+	resp := &oauthex.ClientRegistrationResponse{
+		ClientRegistrationMetadata: req,
+		ClientID:                   clientID,
+		ClientIDIssuedAt:           now,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(resp); err != nil { //nolint:gosec // intentional: DCR response includes client_secret by spec
+		log.ErrorContext(ctx, "failed to write DCR response", slog.String("client_id", clientID), slog.Any("error", err))
+	}
 }
 
 func (s *Server) GitHubCallbackHandler() http.Handler {
@@ -733,6 +751,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		wideevent.SetClientIdentity(r.Context(), s.clientClassification(r.Context(), pending.ClientID, nil))
 
 		githubToken, identity, err := s.github.ExchangeCode(r.Context(), q.Get("code"))
 		if err != nil {
@@ -841,6 +860,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			writeOAuthError(w, reqErr.code, reqErr.description, reqErr.status)
 			return
 		}
+		wideevent.SetClientIdentity(ctx, s.clientClassification(ctx, clientID, client))
 
 		codeChallenge := q.Get("code_challenge")
 		if codeChallenge == "" {

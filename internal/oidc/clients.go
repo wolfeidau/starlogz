@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
 )
 
@@ -14,6 +15,23 @@ type oauthRequestError struct {
 	code        string
 	description string
 	status      int
+}
+
+func (s *Server) clientClassification(ctx context.Context, clientID string, client *storepkg.OAuthClient) clientclass.Classification {
+	if identity := clientclass.FromFirstParty(clientID); clientclass.Recognized(identity) {
+		return identity
+	}
+	if client == nil && s.clients != nil && clientID != "" {
+		var err error
+		client, err = s.clients.GetClient(ctx, clientID)
+		if err != nil {
+			return clientclass.Unknown()
+		}
+	}
+	if client == nil {
+		return clientclass.Unknown()
+	}
+	return clientclass.FromOAuth(client.ClientName)
 }
 
 func (s *Server) clientSupportsGrant(ctx context.Context, clientID, grantType string) bool {

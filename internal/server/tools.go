@@ -13,6 +13,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/wideevent"
@@ -32,11 +33,13 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	if eventEmitter == nil {
 		eventEmitter = wideevent.NewNoopEmitter()
 	}
+	sdkServer := mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{})
 	ms := &mcpServer{
-		server: mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{}),
+		server: sdkServer,
 		store:  st,
 		events: eventEmitter,
 	}
+	sdkServer.AddReceivingMiddleware(trackClientInitialize(ms))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Returns identity and token scopes. Call this first to verify access.",
@@ -94,6 +97,9 @@ func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Conte
 		result, output, err := handler(ctx, req, input)
 		outcome, reason := wideevent.OutcomeSuccess, wideevent.ReasonCompleted
 		attributes := map[string]string{wideevent.AttributeTool: tool}
+		for key, value := range wideevent.ClientIdentityAttributes(classifyMCPRequest(req)) {
+			attributes[key] = value
+		}
 		if err != nil {
 			outcome, reason = wideevent.OutcomeFailure, wideevent.ReasonFailed
 		} else if metadata, ok := output.(toolEventMetadata); ok {
@@ -103,6 +109,50 @@ func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Conte
 		ms.events.Completion(ctx, wideevent.MCPToolCallCompleted, outcome, reason, started, attributes)
 		return result, output, err
 	}
+}
+
+func trackClientInitialize(ms *mcpServer) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+			if method != "initialize" {
+				return next(ctx, method, req)
+			}
+			started := time.Now()
+			identity := classifyMCPRequest(req)
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					ms.events.Completion(ctx, wideevent.MCPClientInitialized, wideevent.OutcomeFailure,
+						wideevent.ReasonFailed, started, wideevent.ClientIdentityAttributes(identity))
+					panic(recovered)
+				}
+				outcome, reason := wideevent.OutcomeSuccess, wideevent.ReasonCompleted
+				if err != nil {
+					outcome, reason = wideevent.OutcomeFailure, wideevent.ReasonFailed
+				}
+				ms.events.Completion(ctx, wideevent.MCPClientInitialized, outcome, reason,
+					started, wideevent.ClientIdentityAttributes(identity))
+			}()
+			return next(ctx, method, req)
+		}
+	}
+}
+
+func classifyMCPRequest(req mcp.Request) clientclass.Classification {
+	if params, ok := req.GetParams().(*mcp.InitializeParams); ok && params.ClientInfo != nil {
+		if identity := clientclass.FromMCP(params.ClientInfo.Name, params.ClientInfo.Version); clientclass.Recognized(identity) {
+			return identity
+		}
+	}
+	extra := req.GetExtra()
+	if extra == nil {
+		return clientclass.Unknown()
+	}
+	if extra.TokenInfo != nil {
+		if identity := clientclass.FromTokenInfo(extra.TokenInfo.Extra); clientclass.Recognized(identity) {
+			return identity
+		}
+	}
+	return clientclass.FromUserAgent(extra.Header.Get("User-Agent"))
 }
 
 func resultCountBucket(count int) string {

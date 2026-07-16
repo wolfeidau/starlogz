@@ -27,7 +27,10 @@ All events use schema version 1:
   "duration_ms": 18,
   "attributes": {
     "tool": "insight_search",
-    "result_count_bucket": "1-10"
+    "result_count_bucket": "1-10",
+    "client_product": "codex",
+    "client_identity_source": "oauth_registration",
+    "client_identity_confidence": "declared"
   }
 }
 ```
@@ -38,6 +41,7 @@ All events use schema version 1:
 
 | Event name | Completion boundary |
 |---|---|
+| `oauth.client_registration.completed` | A parseable `/oauth2/register` request completed validation and registration processing. Malformed bodies remain access-log-only. |
 | `oauth.authorization.completed` | The `/oauth2/authorize` handler completed. |
 | `oauth.github_callback.completed` | The GitHub callback handler completed. |
 | `oauth.token_exchange.completed` | A recognized `authorization_code` token request completed. |
@@ -45,6 +49,7 @@ All events use schema version 1:
 | `ui.login.completed` | The `/login` initiation handler completed and produced an OAuth redirect. This is not an end-to-end user-login count. |
 | `ui.session.created` | The UI callback completed and created a dashboard session. Use this event to count successful dashboard logins. |
 | `ui.session.revoked` | The UI logout handler completed. |
+| `mcp.client_initialized` | The MCP `initialize` request completed. This counts initialization attempts, not unique clients. |
 | `mcp.tool_call.completed` | A registered MCP tool handler completed. |
 
 Malformed token endpoint requests are intentionally access-log-only. Wrong methods, unparseable or oversized forms, and unsupported `grant_type` values cannot be assigned truthfully to either the authorization-code or refresh flow, so the server does not guess an event name. Their HTTP status remains visible in the `http_request` access event.
@@ -66,11 +71,22 @@ HTTP events derive the reason from the response status. MCP tool errors use `fai
 
 ## Attributes
 
-`mcp.tool_call.completed` always includes `tool`, selected from the registered tool names. No other event currently includes attributes.
+The OAuth events and both MCP events include these bounded identity attributes:
+
+| Attribute | Allowed values |
+|---|---|
+| `client_product` | `starlogz_ui`, `codex`, `claude_code`, `cursor`, `vscode`, `mcp_inspector`, `other` |
+| `client_product_major` | Canonical decimal string from `0` through `999`; optional |
+| `client_identity_source` | `first_party`, `mcp_initialize`, `oauth_registration`, `user_agent`, `unknown` |
+| `client_identity_confidence` | `first_party`, `declared`, `signature`, `unknown` |
+
+Third-party identity is self-reported or signature-derived and is never used for authorization. `first_party` is reserved for a Starlogz-owned client identifier. Unknown or invalid inputs emit `other` and never fall back to caller-provided text.
+
+`mcp.tool_call.completed` also always includes `tool`, selected from the registered tool names.
 
 Successful `insight_search` and `insight_list` calls also include `result_count_bucket`. The approved buckets are `0`, `1-10`, `11-50`, `51-100`, and `101-200`. Failed calls omit the bucket because there is no valid result set. Other tools cannot include it.
 
-Events never contain insight content, search queries, tags, emails, tokens, OAuth parameters, arbitrary error strings, request or response bodies, headers, query strings, authorization identities, or raw IP addresses.
+Events never contain insight content, search queries, tags, emails, tokens, OAuth parameters, arbitrary error strings, request or response bodies, headers, query strings, authorization identities, raw client identity inputs, client fingerprints, or raw IP addresses.
 
 ## CloudWatch Logs Insights examples
 
@@ -90,6 +106,24 @@ fields @timestamp, detail.attributes.tool, detail.attributes.result_count_bucket
   and detail.attributes.tool = "insight_search"
   and detail.outcome = "success"
 | stats count() as calls by detail.attributes.result_count_bucket, bin(1h)
+```
+
+Count MCP tool calls by client product:
+
+```text
+fields detail.attributes.client_product, detail.attributes.tool
+| filter detail.event_name = "mcp.tool_call.completed"
+| stats count() as calls by detail.attributes.client_product, detail.attributes.tool
+| sort calls desc
+```
+
+Measure unknown client classifications:
+
+```text
+fields detail.event_name, detail.attributes.client_identity_source
+| filter detail.attributes.client_product = "other"
+| stats count() as events by detail.event_name, detail.attributes.client_identity_source
+| sort events desc
 ```
 
 Find failures by flow and bounded reason:

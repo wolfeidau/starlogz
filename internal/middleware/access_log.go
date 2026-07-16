@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/medama-io/go-useragent"
 	"github.com/medama-io/go-useragent/agents"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -78,7 +79,7 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 			if spanContext.IsValid() {
 				attrs = append(attrs, slog.String("trace_id", spanContext.TraceID().String()))
 			}
-			attrs = append(attrs, userAgentAttrs(parser.Parse(r.UserAgent()))...)
+			attrs = append(attrs, userAgentAttrs(parser.Parse(r.UserAgent()), r.UserAgent())...)
 
 			reqLogger.LogAttrs(r.Context(), slog.LevelInfo, "http_request", attrs...)
 		})
@@ -97,15 +98,22 @@ func routePattern(r *http.Request) string {
 	return pattern
 }
 
-func userAgentAttrs(ua useragent.UserAgent) []slog.Attr {
+func userAgentAttrs(ua useragent.UserAgent, raw string) []slog.Attr {
+	identity := clientclass.FromUserAgent(raw)
 	attrs := []slog.Attr{
 		slog.String("client_kind", clientKind(ua)),
 		slog.String("client_family", browserFamily(ua.Browser())),
 		slog.String("os_family", osFamily(ua.OS())),
 		slog.String("device_class", deviceClass(ua.Device())),
+		slog.String("client_product", identity.Product),
+		slog.String("client_identity_source", identity.Source),
+		slog.String("client_identity_confidence", identity.Confidence),
 	}
 	if major, err := strconv.Atoi(ua.BrowserVersionMajor()); err == nil && major >= 0 && major <= 999 {
 		attrs = append(attrs, slog.Int("client_major", major))
+	}
+	if identity.HasMajor {
+		attrs = append(attrs, slog.Int("client_product_major", identity.Major))
 	}
 	return attrs
 }

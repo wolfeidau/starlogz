@@ -26,6 +26,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/logattr"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -345,7 +346,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	jwksKid := keySet.Keys[0].Kid
 	require.NotEmpty(t, jwksKid)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	parts := strings.SplitN(tokenString, ".", 3)
@@ -1986,7 +1987,7 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
@@ -2032,7 +2033,7 @@ func TestLogoutHandler_WrongMethod(t *testing.T) {
 func TestVerifyJWT_ValidToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
@@ -2041,6 +2042,22 @@ func TestVerifyJWT_ValidToken(t *testing.T) {
 	require.Contains(t, info.Scopes, "insights:read")
 	require.Contains(t, info.Scopes, "insights:write")
 	require.False(t, info.Expiration.IsZero())
+	require.Equal(t, clientclass.ProductOther, info.Extra[clientclass.TokenInfoProductKey])
+	require.Equal(t, clientclass.ConfidenceUnknown, info.Extra[clientclass.TokenInfoConfidenceKey])
+}
+
+func TestVerifyJWT_RoundTripsBoundedClientIdentity(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	identity := clientclass.FromMCP("codex-mcp-client", "144.4.0")
+	identity.Source = clientclass.SourceOAuthRegistration
+
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), identity)
+	require.NoError(t, err)
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
+	require.NoError(t, err)
+	require.Equal(t, clientclass.ProductCodex, info.Extra[clientclass.TokenInfoProductKey])
+	require.Equal(t, 144, info.Extra[clientclass.TokenInfoMajorKey])
+	require.Equal(t, clientclass.ConfidenceDeclared, info.Extra[clientclass.TokenInfoConfidenceKey])
 }
 
 func TestVerifyJWT_Garbage(t *testing.T) {
@@ -2053,7 +2070,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	a := newTestOIDCServer(t)
 	b := newTestOIDCServer(t)
 
-	tokenString, err := b.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := b.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	_, err = a.VerifyJWT(t.Context(), tokenString, nil)
@@ -2063,7 +2080,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 func TestVerifyJWT_RevokedToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -2079,7 +2096,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour), clientclass.Unknown())
 	require.NoError(t, err)
 
 	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
@@ -2110,6 +2127,27 @@ func signCustomToken(t *testing.T, srv *Server, extra func(*jwt.Builder)) string
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES384(), srv.privkey))
 	require.NoError(t, err)
 	return string(signed)
+}
+
+func TestVerifyJWT_AcceptsOldTokenWithoutClientIdentity(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	info, err := srv.VerifyJWT(t.Context(), signCustomToken(t, srv, nil), nil)
+	require.NoError(t, err)
+	require.Equal(t, clientclass.ProductOther, info.Extra[clientclass.TokenInfoProductKey])
+	require.Equal(t, clientclass.ConfidenceUnknown, info.Extra[clientclass.TokenInfoConfidenceKey])
+}
+
+func TestVerifyJWT_BoundsInvalidClientIdentity(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	tokenString := signCustomToken(t, srv, func(builder *jwt.Builder) {
+		builder.Claim(claimClientProduct, "private-client")
+		builder.Claim(claimClientConfidence, clientclass.ConfidenceDeclared)
+	})
+
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
+	require.NoError(t, err)
+	require.Equal(t, clientclass.ProductOther, info.Extra[clientclass.TokenInfoProductKey])
 }
 
 func TestVerifyJWT_MissingAud(t *testing.T) {

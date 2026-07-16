@@ -30,6 +30,7 @@ func validEvent() Event {
 		SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: OAuthRefreshCompleted,
 		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "dev",
 		ServiceVersion: "v1.2.3", Outcome: OutcomeSuccess, Reason: ReasonCompleted,
+		Attributes: withTestIdentity(nil),
 	}
 }
 

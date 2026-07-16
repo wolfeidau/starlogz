@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wolfeidau/starlogz/internal/clientclass"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -21,29 +23,35 @@ const (
 type Name string
 
 const (
-	OAuthAuthorizationCompleted  Name = "oauth.authorization.completed"
-	OAuthGitHubCallbackCompleted Name = "oauth.github_callback.completed"
-	OAuthTokenExchangeCompleted  Name = "oauth.token_exchange.completed" //nolint:gosec // Event name, not a credential.
-	OAuthRefreshCompleted        Name = "oauth.refresh.completed"
-	UILoginCompleted             Name = "ui.login.completed"
-	UISessionCreated             Name = "ui.session.created"
-	UISessionRevoked             Name = "ui.session.revoked"
-	MCPToolCallCompleted         Name = "mcp.tool_call.completed"
+	OAuthAuthorizationCompleted      Name = "oauth.authorization.completed"
+	OAuthClientRegistrationCompleted Name = "oauth.client_registration.completed"
+	OAuthGitHubCallbackCompleted     Name = "oauth.github_callback.completed"
+	OAuthTokenExchangeCompleted      Name = "oauth.token_exchange.completed" //nolint:gosec // Event name, not a credential.
+	OAuthRefreshCompleted            Name = "oauth.refresh.completed"
+	UILoginCompleted                 Name = "ui.login.completed"
+	UISessionCreated                 Name = "ui.session.created"
+	UISessionRevoked                 Name = "ui.session.revoked"
+	MCPClientInitialized             Name = "mcp.client_initialized"
+	MCPToolCallCompleted             Name = "mcp.tool_call.completed"
 )
 
 const (
-	AttributeTool              = "tool"
-	AttributeResultCountBucket = "result_count_bucket"
-	ToolWhoami                 = "whoami"
-	ToolProjectEnsure          = "project_ensure"
-	ToolProjectList            = "project_list"
-	ToolInsightWrite           = "insight_write"
-	ToolInsightGet             = "insight_get"
-	ToolInsightSearch          = "insight_search"
-	ToolInsightList            = "insight_list"
-	ToolInsightUpdate          = "insight_update"
-	ToolInsightDelete          = "insight_delete"
-	ToolInsightListTags        = "insight_list_tags"
+	AttributeTool                     = "tool"
+	AttributeResultCountBucket        = "result_count_bucket"
+	AttributeClientProduct            = "client_product"
+	AttributeClientProductMajor       = "client_product_major"
+	AttributeClientIdentitySource     = "client_identity_source"
+	AttributeClientIdentityConfidence = "client_identity_confidence"
+	ToolWhoami                        = "whoami"
+	ToolProjectEnsure                 = "project_ensure"
+	ToolProjectList                   = "project_list"
+	ToolInsightWrite                  = "insight_write"
+	ToolInsightGet                    = "insight_get"
+	ToolInsightSearch                 = "insight_search"
+	ToolInsightList                   = "insight_list"
+	ToolInsightUpdate                 = "insight_update"
+	ToolInsightDelete                 = "insight_delete"
+	ToolInsightListTags               = "insight_list_tags"
 )
 
 const (
@@ -160,19 +168,56 @@ func (e *Emitter) Completion(ctx context.Context, name Name, outcome Outcome, re
 
 func (e *Emitter) HTTPHandler(name Name, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+		collector := newAttributeCollector(name)
+		ctx := context.WithValue(r.Context(), attributeCollectorKey{}, collector)
+		r = r.WithContext(ctx)
 		started := time.Now()
 		rw := &statusWriter{ResponseWriter: w}
 		defer func(ctx context.Context) {
 			if recovered := recover(); recovered != nil {
-				e.Completion(ctx, name, OutcomeFailure, ReasonServerError, started, nil)
+				e.Completion(ctx, name, OutcomeFailure, ReasonServerError, started, collector.attributes)
 				panic(recovered)
 			}
 			outcome, reason := classifyStatus(rw.statusCode())
-			e.Completion(ctx, name, outcome, reason, started, nil)
+			e.Completion(ctx, name, outcome, reason, started, collector.attributes)
 		}(ctx)
 		next.ServeHTTP(rw, r)
 	})
+}
+
+type attributeCollectorKey struct{}
+
+type attributeCollector struct {
+	attributes map[string]string
+}
+
+func newAttributeCollector(name Name) *attributeCollector {
+	collector := &attributeCollector{}
+	if eventRequiresIdentity(name) {
+		collector.attributes = ClientIdentityAttributes(clientclass.Unknown())
+	}
+	return collector
+}
+
+func SetClientIdentity(ctx context.Context, identity clientclass.Classification) {
+	collector, _ := ctx.Value(attributeCollectorKey{}).(*attributeCollector)
+	if collector == nil {
+		return
+	}
+	collector.attributes = ClientIdentityAttributes(identity)
+}
+
+func ClientIdentityAttributes(identity clientclass.Classification) map[string]string {
+	identity = clientclass.Normalize(identity)
+	attributes := map[string]string{
+		AttributeClientProduct:            identity.Product,
+		AttributeClientIdentitySource:     identity.Source,
+		AttributeClientIdentityConfidence: identity.Confidence,
+	}
+	if identity.HasMajor {
+		attributes[AttributeClientProductMajor] = strconv.Itoa(identity.Major)
+	}
+	return attributes
 }
 
 type statusWriter struct {
@@ -230,10 +275,11 @@ func classifyStatus(status int) (Outcome, string) {
 var (
 	deploymentValuePattern = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
 	allowedNames           = map[Name]struct{}{
-		OAuthAuthorizationCompleted: {}, OAuthGitHubCallbackCompleted: {},
-		OAuthTokenExchangeCompleted: {}, OAuthRefreshCompleted: {},
+		OAuthAuthorizationCompleted: {}, OAuthClientRegistrationCompleted: {},
+		OAuthGitHubCallbackCompleted: {},
+		OAuthTokenExchangeCompleted:  {}, OAuthRefreshCompleted: {},
 		UILoginCompleted: {}, UISessionCreated: {}, UISessionRevoked: {},
-		MCPToolCallCompleted: {},
+		MCPClientInitialized: {}, MCPToolCallCompleted: {},
 	}
 	allowedReasons = map[string]struct{}{
 		ReasonCompleted: {}, ReasonInvalidRequest: {}, ReasonUnauthorized: {},
@@ -306,24 +352,40 @@ func validateDeploymentFields(e Event) error {
 }
 
 func validateAttributes(name Name, outcome Outcome, attributes map[string]string) error {
-	if len(attributes) == 0 {
-		if name == MCPToolCallCompleted {
-			return fmt.Errorf("tool attribute is required")
+	if eventRequiresIdentity(name) {
+		if err := validateIdentityAttributes(attributes); err != nil {
+			return err
+		}
+	}
+	switch name {
+	case MCPToolCallCompleted:
+		return validateToolAttributes(outcome, attributes)
+	case MCPClientInitialized, OAuthClientRegistrationCompleted, OAuthAuthorizationCompleted,
+		OAuthGitHubCallbackCompleted, OAuthTokenExchangeCompleted, OAuthRefreshCompleted:
+		for key := range attributes {
+			if !identityAttribute(key) {
+				return fmt.Errorf("unsupported attribute %q", key)
+			}
+		}
+		return nil
+	default:
+		if len(attributes) != 0 {
+			return fmt.Errorf("attributes are not allowed for %q", name)
 		}
 		return nil
 	}
-	if name != MCPToolCallCompleted || len(attributes) > 2 {
-		return fmt.Errorf("attributes are not allowed for %q", name)
-	}
+}
+
+func validateToolAttributes(outcome Outcome, attributes map[string]string) error {
 	tool, ok := attributes[AttributeTool]
 	if !ok {
-		return fmt.Errorf("only the tool attribute is allowed")
+		return fmt.Errorf("tool attribute is required")
 	}
 	if _, ok := allowedTools[tool]; !ok {
 		return fmt.Errorf("unsupported tool attribute %q", tool)
 	}
 	for key := range attributes {
-		if key != AttributeTool && key != AttributeResultCountBucket {
+		if key != AttributeTool && key != AttributeResultCountBucket && !identityAttribute(key) {
 			return fmt.Errorf("unsupported attribute %q", key)
 		}
 	}
@@ -341,4 +403,49 @@ func validateAttributes(name Name, outcome Outcome, attributes map[string]string
 		}
 	}
 	return nil
+}
+
+func validateIdentityAttributes(attributes map[string]string) error {
+	product, hasProduct := attributes[AttributeClientProduct]
+	source, hasSource := attributes[AttributeClientIdentitySource]
+	confidence, hasConfidence := attributes[AttributeClientIdentityConfidence]
+	if !hasProduct || !hasSource || !hasConfidence {
+		return fmt.Errorf("client identity attributes are required")
+	}
+	identity := clientclass.Classification{
+		Product: product, Source: source, Confidence: confidence,
+	}
+	if value, ok := attributes[AttributeClientProductMajor]; ok {
+		major, err := strconv.Atoi(value)
+		if err != nil || strconv.Itoa(major) != value {
+			return fmt.Errorf("client_product_major must be a canonical integer")
+		}
+		identity.Major = major
+		identity.HasMajor = true
+	}
+	if !clientclass.Valid(identity) {
+		return fmt.Errorf("unsupported client identity attributes")
+	}
+	return nil
+}
+
+func eventRequiresIdentity(name Name) bool {
+	switch name {
+	case MCPClientInitialized, MCPToolCallCompleted, OAuthClientRegistrationCompleted,
+		OAuthAuthorizationCompleted, OAuthGitHubCallbackCompleted,
+		OAuthTokenExchangeCompleted, OAuthRefreshCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func identityAttribute(key string) bool {
+	switch key {
+	case AttributeClientProduct, AttributeClientProductMajor,
+		AttributeClientIdentitySource, AttributeClientIdentityConfidence:
+		return true
+	default:
+		return false
+	}
 }
