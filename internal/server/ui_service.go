@@ -101,15 +101,26 @@ func (s *uiService) ListInsights(ctx context.Context, req *connect.Request[starl
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	insights, err := s.store.ListInsights(ctx, project.ID, req.Msg.GetTag(), limit)
+	after, err := decodeInsightListCursor(req.Msg.GetCursor(), project.ID, req.Msg.GetTag())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+	}
+	page, err := s.store.ListInsights(ctx, store.ListInsightsParams{ProjectID: project.ID, Tag: req.Msg.GetTag(), Limit: limit, After: after})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list insights: %w", err))
 	}
-	protoInsights, err := toProtoInsights(insights, project.Slug)
+	protoInsights, err := toProtoInsights(page.Insights, project.Slug)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	return connect.NewResponse(&starlogzv1.ListInsightsResponse{Insights: protoInsights}), nil
+	response := &starlogzv1.ListInsightsResponse{Insights: protoInsights}
+	if page.NextCursor != nil {
+		response.NextCursor, err = encodeInsightListCursor(project.ID, req.Msg.GetTag(), page.NextCursor)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
+		}
+	}
+	return connect.NewResponse(response), nil
 }
 
 func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[starlogzv1.SearchInsightsRequest]) (*connect.Response[starlogzv1.SearchInsightsResponse], error) {

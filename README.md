@@ -26,7 +26,7 @@ All tools require `insights:read`. Write tools require `insights:write`.
 | `insight_write` | `insights:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Requires `category` and `source`. |
 | `insight_get` | `insights:read` | Retrieves one insight by ID or key with bounded outgoing links and backlinks. |
 | `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns results ordered by relevance. |
-| `insight_list` | `insights:read` | Lists all live insights in a project, newest first. Optional tag filter. |
+| `insight_list` | `insights:read` | Lists live insights by most recent update. Optional tag filter and opaque cursor continuation. |
 | `insight_update` | `insights:write` | Updates content and/or tags of an existing insight. |
 | `insight_delete` | `insights:write` | Soft-deletes an insight by ID. Does not appear in search or list after deletion. |
 | `insight_list_tags` | `insights:read` | Returns tags for a project ordered by usage frequency. |
@@ -317,7 +317,8 @@ Error events are forwarded to Sentry when `SENTRY_DSN` is set. Only `Error`-leve
 - No insight versioning, keyed-insight updates overwrite content and tags in place
 - No cross-user access control, any authenticated user can read or write any project by slug
 - English full-text only, `to_tsvector('english', ...)` is hardcoded
-- No pagination, cursor `limit` is the only bound on list and search results
+- Cursor pagination is available for insight listing; search remains limited to
+  its first bounded result set
 
 ## Built with AI
 

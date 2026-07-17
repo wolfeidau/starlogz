@@ -1,7 +1,7 @@
 # Linked insights
 
 > Status: Current contract
-> Last reviewed: 2026-07-16
+> Last reviewed: 2026-07-18
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz supports explicit, project-local relationships between insights. Links
@@ -148,9 +148,9 @@ reference with another `insight_get` call rather than receiving an unbounded
 graph expansion. Missing, deleted, and inaccessible insights return the same
 not-found behavior.
 
-`insight_search` and `insight_list` retain their existing ranking, inputs,
-limits, and raw content. They do not expand or attach relationship data. The
-intended traversal is:
+`insight_search` and `insight_list` retain their ranking, limits, and raw
+content. Cursor pagination is additive and does not expand or attach
+relationship data. The intended traversal is:
 
 ```text
 insight_search -> select result -> insight_get -> traverse deliberately

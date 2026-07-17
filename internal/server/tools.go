@@ -63,7 +63,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list",
-		Description: "Lists all live insights in a project, newest first. Optionally filter by a single tag.",
+		Description: "Lists live insights in a project, newest first. Optionally filter by a single tag or continue with an opaque cursor.",
 		InputSchema: insightListSchema,
 	}, trackTool(ms, wideevent.ToolInsightList, ms.insightList))
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -172,6 +172,7 @@ type insightListInput struct {
 	Project string `json:"project"`
 	Tag     string `json:"tag"`
 	Limit   int    `json:"limit"`
+	Cursor  string `json:"cursor"`
 }
 
 type insightDeleteInput struct {
@@ -255,6 +256,8 @@ var (
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
+		s.Properties["cursor"].MinLength = jsonschema.Ptr(1)
+		s.Properties["cursor"].MaxLength = jsonschema.Ptr(maxCursorLength)
 		s.Required = []string{projectSchemaProperty}
 		return s
 	}()
@@ -536,12 +539,24 @@ func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, 
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	insights, err := ms.store.ListInsights(ctx, project.ID, in.Tag, limit)
+	after, err := decodeInsightListCursor(in.Cursor, project.ID, in.Tag)
+	if err != nil {
+		return nil, nil, errInvalidCursor
+	}
+	page, err := ms.store.ListInsights(ctx, store.ListInsightsParams{ProjectID: project.ID, Tag: in.Tag, Limit: limit, After: after})
 	if err != nil {
 		return nil, nil, fmt.Errorf("list insights: %w", err)
 	}
-	result, _, err := jsonResult(map[string]any{"insights": toInsightResponses(insights)})
-	return result, toolEventMetadata{resultCount: len(insights)}, err
+	output := map[string]any{"insights": toInsightResponses(page.Insights)}
+	if page.NextCursor != nil {
+		nextCursor, err := encodeInsightListCursor(project.ID, in.Tag, page.NextCursor)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode next cursor: %w", err)
+		}
+		output["next_cursor"] = nextCursor
+	}
+	result, _, err := jsonResult(output)
+	return result, toolEventMetadata{resultCount: len(page.Insights)}, err
 }
 
 func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest, in insightDeleteInput) (*mcp.CallToolResult, any, error) {

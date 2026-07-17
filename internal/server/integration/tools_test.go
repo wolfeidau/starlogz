@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/commands"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -90,6 +92,7 @@ type toolFixture struct {
 	ts      *httptest.Server
 	oidcSrv *oidc.Server
 	store   *postgres.Store
+	dsn     string
 }
 
 // newToolFixture clones a migrated Postgres template database, builds the
@@ -98,7 +101,8 @@ func newToolFixture(t *testing.T) *toolFixture {
 	t.Helper()
 	ctx := t.Context()
 
-	st, err := postgres.New(ctx, testDB.NewDSN(t), nil)
+	dsn := testDB.NewDSN(t)
+	st, err := postgres.New(ctx, dsn, nil)
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 
@@ -131,7 +135,7 @@ func newToolFixture(t *testing.T) *toolFixture {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	return &toolFixture{ts: ts, oidcSrv: oidcSrv, store: st}
+	return &toolFixture{ts: ts, oidcSrv: oidcSrv, store: st, dsn: dsn}
 }
 
 var ghIDSeq atomic.Int64
@@ -197,6 +201,81 @@ func TestUIWebSession(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.Equal(t, user.ID.String(), body["userId"])
 	require.Equal(t, "web-user", body["login"])
+}
+
+func TestUIListInsightsCursorPagination(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "web-cursor-user")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	project, err := f.store.EnsureProject(ctx, org.ID, user.ID, "web-cursor", "Web Cursor")
+	require.NoError(t, err)
+	for _, content := range []string{"first", "second", "third"} {
+		_, err := f.store.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: project.ID,
+			Content:   content,
+			Tags:      []string{"page"},
+			Category:  "fact",
+			Source:    "repo",
+			CreatedBy: user.ID,
+		})
+		require.NoError(t, err)
+	}
+
+	rawToken := "opaque-cursor-browser-session"
+	now := time.Now()
+	_, err = f.store.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(7 * 24 * time.Hour), ExpiresAt: now.Add(30 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	type listResponse struct {
+		Insights []struct {
+			ID string `json:"id"`
+		} `json:"insights"`
+		NextCursor string `json:"nextCursor"`
+	}
+	callList := func(body map[string]any) (int, listResponse) {
+		t.Helper()
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			f.ts.URL+"/starlogz.v1.UIService/ListInsights", strings.NewReader(string(payload)))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		var decoded listResponse
+		if resp.StatusCode == http.StatusOK {
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&decoded))
+		}
+		return resp.StatusCode, decoded
+	}
+
+	status, first := callList(map[string]any{"project": "web-cursor", "tag": "page", "limit": 1})
+	require.Equal(t, http.StatusOK, status)
+	require.Len(t, first.Insights, 1)
+	require.NotEmpty(t, first.NextCursor)
+
+	status, second := callList(map[string]any{"project": "web-cursor", "tag": "page", "limit": 1, "cursor": first.NextCursor})
+	require.Equal(t, http.StatusOK, status)
+	require.Len(t, second.Insights, 1)
+	require.NotEqual(t, first.Insights[0].ID, second.Insights[0].ID)
+	require.NotEmpty(t, second.NextCursor)
+
+	status, third := callList(map[string]any{"project": "web-cursor", "tag": "page", "limit": 1, "cursor": second.NextCursor})
+	require.Equal(t, http.StatusOK, status)
+	require.Len(t, third.Insights, 1)
+	require.NotEqual(t, first.Insights[0].ID, third.Insights[0].ID)
+	require.NotEqual(t, second.Insights[0].ID, third.Insights[0].ID)
+	require.Empty(t, third.NextCursor)
+
+	status, _ = callList(map[string]any{"project": "web-cursor", "tag": "other", "limit": 1, "cursor": first.NextCursor})
+	require.Equal(t, http.StatusBadRequest, status)
 }
 
 func TestUIGetInsightAndRenderedHTML(t *testing.T) {
@@ -647,6 +726,8 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	requireSchemaNumber(t, 1, schemaProperty(t, insightList, "project")["minLength"])
 	requireSchemaNumber(t, 0, schemaProperty(t, insightList, "limit")["minimum"])
 	requireSchemaNumber(t, 200, schemaProperty(t, insightList, "limit")["maximum"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightList, "cursor")["minLength"])
+	requireSchemaNumber(t, 1024, schemaProperty(t, insightList, "cursor")["maxLength"])
 
 	insightDelete := inputSchemaMap(t, list.Tools, "insight_delete")
 	require.ElementsMatch(t, []string{"id"}, schemaRequired(t, insightDelete))
@@ -1230,6 +1311,112 @@ func TestInsightList_RespectsTagFilter(t *testing.T) {
 	require.Contains(t, text, "go fact")
 	require.Contains(t, text, "both fact")
 	require.NotContains(t, text, "python fact")
+}
+
+func TestInsightList_CursorPagination(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "cursor-user")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	for _, content := range []string{"first", "second", "third"} {
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("cursor-list", content, map[string]any{"tags": []string{"page"}}))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	}
+
+	type listResponse struct {
+		Insights []struct {
+			ID string `json:"id"`
+		} `json:"insights"`
+		NextCursor string `json:"next_cursor"`
+	}
+
+	var seen []string
+	cursor := ""
+	for {
+		args := map[string]any{"project": "cursor-list", "tag": "page", "limit": 1}
+		if cursor != "" {
+			args["cursor"] = cursor
+		}
+		res := callTool(t, ctx, sess, "insight_list", args)
+		require.False(t, res.IsError, "insight_list failed: %s", resultText(t, res))
+		var page listResponse
+		require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &page))
+		require.Len(t, page.Insights, 1)
+		seen = append(seen, page.Insights[0].ID)
+		if len(seen) < 3 {
+			require.NotEmpty(t, page.NextCursor)
+		} else {
+			require.Empty(t, page.NextCursor)
+		}
+		cursor = page.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	require.Len(t, seen, 3)
+	require.Len(t, map[string]struct{}{seen[0]: {}, seen[1]: {}, seen[2]: {}}, 3)
+
+	invalid := callTool(t, ctx, sess, "insight_list", map[string]any{
+		"project": "cursor-list",
+		"tag":     "different",
+		"limit":   1,
+		"cursor":  "not-a-cursor",
+	})
+	require.True(t, invalid.IsError)
+	require.Contains(t, resultText(t, invalid), "invalid_cursor")
+}
+
+func TestInsightList_CursorPaginationForImportedPreEpochTimestamps(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "pre-epoch-cursor-user")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+
+	input := filepath.Join(t.TempDir(), "pre-epoch.json")
+	document := []byte(`{
+		"project": {
+			"slug": "pre-epoch-list",
+			"name": "Pre-epoch list",
+			"insights": [
+				{"content":"first","tags":["historic"],"category":"fact","source":"repo","created_at":"1960-01-02T03:04:05Z","updated_at":"1960-01-02T03:04:05Z"},
+				{"content":"second","tags":["historic"],"category":"fact","source":"repo","created_at":"1960-01-02T03:04:05Z","updated_at":"1960-01-02T03:04:05Z"},
+				{"content":"third","tags":["historic"],"category":"fact","source":"repo","created_at":"1960-01-02T03:04:05Z","updated_at":"1960-01-02T03:04:05Z"}
+			]
+		}
+	}`)
+	require.NoError(t, os.WriteFile(input, document, 0o600))
+	importCmd := &commands.ImportCmd{DatabaseURL: f.dsn, Input: input, OrgID: org.ID.String(), CreatedBy: user.ID.String()}
+	require.NoError(t, importCmd.Run(ctx, &commands.Globals{Logger: slog.New(slog.DiscardHandler)}))
+
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read"))
+	var seen []string
+	cursor := ""
+	for {
+		args := map[string]any{"project": "pre-epoch-list", "limit": 1}
+		if cursor != "" {
+			args["cursor"] = cursor
+		}
+		res := callTool(t, ctx, sess, "insight_list", args)
+		require.False(t, res.IsError, "insight_list failed: %s", resultText(t, res))
+		var page struct {
+			Insights []struct {
+				ID string `json:"id"`
+			} `json:"insights"`
+			NextCursor string `json:"next_cursor"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &page))
+		require.Len(t, page.Insights, 1)
+		seen = append(seen, page.Insights[0].ID)
+		cursor = page.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	require.Len(t, seen, 3)
+	require.Len(t, map[string]struct{}{seen[0]: {}, seen[1]: {}, seen[2]: {}}, 3)
 }
 
 // --- insight_delete / insight_update: scope enforcement and error surfaces ---
