@@ -177,10 +177,11 @@ func (c *ExportCmd) runAll(ctx context.Context, st *postgres.Store, logger *slog
 }
 
 func exportInsightsForProject(ctx context.Context, st *postgres.Store, projectID uuid.UUID) ([]exportInsight, error) {
-	insights, err := st.ListInsights(ctx, projectID, "", maxExportInsights)
+	page, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: projectID, Limit: maxExportInsights})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list insights: %w", err)
 	}
+	insights := page.Insights
 
 	exported := make([]exportInsight, len(insights))
 	for i, in := range insights {

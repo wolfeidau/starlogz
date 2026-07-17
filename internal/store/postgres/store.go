@@ -1322,34 +1322,46 @@ func (s *Store) SearchInsights(ctx context.Context, projectID uuid.UUID, query s
 	return scanInsights(rows)
 }
 
-// ListInsights returns live insights for a project ordered by most recently updated.
-func (s *Store) ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*store.Insight, error) {
-	s.logger(ctx).DebugContext(ctx, "listing insights", slog.String("project_id", projectID.String()), slog.Bool("tag_filter", tag != ""), slog.Int("limit", limit))
+func (s *Store) ListInsights(ctx context.Context, p store.ListInsightsParams) (*store.InsightPage, error) {
+	s.logger(ctx).DebugContext(ctx, "listing insights", slog.String("project_id", p.ProjectID.String()), slog.Bool("tag_filter", p.Tag != ""), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil))
 
-	var rows pgx.Rows
-	var err error
-	if tag != "" {
-		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
-			FROM insights
-			WHERE project_id = $1 AND deleted_at IS NULL AND tags @> ARRAY[$3::text]
-			ORDER BY updated_at DESC
-			LIMIT $2`,
-			projectID, limit, tag)
-	} else {
-		rows, err = s.pool.Query(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
-			FROM insights
-			WHERE project_id = $1 AND deleted_at IS NULL
-			ORDER BY updated_at DESC
-			LIMIT $2`,
-			projectID, limit)
+	if p.Limit <= 0 {
+		return &store.InsightPage{}, nil
 	}
+
+	query := `
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+		FROM insights
+		WHERE project_id = $1 AND deleted_at IS NULL`
+	args := []any{p.ProjectID}
+	if p.Tag != "" {
+		args = append(args, p.Tag)
+		query += fmt.Sprintf(" AND tags @> ARRAY[$%d::text]", len(args))
+	}
+	if p.After != nil {
+		args = append(args, p.After.UpdatedAt, p.After.ID)
+		query += fmt.Sprintf(" AND (updated_at, id) < ($%d, $%d)", len(args)-1, len(args))
+	}
+	args = append(args, p.Limit+1)
+	query += fmt.Sprintf(" ORDER BY updated_at DESC, id DESC LIMIT $%d", len(args))
+
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list insights: %w", err)
 	}
 	defer rows.Close()
-	return scanInsights(rows)
+
+	insights, err := scanInsights(rows)
+	if err != nil {
+		return nil, err
+	}
+	page := &store.InsightPage{Insights: insights}
+	if len(page.Insights) > p.Limit {
+		page.Insights = page.Insights[:p.Limit]
+		last := page.Insights[len(page.Insights)-1]
+		page.NextCursor = &store.InsightListCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+	}
+	return page, nil
 }
 
 // ListTags returns tags for a project ordered by usage frequency.
@@ -1429,10 +1441,11 @@ func (s *Store) GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*
 		return nil, fmt.Errorf("recent activity: %w", err)
 	}
 
-	out.RecentInsights, err = s.ListInsights(ctx, projectID, "", 12)
+	recent, err := s.ListInsights(ctx, store.ListInsightsParams{ProjectID: projectID, Limit: 12})
 	if err != nil {
 		return nil, fmt.Errorf("recent insights: %w", err)
 	}
+	out.RecentInsights = recent.Insights
 
 	return out, nil
 }

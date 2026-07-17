@@ -48,8 +48,9 @@ func TestImportCmd_SingleProjectRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, srcProj.Name, imported.Name)
 
-	insights, err := st.ListInsights(t.Context(), imported.ID, "", 100)
+	page, err := st.ListInsights(t.Context(), store.ListInsightsParams{ProjectID: imported.ID, Limit: 100})
 	require.NoError(t, err)
+	insights := page.Insights
 	require.Len(t, insights, 1)
 	require.Equal(t, "preferred-language", insights[0].Key)
 	require.Equal(t, "Go", insights[0].Content)
@@ -80,8 +81,9 @@ func TestImportCmd_PreservesInsightTimestamps(t *testing.T) {
 
 	project, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "proj")
 	require.NoError(t, err)
-	insights, err := st.ListInsights(t.Context(), project.ID, "", 100)
+	page, err := st.ListInsights(t.Context(), store.ListInsightsParams{ProjectID: project.ID, Limit: 100})
 	require.NoError(t, err)
+	insights := page.Insights
 	require.Len(t, insights, 1)
 	require.True(t, sourceCreated.Equal(insights[0].CreatedAt), "created_at must be preserved from the export, not reset to now")
 	require.True(t, sourceUpdated.Equal(insights[0].UpdatedAt), "updated_at must be preserved from the export, not reset to now")
@@ -110,8 +112,9 @@ func TestImportCmd_KeyedInsightsUpsertOnRerun(t *testing.T) {
 
 	project, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "proj")
 	require.NoError(t, err)
-	insights, err := st.ListInsights(t.Context(), project.ID, "", 100)
+	page, err := st.ListInsights(t.Context(), store.ListInsightsParams{ProjectID: project.ID, Limit: 100})
 	require.NoError(t, err)
+	insights := page.Insights
 	require.Len(t, insights, 1, "re-importing a keyed insight must upsert, not duplicate")
 }
 
@@ -151,13 +154,15 @@ func TestImportCmd_AllOrgsShapeFlattensIntoTargetOrg(t *testing.T) {
 	projB, err := st.GetProjectBySlug(t.Context(), dstOrg.ID, "proj-b")
 	require.NoError(t, err)
 
-	insightsA, err := st.ListInsights(t.Context(), projA.ID, "", 100)
+	pageA, err := st.ListInsights(t.Context(), store.ListInsightsParams{ProjectID: projA.ID, Limit: 100})
 	require.NoError(t, err)
+	insightsA := pageA.Insights
 	require.Len(t, insightsA, 1)
 	require.Equal(t, "from a", insightsA[0].Content)
 
-	insightsB, err := st.ListInsights(t.Context(), projB.ID, "", 100)
+	pageB, err := st.ListInsights(t.Context(), store.ListInsightsParams{ProjectID: projB.ID, Limit: 100})
 	require.NoError(t, err)
+	insightsB := pageB.Insights
 	require.Len(t, insightsB, 1)
 	require.Equal(t, "from b", insightsB[0].Content)
 }

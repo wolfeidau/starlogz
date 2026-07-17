@@ -127,10 +127,12 @@ message ListInsightsRequest {
   string project = 1;
   string tag = 2;
   int32 limit = 3;
+  string cursor = 4;
 }
 
 message ListInsightsResponse {
   repeated Insight insights = 1;
+  string next_cursor = 2;
 }
 
 message SearchInsightsRequest {

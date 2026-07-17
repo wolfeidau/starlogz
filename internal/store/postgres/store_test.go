@@ -2,11 +2,14 @@ package postgres_test
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/store/postgres"
@@ -36,18 +39,72 @@ func newTestStore(t *testing.T) *postgres.Store {
 // newTestStoreWithEnc is like newTestStore but configures an encryptor at construction time.
 func newTestStoreWithEnc(t *testing.T, enc *store.Encryptor) *postgres.Store {
 	t.Helper()
-	ctx := t.Context()
+	st, _ := newTestStoreWithEncAndDSN(t, enc)
+	return st
+}
 
-	st, err := postgres.New(ctx, testDB.NewDSN(t), enc)
+func newTestStoreAndDSN(t *testing.T) (*postgres.Store, string) {
+	t.Helper()
+	return newTestStoreWithEncAndDSN(t, nil)
+}
+
+func newTestStoreWithEncAndDSN(t *testing.T, enc *store.Encryptor) (*postgres.Store, string) {
+	t.Helper()
+	ctx := t.Context()
+	dsn := testDB.NewDSN(t)
+
+	st, err := postgres.New(ctx, dsn, enc)
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 
-	return st
+	return st, dsn
 }
 
 func TestPing(t *testing.T) {
 	st := newTestStore(t)
 	require.NoError(t, st.Ping(t.Context()))
+}
+
+func TestMigrateRepairsInvalidConcurrentIndex(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 2)
+	for range 2 {
+		_, err := st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "duplicate", CreatedBy: u.ID})
+		require.NoError(t, err)
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 18`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `DROP INDEX insights_project_updated_live`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `CREATE UNIQUE INDEX CONCURRENTLY insights_project_updated_live ON insights (content)`)
+	require.Error(t, err)
+
+	var valid bool
+	err = pool.QueryRow(ctx, `SELECT indisvalid FROM pg_catalog.pg_index WHERE indexrelid = to_regclass('insights_project_updated_live')`).Scan(&valid)
+	require.NoError(t, err)
+	require.False(t, valid)
+
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+	var definition string
+	err = pool.QueryRow(ctx, `SELECT indisvalid, pg_get_indexdef(indexrelid) FROM pg_catalog.pg_index WHERE indexrelid = to_regclass('insights_project_updated_live')`).Scan(&valid, &definition)
+	require.NoError(t, err)
+	require.True(t, valid)
+	require.Contains(t, definition, "project_id, updated_at DESC, id DESC")
+	require.Contains(t, definition, "WHERE (deleted_at IS NULL)")
+
+	var indexOID uint32
+	require.NoError(t, pool.QueryRow(ctx, `SELECT to_regclass('insights_project_updated_live')::oid`).Scan(&indexOID))
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 18`)
+	require.NoError(t, err)
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+	var reusedIndexOID uint32
+	require.NoError(t, pool.QueryRow(ctx, `SELECT to_regclass('insights_project_updated_live')::oid`).Scan(&reusedIndexOID))
+	require.Equal(t, indexOID, reusedIndexOID)
 }
 
 func TestUpsertUser_NewAndUpdate(t *testing.T) {
@@ -285,10 +342,10 @@ func TestInsightLinks_WarningsAndSynchronization(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[string]int{"INSERT": 2}, operationDelta(baseline, insightLinkAuditOperations(t, st)), "unchanged links must be preserved")
 
-	targets, err := st.ListInsights(ctx, p.ID, "", 10)
+	targetPage, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, err)
 	var targetID uuid.UUID
-	for _, insight := range targets {
+	for _, insight := range targetPage.Insights {
 		if insight.Key == "target-a" {
 			targetID = insight.ID
 		}
@@ -561,17 +618,68 @@ func TestListInsights(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	all, err := st.ListInsights(ctx, p.ID, "", 10)
+	all, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, all, 3)
+	require.Len(t, all.Insights, 3)
 
-	byTag, err := st.ListInsights(ctx, p.ID, "x", 10)
+	byTag, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Tag: "x", Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, byTag, 3)
+	require.Len(t, byTag.Insights, 3)
 
-	noMatch, err := st.ListInsights(ctx, p.ID, "y", 10)
+	noMatch, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Tag: "y", Limit: 10})
 	require.NoError(t, err)
-	require.Empty(t, noMatch)
+	require.Empty(t, noMatch.Insights)
+	require.Nil(t, noMatch.NextCursor)
+
+	exact, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Limit: 3})
+	require.NoError(t, err)
+	require.Len(t, exact.Insights, 3)
+	require.Nil(t, exact.NextCursor)
+
+	limitPlusOne, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, limitPlusOne.Insights, 2)
+	require.NotNil(t, limitPlusOne.NextCursor)
+	require.Nil(t, all.NextCursor)
+}
+
+func TestListInsightsCursorUsesUpdatedAtAndID(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 41)
+	updatedAt := time.Date(2026, 7, 18, 12, 0, 0, 123456000, time.UTC)
+
+	var written []*store.Insight
+	for _, content := range []string{"insight one", "insight two", "insight three"} {
+		insight, err := st.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: p.ID,
+			Content:   content,
+			Tags:      []string{"x"},
+			CreatedBy: u.ID,
+			CreatedAt: updatedAt,
+			UpdatedAt: updatedAt,
+		})
+		require.NoError(t, err)
+		written = append(written, insight)
+	}
+	sort.Slice(written, func(i, j int) bool {
+		return written[i].ID.String() > written[j].ID.String()
+	})
+
+	first, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Tag: "x", Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, first.Insights, 2)
+	require.Equal(t, written[0].ID, first.Insights[0].ID)
+	require.Equal(t, written[1].ID, first.Insights[1].ID)
+	require.NotNil(t, first.NextCursor)
+	require.Equal(t, first.Insights[1].ID, first.NextCursor.ID)
+	require.Equal(t, updatedAt.UnixMicro(), first.NextCursor.UpdatedAt.UnixMicro())
+
+	second, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Tag: "x", Limit: 2, After: first.NextCursor})
+	require.NoError(t, err)
+	require.Len(t, second.Insights, 1)
+	require.Equal(t, written[2].ID, second.Insights[0].ID)
+	require.Nil(t, second.NextCursor)
 }
 
 func TestDeleteInsight(t *testing.T) {
@@ -585,9 +693,9 @@ func TestDeleteInsight(t *testing.T) {
 	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, f.ID))
 
 	// Deleted insight must not appear in list.
-	insights, err := st.ListInsights(ctx, p.ID, "", 10)
+	insights, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, err)
-	require.Empty(t, insights)
+	require.Empty(t, insights.Insights)
 
 	// Double-delete returns ErrNotFound.
 	require.ErrorIs(t, st.DeleteInsight(ctx, p.OrgID, f.ID), store.ErrNotFound)

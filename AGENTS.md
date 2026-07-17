@@ -24,7 +24,7 @@ internal/server/                  HTTP mux, MCP tool handlers, health endpoint
 internal/server/public/           generated dashboard assets embedded in the server binary
 internal/store/                   store interface + types (Insight, WriteInsightParams, …)
 internal/store/postgres/          PostgreSQL implementation + migration runner
-internal/store/postgres/migrations/  embedded SQL migration files (1–17)
+internal/store/postgres/migrations/  embedded SQL migration files (1–18)
 internal/telemetry/               OTel init (traces + metrics via OTLP gRPC)
 spec/                             current contracts and implemented decision records
 ui/                               React dashboard source and generated Connect clients
@@ -63,7 +63,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. Returns link warnings as an additive array. |
 | `insight_get`      | `insights:read`  | Gets one insight by ID or key with bounded outgoing links and backlinks. |
 | `insight_search`   | `insights:read`  | Full-text search over live insights. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`. |
-| `insight_list`     | `insights:read`  | Lists live insights, newest first. Optional tag filter. |
+| `insight_list`     | `insights:read`  | Lists live insights by `updated_at DESC, id DESC`. Optional tag filter and opaque cursor continuation. |
 | `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Content changes return link warnings; tag-only updates omit them. |
 | `insight_delete`   | `insights:write` | Soft-deletes an insight |
 | `insight_list_tags`| `insights:read`  | Returns tags ordered by usage frequency |
@@ -149,6 +149,15 @@ Telemetry is opt-in: if `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, no exporters a
 ---
 
 ## Code conventions
+
+### PostgreSQL migrations
+
+Migrations run transactionally by default. An index added to an existing
+populated table uses `CREATE INDEX CONCURRENTLY` and starts its migration file
+with `-- starlogz:concurrent-index <index_name>`. The runner executes that
+migration outside a transaction, repairs an invalid prior build, and records
+the schema version after PostgreSQL reports the index valid. The file contains
+one concurrent index statement and does not insert into `schema_migrations`.
 
 ### Errors
 

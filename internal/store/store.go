@@ -55,7 +55,7 @@ type Store interface {
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
 	SearchInsights(ctx context.Context, projectID uuid.UUID, query string, queryMode SearchQueryMode, tags []string, tagMode SearchTagMode, limit int) ([]*Insight, error)
-	ListInsights(ctx context.Context, projectID uuid.UUID, tag string, limit int) ([]*Insight, error)
+	ListInsights(ctx context.Context, p ListInsightsParams) (*InsightPage, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
 	GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*ProjectDashboard, error)
 
@@ -140,6 +140,23 @@ type Insight struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	LinkWarnings []InsightLinkWarning
+}
+
+type ListInsightsParams struct {
+	ProjectID uuid.UUID
+	Tag       string
+	Limit     int
+	After     *InsightListCursor
+}
+
+type InsightListCursor struct {
+	UpdatedAt time.Time
+	ID        uuid.UUID
+}
+
+type InsightPage struct {
+	Insights   []*Insight
+	NextCursor *InsightListCursor
 }
 
 type InsightLinkWarning struct {

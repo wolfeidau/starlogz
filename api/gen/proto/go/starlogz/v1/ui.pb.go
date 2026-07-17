@@ -917,6 +917,7 @@ type ListInsightsRequest struct {
 	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
 	Tag           string                 `protobuf:"bytes,2,opt,name=tag,proto3" json:"tag,omitempty"`
 	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -972,9 +973,17 @@ func (x *ListInsightsRequest) GetLimit() int32 {
 	return 0
 }
 
+func (x *ListInsightsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type ListInsightsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Insights      []*Insight             `protobuf:"bytes,1,rep,name=insights,proto3" json:"insights,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1014,6 +1023,13 @@ func (x *ListInsightsResponse) GetInsights() []*Insight {
 		return x.Insights
 	}
 	return nil
+}
+
+func (x *ListInsightsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
 }
 
 type SearchInsightsRequest struct {
@@ -1301,13 +1317,16 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"link_count\x18\x04 \x01(\x05R\tlinkCount\x12%\n" +
 	"\x0ebacklink_count\x18\x05 \x01(\x05R\rbacklinkCount\x12'\n" +
 	"\x0flinks_truncated\x18\x06 \x01(\bR\x0elinksTruncated\x12/\n" +
-	"\x13backlinks_truncated\x18\a \x01(\bR\x12backlinksTruncated\"W\n" +
+	"\x13backlinks_truncated\x18\a \x01(\bR\x12backlinksTruncated\"o\n" +
 	"\x13ListInsightsRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x10\n" +
 	"\x03tag\x18\x02 \x01(\tR\x03tag\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x05R\x05limit\"H\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"i\n" +
 	"\x14ListInsightsResponse\x120\n" +
-	"\binsights\x18\x01 \x03(\v2\x14.starlogz.v1.InsightR\binsights\"q\n" +
+	"\binsights\x18\x01 \x03(\v2\x14.starlogz.v1.InsightR\binsights\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"q\n" +
 	"\x15SearchInsightsRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12\x12\n" +
