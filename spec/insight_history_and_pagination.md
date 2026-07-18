@@ -51,6 +51,9 @@ write snapshots atomically, suppress semantic no-ops, expose revisions, and
 accept optional concurrency preconditions. Slices 3 and 4 form one releasable
 unit, but production release remains gated on the migration measurements below.
 MCP and Connect history reads and MCP restore are also implemented.
+The dashboard now exposes Connect history through a read-only, explicitly
+paginated revision panel. Dashboard restore remains deferred pending acceptance
+of the session-authenticated web write and CSRF boundary.
 The implemented pagination behavior is authoritative in
 [Cursor pagination](pagination.md); implemented revision, concurrency, and
 history-read and restore behavior is authoritative in
@@ -517,10 +520,10 @@ into a project with existing revisions remain review questions.
 5. **Implemented:** Add MCP and Connect history reads with revision cursor
    continuation.
 6. **Implemented:** Add MCP restore.
-7. Add dashboard history review; add dashboard restore only after the web write
-   boundary is accepted.
-8. Add revision-aware export/import.
-9. Validate revision/audit parity, then drop `audit_insights` in a later
+7. **Implemented:** Add the read-only dashboard history panel.
+8. Add dashboard restore only after the web write boundary is accepted.
+9. Add revision-aware export/import.
+10. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
 
 Steps 3 and 4 are one deployment boundary and are implemented in the same

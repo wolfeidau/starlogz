@@ -1,8 +1,14 @@
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { TransportProvider, useQuery } from "@connectrpc/connect-query";
+import { createConnectTransport } from "@connectrpc/connect-web";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type {
+  ActivityBucket,
+  CountBucket,
+  Insight,
+  Project,
+} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
 import {
   getInsight,
   getProjectDashboard,
@@ -10,22 +16,13 @@ import {
   listProjects,
   listTags,
 } from "../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
-import type {
-  ActivityBucket,
-  CountBucket,
-  Insight,
-  Project,
-} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { useDashboardNavigation } from "./dashboard_navigation";
 import {
   LoadMoreButton,
   useDashboardInsightPages,
 } from "./dashboard_pagination";
-import {
-  formatTimestamp,
-  InsightDetail,
-  RenderedMarkdown,
-} from "./insight_detail";
+import { formatTimestamp, RenderedMarkdown } from "./insight_content";
+import { InsightDetail } from "./insight_detail";
 import "./dashboard.css";
 
 function LoginView() {

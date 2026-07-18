@@ -646,6 +646,157 @@ code {
   font-size: 12px;
 }
 
+.history-section {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+
+.history-heading,
+.history-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.history-heading {
+  margin-bottom: 16px;
+}
+
+.history-heading h3,
+.history-preview-header h4,
+.history-heading p {
+  margin: 0;
+}
+
+.history-heading p {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.history-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.history-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.5fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.history-navigation,
+.history-preview {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.history-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-list li + li {
+  border-top: 1px solid var(--line-soft);
+}
+
+.history-revision-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 12px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-revision-button:hover,
+.history-revision-button[aria-pressed="true"] {
+  background: var(--primary-soft);
+}
+
+.history-revision-button:focus-visible {
+  outline: 3px solid rgb(37 99 235 / 20%);
+  outline-offset: -3px;
+}
+
+.history-revision-button > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-revision-button > span + span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-deleted {
+  border-radius: 999px;
+  background: #fee2e2;
+  padding: 3px 8px;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.history-preview {
+  padding: 16px;
+}
+
+.history-preview-header {
+  margin-bottom: 14px;
+}
+
+.history-preview-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-preview-metadata > span:not(.pill, .history-deleted) {
+  overflow-wrap: anywhere;
+}
+
+.history-state {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.history-error {
+  color: #b91c1c;
+}
+
+.history-navigation .pagination-actions {
+  padding: 12px;
+}
+
+.history-pagination-error {
+  margin: 0;
+  border-top: 1px solid var(--line-soft);
+  padding: 12px 12px 0;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .summary-grid,
   .dashboard-grid {
@@ -653,6 +804,10 @@ code {
   }
 
   .toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .history-layout {
     grid-template-columns: 1fr;
   }
 }
