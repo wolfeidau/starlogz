@@ -62,7 +62,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
 | `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. Returns link warnings as an additive array. |
 | `insight_get`      | `insights:read`  | Gets one insight by ID or key with bounded outgoing links and backlinks. |
-| `insight_search`   | `insights:read`  | Full-text search over live insights. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`. |
+| `insight_search`   | `insights:read`  | Full-text search over live insights by `rank DESC, updated_at DESC, id DESC`. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`; opaque cursor continuation is optional. |
 | `insight_list`     | `insights:read`  | Lists live insights by `updated_at DESC, id DESC`. Optional tag filter and opaque cursor continuation. |
 | `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Content changes return link warnings; tag-only updates omit them. |
 | `insight_delete`   | `insights:write` | Soft-deletes an insight |

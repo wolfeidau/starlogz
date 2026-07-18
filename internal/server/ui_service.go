@@ -132,22 +132,41 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 	if err != nil {
 		return nil, err
 	}
-	if req.Msg.GetQuery() == "" {
+	query := req.Msg.GetQuery()
+	if query == "" {
+		if req.Msg.GetCursor() != "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+		}
 		return connect.NewResponse(&starlogzv1.SearchInsightsResponse{}), nil
 	}
 	limit := int(req.Msg.GetLimit())
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	insights, err := s.store.SearchInsights(ctx, project.ID, req.Msg.GetQuery(), store.SearchQueryModeAll, req.Msg.GetTags(), store.SearchTagModeAll, limit)
+	tags := canonicalSearchTags(req.Msg.GetTags())
+	after, err := decodeInsightSearchCursor(req.Msg.GetCursor(), project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+	}
+	page, err := s.store.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: project.ID, Query: query, QueryMode: store.SearchQueryModeAll,
+		Tags: tags, TagMode: store.SearchTagModeAll, Limit: limit, After: after,
+	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("search insights: %w", err))
 	}
-	protoInsights, err := toProtoInsights(insights, project.Slug)
+	protoInsights, err := toProtoInsights(page.Insights, project.Slug)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	return connect.NewResponse(&starlogzv1.SearchInsightsResponse{Insights: protoInsights}), nil
+	response := &starlogzv1.SearchInsightsResponse{Insights: protoInsights}
+	if page.NextCursor != nil {
+		response.NextCursor, err = encodeInsightSearchCursor(project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, page.NextCursor)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
+		}
+	}
+	return connect.NewResponse(response), nil
 }
 
 func (s *uiService) GetInsight(ctx context.Context, req *connect.Request[starlogzv1.GetInsightRequest]) (*connect.Response[starlogzv1.GetInsightResponse], error) {

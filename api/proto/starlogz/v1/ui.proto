@@ -140,10 +140,12 @@ message SearchInsightsRequest {
   string query = 2;
   repeated string tags = 3;
   int32 limit = 4;
+  string cursor = 5;
 }
 
 message SearchInsightsResponse {
   repeated Insight insights = 1;
+  string next_cursor = 2;
 }
 
 message ListTagsRequest {
