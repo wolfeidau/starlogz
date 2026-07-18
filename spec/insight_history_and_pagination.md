@@ -52,8 +52,8 @@ accept optional concurrency preconditions. Slices 3 and 4 form one releasable
 unit, but production release remains gated on the migration measurements below.
 MCP and Connect history reads and MCP restore are also implemented.
 The dashboard now exposes Connect history through a read-only, explicitly
-paginated revision panel. Dashboard restore remains deferred pending acceptance
-of the session-authenticated web write and CSRF boundary.
+paginated revision panel. Dashboard restore is outside this proposal because the
+current dashboard does not need a restore workflow.
 The implemented pagination behavior is authoritative in
 [Cursor pagination](pagination.md); implemented revision, concurrency, and
 history-read and restore behavior is authoritative in
@@ -84,8 +84,7 @@ history-read and restore behavior is authoritative in
 - Automatic history expiration or partitioning before measured scale requires
   it.
 - Changing public insight UUIDs or adding a UUID to each revision.
-- General dashboard authoring. Dashboard restore is a separately gated slice
-  within this proposal.
+- General dashboard authoring, including dashboard restore.
 
 ## Evidence and design provenance
 
@@ -401,8 +400,8 @@ MCP returns a tool execution error with `isError: true` and a bounded JSON body:
 ```
 
 This follows the MCP distinction between actionable tool execution errors and
-protocol errors. Connect conflict mapping remains deferred until a Connect write
-RPC exists. Internally the error retains expected and current revision values
+protocol errors. Connect write RPCs and their conflict mapping are outside this
+proposal. Internally the error retains expected and current revision values
 without logging insight content.
 
 ## History reads and restore contract
@@ -466,10 +465,10 @@ Connect list and search requests add `cursor`; their responses add
 `next_cursor`. The dashboard uses an infinite-query pattern and an explicit
 “Load more” action rather than automatically issuing unbounded requests.
 
-Connect insight messages add `revision`. A read-only history panel can ship with
-the history endpoint. Dashboard restore is a separate delivery slice because it
-introduces a session-authenticated write operation and must revalidate the web
-session's CSRF and same-origin boundary before implementation.
+Connect insight messages add `revision`. The shipped read-only history panel
+uses the history endpoint and adds no Connect or dashboard mutation RPC.
+Dashboard restore is not currently needed and is outside this proposal. Any
+future restore control belongs to a separately accepted dashboard write design.
 
 The history panel renders only server-sanitized Markdown for a selected
 revision. Diffs are derived from raw text without placing raw content into a
@@ -521,9 +520,8 @@ into a project with existing revisions remain review questions.
    continuation.
 6. **Implemented:** Add MCP restore.
 7. **Implemented:** Add the read-only dashboard history panel.
-8. Add dashboard restore only after the web write boundary is accepted.
-9. Add revision-aware export/import.
-10. Validate revision/audit parity, then drop `audit_insights` in a later
+8. Add revision-aware export/import.
+9. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
 
 Steps 3 and 4 are one deployment boundary and are implemented in the same
@@ -576,6 +574,8 @@ Pending pre-production validation:
 
 ### Revision correctness
 
+Completed automated verification covers:
+
 - descending, bounded history traversal for live and soft-deleted insights;
 - cursor scope binding, terminal empty pages, and invalid cursor rejection;
 - project authorization and not-found behavior for inaccessible history;
@@ -591,14 +591,17 @@ Pending pre-production validation:
   succeeds;
 - history access after soft deletion and not-found behavior outside scope;
 - restore of deleted and live rows, including key-reuse conflicts;
-- atomic content, link, warning, revision, and restore behavior;
-- revision-aware import/export round trips;
+- atomic content, link, warning, revision, and restore behavior.
+
+Pending verification:
+
+- revision-aware import/export round trips; and
 - audit/revision parity during the validation release.
 
 Store behavior uses real PostgreSQL integration tests. MCP and Connect handlers
-use their existing integration patterns. Dashboard pagination, history, browser
-navigation, focus, sanitized rendering, conflict, and restore states receive Bun
-tests and browser verification.
+use their existing integration patterns. Dashboard pagination, history,
+navigation, focus, and sanitized rendering receive Bun tests; deployed-browser
+verification remains listed above.
 
 ## Risks and mitigations
 
@@ -613,23 +616,18 @@ tests and browser verification.
 | Revision table duplicates generic audit data | Validate both for one release, then drop only `audit_insights`. |
 | Removing the insight trigger loses evidence of out-of-band SQL writes | Restrict direct writes and confirm the operational audit requirement; retain metadata-only auditing if required. |
 | Baseline backfill exceeds deployment window | Measure on production-shaped data and split schema, dual write, backfill, and validation if necessary. |
-| Dashboard restore introduces CSRF risk | Ship read-only history separately and accept the web write boundary before restore UI. |
 
 ## Review questions
 
 History exposes nullable `changed_by` user IDs. Actor presentation for shared
-organizations remains a future dashboard concern rather than a transport
-contract blocker.
+organizations remains a future dashboard-redesign concern rather than a
+transport contract blocker.
 
-1. Should Connect map future revision conflicts to `ABORTED`, `FAILED_PRECONDITION`, or
-   a typed error detail?
-2. Is preserving legacy last-write-wins indefinitely acceptable, or should a
+1. Is preserving legacy last-write-wins indefinitely acceptable, or should a
    later API version require `expected_revision` for destructive mutations?
-3. Is revision-aware export/import a general-availability gate, and how should
+2. Is revision-aware export/import a general-availability gate, and how should
    history merge with an existing destination insight?
-4. Should dashboard restore be part of this program or remain deferred until a
-   broader dashboard write contract is designed?
-5. Is one release of audit/revision dual recording sufficient before removing
+3. Is one release of audit/revision dual recording sufficient before removing
    `audit_insights`, and must a metadata-only audit continue for privileged
    direct SQL writes?
 
