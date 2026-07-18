@@ -54,6 +54,10 @@ MCP and Connect history reads and MCP restore are also implemented.
 The dashboard now exposes Connect history through a read-only, explicitly
 paginated revision panel. Dashboard restore is outside this proposal because the
 current dashboard does not need a restore workflow.
+The dev database parity check after migration 19 matched every accepted
+revision to exactly one insight audit row with no persisted-state mismatches.
+Migration 20 removes the redundant `audit_insights` trigger while preserving
+the audit table and all other audit triggers.
 The implemented pagination behavior is authoritative in
 [Cursor pagination](pagination.md); implemented revision, concurrency, and
 history-read and restore behavior is authoritative in
@@ -321,20 +325,16 @@ rolls back the entire mutation.
 
 ### Existing audit log
 
-The revision ledger becomes the authoritative history for insights. Keeping the
-generic `audit_insights` trigger permanently would duplicate large old and new
-payloads.
-
-Rollout keeps the trigger for one validation release while revision writes are
-compared against audit records. A later migration drops only the insight audit
-trigger after verification. Existing `audit_log` rows remain untouched, and
-auditing for other tables and insight links is unchanged.
+The revision ledger is the authoritative history for insights. Migration 20
+drops only the redundant `audit_insights` trigger after the dev parity check.
+Existing `audit_log` rows remain untouched, and auditing for other tables and
+insight links is unchanged.
 
 Product revision history is not a substitute for privileged database auditing.
-Before removing `audit_insights`, confirm whether direct SQL writes must remain
-independently auditable. If they must, retain a metadata-only operational audit
-path rather than duplicating insight content snapshots. Application roles
-should not be permitted to bypass the revision-writing transaction.
+If privileged direct SQL writes become a supported workflow, add a metadata-only
+operational audit path rather than duplicating insight content snapshots.
+Application roles should not be permitted to bypass the revision-writing
+transaction.
 
 ## Optimistic concurrency design
 
@@ -505,8 +505,8 @@ trusted-HTML boundary.
    continuation.
 6. **Implemented:** Add MCP restore.
 7. **Implemented:** Add the read-only dashboard history panel.
-8. Validate revision/audit parity, then drop `audit_insights` in a later
-   migration without deleting historical audit rows.
+8. **Implemented:** Validate revision/audit parity and drop `audit_insights`
+   without deleting historical audit rows.
 
 Steps 3 and 4 are one deployment boundary and are implemented in the same
 release unit. Migration 19 must not be separated from the revision-aware
@@ -577,10 +577,6 @@ Completed automated verification covers:
 - restore of deleted and live rows, including key-reuse conflicts;
 - atomic content, link, warning, revision, and restore behavior.
 
-Pending verification:
-
-- audit/revision parity during the validation release.
-
 Store behavior uses real PostgreSQL integration tests. MCP and Connect handlers
 use their existing integration patterns. Dashboard pagination, history,
 navigation, focus, and sanitized rendering receive Bun tests; deployed-browser
@@ -596,7 +592,7 @@ verification remains listed above.
 | Concurrent mutation moves rows across page boundaries | Document page-at-query-time semantics; do not promise a cross-request snapshot. |
 | Optional concurrency leaves legacy callers last-write-wins | Preserve compatibility initially, advertise revisions, and consider requiring preconditions only in a future contract change. |
 | Restore collides with a reused key | Detect the live-key conflict in the transaction and return a bounded conflict without mutation. |
-| Revision table duplicates generic audit data | Validate both for one release, then drop only `audit_insights`. |
+| Revision table duplicates generic audit data | Keep the revision ledger authoritative and retain only the generic audit data needed for other tables. |
 | Removing the insight trigger loses evidence of out-of-band SQL writes | Restrict direct writes and confirm the operational audit requirement; retain metadata-only auditing if required. |
 | Baseline backfill exceeds deployment window | Measure on production-shaped data and split schema, dual write, backfill, and validation if necessary. |
 
@@ -608,9 +604,8 @@ transport contract blocker.
 
 1. Is preserving legacy last-write-wins indefinitely acceptable, or should a
    later API version require `expected_revision` for destructive mutations?
-2. Is one release of audit/revision dual recording sufficient before removing
-   `audit_insights`, and must a metadata-only audit continue for privileged
-   direct SQL writes?
+2. If privileged direct SQL writes become a supported workflow, should a
+   separate metadata-only audit path be added?
 
 ## References
 

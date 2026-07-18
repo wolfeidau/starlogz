@@ -285,6 +285,44 @@ func TestMigrateAddsInsightRevisionBaselines(t *testing.T) {
 	require.Zero(t, revisionCount)
 }
 
+func TestMigrateDropsInsightAuditTrigger(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	var triggerExists bool
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_trigger
+			WHERE tgrelid = 'insights'::regclass
+			  AND tgname = 'audit_insights'
+		)`).Scan(&triggerExists))
+	require.False(t, triggerExists)
+
+	// Recreate the pre-migration state and verify the migration is the operation
+	// that removes the trigger, rather than relying only on the template state.
+	_, err = pool.Exec(ctx, `
+		CREATE TRIGGER audit_insights
+		AFTER INSERT OR UPDATE OR DELETE ON insights
+		FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
+		DELETE FROM schema_migrations WHERE version = 20`)
+	require.NoError(t, err)
+
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_trigger
+			WHERE tgrelid = 'insights'::regclass
+			  AND tgname = 'audit_insights'
+		)`).Scan(&triggerExists))
+	require.False(t, triggerExists)
+}
+
 func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
