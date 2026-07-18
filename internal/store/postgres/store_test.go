@@ -650,6 +650,280 @@ func TestListInsightHistoryCursorKeepsOlderContinuationStable(t *testing.T) {
 	require.Equal(t, []int{2, 1}, []int{continuation.Revisions[0].Revision, continuation.Revisions[1].Revision})
 }
 
+func TestRestoreInsightCreatesLiveRevisionAndSuppressesLiveNoOp(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 38)
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "target-a", Content: "target", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	current, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "restore-source", Content: "[[insight:target-a]] [[insight:missing]]",
+		Tags: []string{"v1"}, Category: "decision", Source: "repo", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	expected := current.Revision
+	current, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "restore-source", Content: "[[insight:changed]]", Tags: []string{"v2"},
+		Category: "context", Source: "agent", CreatedBy: u.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	expected = current.Revision
+	deletedRevision, err := st.DeleteInsight(ctx, store.DeleteInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, ChangedBy: u.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, deletedRevision)
+
+	restored, err := st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: 1,
+		ExpectedRevision: deletedRevision, ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, restored.Revision)
+	require.Equal(t, "restore-source", restored.Key)
+	require.Equal(t, "[[insight:target-a]] [[insight:missing]]", restored.Content)
+	require.Equal(t, []string{"v1"}, restored.Tags)
+	require.Equal(t, "decision", restored.Category)
+	require.Equal(t, "repo", restored.Source)
+	require.Equal(t, []store.InsightLinkWarning{{Code: store.InsightLinkWarningUnresolved, TargetKey: "missing"}}, restored.LinkWarnings)
+
+	detail, err := st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, InsightID: current.ID, RelationLimit: 10})
+	require.NoError(t, err)
+	require.Equal(t, []string{"missing", "target-a"}, []string{detail.Links[0].TargetKey, detail.Links[1].TargetKey})
+	require.False(t, detail.Links[0].Resolved)
+	require.True(t, detail.Links[1].Resolved)
+	revisions := readInsightRevisions(t, pool, current.ID)
+	require.Equal(t, []string{"create", "update", "delete", "restore"}, []string{
+		revisions[0].Operation, revisions[1].Operation, revisions[2].Operation, revisions[3].Operation,
+	})
+	require.Nil(t, revisions[3].DeletedAt)
+	require.Equal(t, u.ID, revisions[3].ChangedBy)
+
+	_, err = pool.Exec(ctx, `DELETE FROM insight_links WHERE source_insight_id = $1`, current.ID)
+	require.NoError(t, err)
+	noOp, err := st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: 4, ExpectedRevision: 4, ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, noOp.Revision)
+	require.Equal(t, restored.UpdatedAt, noOp.UpdatedAt)
+	require.Len(t, noOp.LinkWarnings, 1)
+	require.Len(t, readInsightRevisions(t, pool, current.ID), 4)
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, InsightID: current.ID, RelationLimit: 10})
+	require.NoError(t, err)
+	require.Len(t, detail.Links, 2)
+
+	changed, err := st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: 2, ExpectedRevision: 4, ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 5, changed.Revision)
+	require.Equal(t, "[[insight:changed]]", changed.Content)
+	require.Equal(t, []string{"v2"}, changed.Tags)
+	require.Equal(t, "context", changed.Category)
+	require.Equal(t, "agent", changed.Source)
+
+	_, err = st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: 99, ExpectedRevision: 5, ChangedBy: u.ID,
+	})
+	require.ErrorIs(t, err, store.ErrInsightRevisionNotFound)
+	other, err := st.EnsureProject(ctx, p.OrgID, u.ID, "restore-other", "Restore Other")
+	require.NoError(t, err)
+	_, err = st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: other.ID, InsightID: current.ID, TargetRevision: 1, ExpectedRevision: 5, ChangedBy: u.ID,
+	})
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: 0, ExpectedRevision: 5, ChangedBy: u.ID,
+	})
+	require.ErrorIs(t, err, store.ErrInvalidTargetRevision)
+	_, err = st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: 1, ExpectedRevision: 0, ChangedBy: u.ID,
+	})
+	require.ErrorIs(t, err, store.ErrInvalidExpectedRevision)
+}
+
+func TestRestoreInsightMapsUniqueKeyConflictWithoutMutation(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 39)
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	original, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "reused", Content: "original", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	deletedRevision, err := st.DeleteInsight(ctx, store.DeleteInsightParams{
+		OrgID: p.OrgID, InsightID: original.ID, ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "reused", Content: "claimant", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+
+	_, err = st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: original.ID, TargetRevision: 1,
+		ExpectedRevision: deletedRevision, ChangedBy: u.ID,
+	})
+	require.ErrorIs(t, err, store.ErrInsightKeyConflict)
+	require.Len(t, readInsightRevisions(t, pool, original.ID), 2)
+	history, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: original.ID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, history.CurrentRevision)
+	require.NotNil(t, history.DeletedAt)
+}
+
+func TestRestoreInsightDeletedSameStateStillCreatesLiveRevision(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 43)
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	current, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "same-state", Content: "unchanged", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	deletedRevision, err := st.DeleteInsight(ctx, store.DeleteInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	restored, err := st.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: p.ID, InsightID: current.ID, TargetRevision: deletedRevision,
+		ExpectedRevision: deletedRevision, ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, restored.Revision)
+	require.Equal(t, "unchanged", restored.Content)
+	revisions := readInsightRevisions(t, pool, current.ID)
+	require.Equal(t, []string{"create", "delete", "restore"}, []string{
+		revisions[0].Operation, revisions[1].Operation, revisions[2].Operation,
+	})
+	require.NotNil(t, revisions[1].DeletedAt)
+	require.Nil(t, revisions[2].DeletedAt)
+}
+
+func TestRestoreInsightConcurrentPreconditionAllowsOneWriter(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 40)
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	current, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "restore-race", Content: "v1", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	expected := current.Revision
+	current, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, Content: "v2", ChangedBy: u.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, restoreErr := st.RestoreInsight(ctx, store.RestoreInsightParams{
+				ProjectID: p.ID, InsightID: current.ID, TargetRevision: 1,
+				ExpectedRevision: 2, ChangedBy: u.ID,
+			})
+			results <- restoreErr
+		}()
+	}
+	close(start)
+	var successes, conflicts int
+	for range 2 {
+		resultErr := <-results
+		if resultErr == nil {
+			successes++
+			continue
+		}
+		var conflict *store.RevisionConflictError
+		require.ErrorAs(t, resultErr, &conflict)
+		require.Equal(t, 3, conflict.Current)
+		conflicts++
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, 1, conflicts)
+	require.Len(t, readInsightRevisions(t, pool, current.ID), 3)
+}
+
+func TestRestoreInsightRollsBackDerivedStateAndRevision(t *testing.T) {
+	tests := []struct {
+		name       string
+		failureSQL string
+	}{
+		{
+			name: "link synchronization",
+			failureSQL: `
+				CREATE FUNCTION reject_restore_link() RETURNS trigger LANGUAGE plpgsql AS $$
+				BEGIN RAISE EXCEPTION 'reject restore link'; END $$;
+				CREATE TRIGGER reject_restore_link BEFORE INSERT ON insight_links
+				FOR EACH ROW WHEN (NEW.target_key = 'original') EXECUTE FUNCTION reject_restore_link()`,
+		},
+		{
+			name: "revision insertion",
+			failureSQL: `
+				CREATE FUNCTION reject_restore_revision() RETURNS trigger LANGUAGE plpgsql AS $$
+				BEGIN RAISE EXCEPTION 'reject restore revision'; END $$;
+				CREATE TRIGGER reject_restore_revision BEFORE INSERT ON insight_revisions
+				FOR EACH ROW WHEN (NEW.operation = 'restore') EXECUTE FUNCTION reject_restore_revision()`,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st, dsn := newTestStoreAndDSN(t)
+			ctx := t.Context()
+			u, p := testUserAndProject(t, st, int64(41+i))
+			pool, err := pgxpool.New(ctx, dsn)
+			require.NoError(t, err)
+			t.Cleanup(pool.Close)
+			current, err := st.WriteInsight(ctx, store.WriteInsightParams{
+				ProjectID: p.ID, Key: "restore-rollback", Content: "[[insight:original]]", CreatedBy: u.ID,
+			})
+			require.NoError(t, err)
+			expected := current.Revision
+			current, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+				OrgID: p.OrgID, InsightID: current.ID, Content: "[[insight:changed]]",
+				ChangedBy: u.ID, ExpectedRevision: &expected,
+			})
+			require.NoError(t, err)
+			_, err = pool.Exec(ctx, tc.failureSQL)
+			require.NoError(t, err)
+
+			_, err = st.RestoreInsight(ctx, store.RestoreInsightParams{
+				ProjectID: p.ID, InsightID: current.ID, TargetRevision: 1,
+				ExpectedRevision: 2, ChangedBy: u.ID,
+			})
+			require.Error(t, err)
+			detail, err := st.GetInsight(ctx, store.GetInsightParams{
+				ProjectID: p.ID, InsightID: current.ID, RelationLimit: 10,
+			})
+			require.NoError(t, err)
+			require.Equal(t, "[[insight:changed]]", detail.Insight.Content)
+			require.Equal(t, 2, detail.Insight.Revision)
+			require.Len(t, detail.Links, 1)
+			require.Equal(t, "changed", detail.Links[0].TargetKey)
+			require.Len(t, readInsightRevisions(t, pool, current.ID), 2)
+		})
+	}
+}
+
 func TestInsightRevisionPreconditions(t *testing.T) {
 	st, dsn := newTestStoreAndDSN(t)
 	ctx := t.Context()

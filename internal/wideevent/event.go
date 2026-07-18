@@ -40,6 +40,7 @@ const (
 	ToolInsightWrite           = "insight_write"
 	ToolInsightGet             = "insight_get"
 	ToolInsightHistory         = "insight_history"
+	ToolInsightRestore         = "insight_restore"
 	ToolInsightSearch          = "insight_search"
 	ToolInsightList            = "insight_list"
 	ToolInsightUpdate          = "insight_update"
@@ -243,7 +244,7 @@ var (
 	}
 	allowedTools = map[string]struct{}{
 		ToolWhoami: {}, ToolProjectEnsure: {}, ToolProjectList: {},
-		ToolInsightWrite: {}, ToolInsightGet: {}, ToolInsightHistory: {}, ToolInsightSearch: {}, ToolInsightList: {},
+		ToolInsightWrite: {}, ToolInsightGet: {}, ToolInsightHistory: {}, ToolInsightRestore: {}, ToolInsightSearch: {}, ToolInsightList: {},
 		ToolInsightUpdate: {}, ToolInsightDelete: {}, ToolInsightListTags: {},
 	}
 	allowedResultCountBuckets = map[string]struct{}{

@@ -204,6 +204,10 @@ func TestResultCountBucketValidation(t *testing.T) {
 				AttributeResultCountBucket: ResultCountOneToTen,
 			},
 		},
+		"successful restore without bucket": {
+			outcome:    OutcomeSuccess,
+			attributes: map[string]string{AttributeTool: ToolInsightRestore},
+		},
 		"successful search without bucket": {
 			outcome:    OutcomeSuccess,
 			attributes: map[string]string{AttributeTool: ToolInsightSearch},

@@ -50,10 +50,10 @@ typed revision ledger, and baseline snapshots. Existing mutation paths now
 write snapshots atomically, suppress semantic no-ops, expose revisions, and
 accept optional concurrency preconditions. Slices 3 and 4 form one releasable
 unit, but production release remains gated on the migration measurements below.
-MCP and Connect history reads are also implemented; restore remains proposed.
+MCP and Connect history reads and MCP restore are also implemented.
 The implemented pagination behavior is authoritative in
 [Cursor pagination](pagination.md); implemented revision, concurrency, and
-history-read behavior is authoritative in
+history-read and restore behavior is authoritative in
 [Insight revisions and optimistic concurrency](insight_revisions.md).
 
 ## Goals
@@ -338,8 +338,8 @@ should not be permitted to bypass the revision-writing transaction.
 
 The implemented external behavior in this section is authoritative in
 [Insight revisions and optimistic concurrency](insight_revisions.md). This
-proposal retains the design rationale and its relationship to future history
-and restore operations.
+proposal retains the design rationale and its relationship to history and
+restore operations.
 
 ### Revision exposure
 
@@ -402,7 +402,7 @@ protocol errors. Connect conflict mapping remains deferred until a Connect write
 RPC exists. Internally the error retains expected and current revision values
 without logging insight content.
 
-## History reads and proposed restore contract
+## History reads and restore contract
 
 ### `insight_history`
 
@@ -498,8 +498,8 @@ into a project with existing revisions remain review questions.
 - Search queries, tags, cursor payloads, filter hashes, ranks, insight content,
   revisions, and actor IDs remain excluded from access logs and wide events.
 - `insight_history` is in the bounded tool-name allowlist and successful calls
-  use the existing result-count bucket. Proposed restore events must not emit
-  content or revision attributes.
+  use the existing result-count bucket. `insight_restore` events emit only the
+  bounded tool name, without content or revision attributes.
 - Conflict and invalid-cursor errors expose bounded codes, not arbitrary
   database or decoding errors.
 
@@ -516,7 +516,7 @@ into a project with existing revisions remain review questions.
    to existing mutation paths while retaining `audit_insights` for comparison.
 5. **Implemented:** Add MCP and Connect history reads with revision cursor
    continuation.
-6. Add MCP restore.
+6. **Implemented:** Add MCP restore.
 7. Add dashboard history review; add dashboard restore only after the web write
    boundary is accepted.
 8. Add revision-aware export/import.

@@ -5,9 +5,9 @@
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz records accepted insight state changes as immutable full snapshots and
-exposes a positive revision number for optional optimistic concurrency. History
-reads are bounded and authorized; restore operations are not part of this
-contract.
+exposes a positive revision number for optimistic concurrency. History reads
+are bounded and authorized; MCP callers can restore an earlier snapshot as a
+new live revision.
 
 ## Revision model
 
@@ -17,19 +17,20 @@ and inserts one snapshot with the same `(insight_id, revision)` identity.
 
 Snapshots retain key, content, tags, category, source, deletion state, operation,
 actor when known, and change time. Supported operations for current mutation
-paths are `create`, `baseline`, `update`, and `delete`. Migration baselines use a
-null actor because the legacy schema cannot identify the latest editor. Soft
-deletion retains snapshots; hard deletion cascades to them.
+paths are `create`, `baseline`, `update`, `delete`, and `restore`. Migration
+baselines use a null actor because the legacy schema cannot identify the latest
+editor. Soft deletion retains snapshots; hard deletion cascades to them.
 
 Current-state list and search remain backed by `insights`. The revision ledger
 does not change current search ranking or pagination.
 
 ## Mutation atomicity
 
-Creates, keyed upserts, updates, imports, and soft deletes write their current
-row and snapshot in one transaction. Content-bearing writes synchronize derived
-insight links in that transaction. A failure in the current-row mutation, link
-synchronization, or snapshot insertion rolls back the entire mutation.
+Creates, keyed upserts, updates, imports, soft deletes, and restores write their
+current row and snapshot in one transaction. Content-bearing writes synchronize
+derived insight links in that transaction. A failure in the current-row
+mutation, link synchronization, or snapshot insertion rolls back the entire
+mutation.
 
 The authenticated actor is recorded for interactive mutations. Import records
 the importing user. Removing a user sets historical actor references to null so
@@ -45,7 +46,9 @@ A content-bearing no-op still repairs the derived `insight_links` projection in
 the mutation transaction. This preserves lazy extraction for content that
 predates link storage. A keyed `insight_write` regenerates link warnings;
 `insight_update` continues to omit warnings when persisted content is unchanged.
-Tag-only no-ops do not touch relationships.
+Tag-only no-ops do not touch relationships. Restoring the effective state of an
+already-live insight is a no-op that still repairs links and returns warnings;
+restoring a deleted insight always creates a new live revision.
 
 ## Revision exposure
 
@@ -57,9 +60,10 @@ Current insight representations include `revision`. MCP returns it from:
 - `insight_search`; and
 - `insight_update`.
 
-`insight_delete` returns the resulting deletion revision. The Connect `Insight`
-message also includes revision for current read responses. Connect has no insight
-mutation RPC in this contract.
+`insight_delete` returns the resulting deletion revision. `insight_restore`
+returns the insight ID, resulting revision, and link warnings. The Connect
+`Insight` message also includes revision for current read responses. Connect has
+no insight mutation RPC in this contract.
 
 ## History reads
 
@@ -95,6 +99,32 @@ History content, actors, cursor values, and snapshot fields are excluded from
 logs and wide events. Successful MCP calls emit only the tool name and a bounded
 result-count bucket.
 
+## Restore
+
+MCP `insight_restore` requires `insights:write` and accepts project, insight ID,
+target revision, and a required positive `expected_revision`. The caller's
+organization and exact project are resolved before the insight is locked.
+Missing, hard-deleted, and inaccessible insights share not-found behavior.
+
+Restore copies the target snapshot's key, content, tags, category, and source
+into the current row, clears `deleted_at`, increments the current revision, and
+records operation `restore` with the authenticated actor. Revision numbers are
+never rewound or reused. Markdown links are reparsed and synchronized before
+the transaction commits.
+
+If another live insight has claimed the snapshot key, the operation changes
+nothing and returns this bounded tool error:
+
+```json
+{"code":"key_conflict"}
+```
+
+A missing target revision returns `revision_not_found` with the requested
+positive revision. A stale precondition returns the standard
+`revision_conflict` body. Conflict responses and telemetry exclude insight
+content, keys, tags, and actor identifiers. Restore wide events include only
+the bounded tool name.
+
 ## Optional preconditions
 
 Existing MCP mutation tools accept optional `expected_revision`:
@@ -105,11 +135,13 @@ Existing MCP mutation tools accept optional `expected_revision`:
 - keyless `insight_write`: omission or `0` creates a new insight; a positive
   value is invalid; and
 - `insight_update` and `insight_delete`: omission preserves existing behavior,
-  a positive value requires an exact current revision, and `0` is invalid.
+  a positive value requires an exact current revision, and `0` is invalid; and
+- `insight_restore`: a positive `expected_revision` is required and must match
+  the current revision of either a live or soft-deleted insight.
 
-The live target is locked before comparing the precondition and remains locked
-through link synchronization, snapshot insertion, and commit. A mismatch does
-not mutate insight fields, timestamps, links, or snapshots.
+The mutation target is locked before comparing the precondition and remains
+locked through link synchronization, snapshot insertion, and commit. A mismatch
+does not mutate insight fields, timestamps, links, or snapshots.
 
 MCP reports a mismatch as a tool execution error with `isError: true` and this
 bounded JSON body:
@@ -125,5 +157,5 @@ bounded JSON body:
 A missing keyed target has current revision `0`. Conflict responses and
 telemetry exclude insight content, keys, tags, and actor identifiers.
 
-The design rationale, migration plan, and proposed restore behavior
-remain in [Insight history, optimistic concurrency, and cursor pagination](insight_history_and_pagination.md).
+The design rationale and remaining rollout plan remain in
+[Insight history, optimistic concurrency, and cursor pagination](insight_history_and_pagination.md).

@@ -915,6 +915,16 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	require.NotContains(t, schemaProperty(t, insightHistory, "cursor"), "minLength")
 	require.NotContains(t, schemaProperty(t, insightHistory, "cursor"), "maxLength")
 
+	insightRestore := inputSchemaMap(t, list.Tools, "insight_restore")
+	require.ElementsMatch(t, []string{"project", "id", "target_revision", "expected_revision"}, schemaRequired(t, insightRestore))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightRestore, "project")["minLength"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightRestore, "id")["minLength"])
+	require.Equal(t, "uuid", schemaProperty(t, insightRestore, "id")["format"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightRestore, "target_revision")["minimum"])
+	requireSchemaNumber(t, float64(store.MaxInsightRevision), schemaProperty(t, insightRestore, "target_revision")["maximum"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightRestore, "expected_revision")["minimum"])
+	requireSchemaNumber(t, float64(store.MaxInsightRevision), schemaProperty(t, insightRestore, "expected_revision")["maximum"])
+
 	insightSearch := inputSchemaMap(t, list.Tools, "insight_search")
 	require.ElementsMatch(t, []string{"project", "query"}, schemaRequired(t, insightSearch))
 	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "project")["minLength"])
@@ -1426,6 +1436,127 @@ func TestInsightHistory_PaginatesSoftDeletedInsight(t *testing.T) {
 	f.execSQL(ctx, t, `DELETE FROM insights WHERE id = $1`, mutation.ID)
 	res, _ = callHistory(map[string]any{
 		"project": "history-project", "id": mutation.ID,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
+}
+
+func TestInsightRestore_RestoresRevisionAndReturnsStructuredConflicts(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "restore-user")
+	writeSession := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+	readSession := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read"))
+
+	var mutation struct {
+		ID       string `json:"id"`
+		Revision int    `json:"revision"`
+	}
+	res := callTool(t, ctx, writeSession, "insight_write", insightWriteArgs(
+		"restore-project", "[[insight:missing]]", map[string]any{"key": "restore-key"},
+	))
+	require.False(t, res.IsError, "write failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
+	res = callTool(t, ctx, writeSession, "insight_update", map[string]any{
+		"id": mutation.ID, "content": "v2", "expected_revision": 1,
+	})
+	require.False(t, res.IsError, "update failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
+	res = callTool(t, ctx, writeSession, "insight_delete", map[string]any{
+		"id": mutation.ID, "expected_revision": 2,
+	})
+	require.False(t, res.IsError, "delete failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
+	require.Equal(t, 3, mutation.Revision)
+
+	args := map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+		"target_revision": 1, "expected_revision": 3,
+	}
+	res = callTool(t, ctx, readSession, "insight_restore", args)
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insights:write")
+
+	type warning struct {
+		Code      string `json:"code"`
+		TargetKey string `json:"target_key"`
+	}
+	var restored struct {
+		ID       string    `json:"id"`
+		Revision int       `json:"revision"`
+		Warnings []warning `json:"warnings"`
+	}
+	res = callTool(t, ctx, writeSession, "insight_restore", args)
+	require.False(t, res.IsError, "restore failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &restored))
+	require.Equal(t, mutation.ID, restored.ID)
+	require.Equal(t, 4, restored.Revision)
+	require.Equal(t, []warning{{Code: "unresolved_insight_link", TargetKey: "missing"}}, restored.Warnings)
+
+	res = callTool(t, ctx, writeSession, "insight_restore", map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+		"target_revision": 1, "expected_revision": 4,
+	})
+	require.False(t, res.IsError, "live no-op restore failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &restored))
+	require.Equal(t, 4, restored.Revision)
+
+	res = callTool(t, ctx, writeSession, "insight_restore", args)
+	require.True(t, res.IsError)
+	require.JSONEq(t, `{"code":"revision_conflict","expected_revision":3,"current_revision":4}`, resultText(t, res))
+	res = callTool(t, ctx, writeSession, "insight_restore", map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+		"target_revision": 99, "expected_revision": 4,
+	})
+	require.True(t, res.IsError)
+	require.JSONEq(t, `{"code":"revision_not_found","target_revision":99}`, resultText(t, res))
+
+	res = callTool(t, ctx, writeSession, "insight_history", map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+	})
+	require.False(t, res.IsError, "history failed: %s", resultText(t, res))
+	require.Contains(t, resultText(t, res), `"operation":"restore"`)
+	require.Contains(t, resultText(t, res), `"current_revision":4`)
+
+	res = callTool(t, ctx, writeSession, "insight_write", insightWriteArgs("other-restore-project", "other", nil))
+	require.False(t, res.IsError)
+	res = callTool(t, ctx, writeSession, "insight_restore", map[string]any{
+		"project": "other-restore-project", "id": mutation.ID,
+		"target_revision": 1, "expected_revision": 4,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
+
+	res = callTool(t, ctx, writeSession, "insight_delete", map[string]any{
+		"id": mutation.ID, "expected_revision": 4,
+	})
+	require.False(t, res.IsError)
+	res = callTool(t, ctx, writeSession, "insight_write", insightWriteArgs(
+		"restore-project", "claimant", map[string]any{"key": "restore-key"},
+	))
+	require.False(t, res.IsError)
+	res = callTool(t, ctx, writeSession, "insight_restore", map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+		"target_revision": 1, "expected_revision": 5,
+	})
+	require.True(t, res.IsError)
+	require.JSONEq(t, `{"code":"key_conflict"}`, resultText(t, res))
+
+	otherUser := f.makeUser(t, ctx, "restore-other-user")
+	otherWrite := f.connect(t, ctx, f.tokenFor(t, otherUser.ID, "insights:read insights:write"))
+	res = callTool(t, ctx, otherWrite, "insight_write", insightWriteArgs("restore-project", "scoped", nil))
+	require.False(t, res.IsError)
+	res = callTool(t, ctx, otherWrite, "insight_restore", map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+		"target_revision": 1, "expected_revision": 5,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
+
+	f.execSQL(ctx, t, `DELETE FROM insights WHERE id = $1`, mutation.ID)
+	res = callTool(t, ctx, writeSession, "insight_restore", map[string]any{
+		"project": "restore-project", "id": mutation.ID,
+		"target_revision": 1, "expected_revision": 5,
 	})
 	require.True(t, res.IsError)
 	require.Contains(t, resultText(t, res), "insight not found")
