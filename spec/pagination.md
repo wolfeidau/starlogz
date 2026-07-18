@@ -1,7 +1,7 @@
 # Cursor pagination
 
 > Status: Current contract
-> Last reviewed: 2026-07-18
+> Last reviewed: 2026-07-19
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz supports cursor pagination for MCP `insight_list` and
@@ -78,5 +78,5 @@ move it across the cursor boundary, so a mutating dataset can produce a skipped
 or repeated row. A static matching dataset traverses without gaps or
 duplicates.
 
-The broader rationale, PostgreSQL references, and planned history work
-remain in [Insight history, optimistic concurrency, and cursor pagination](insight_history_and_pagination.md).
+The broader rationale and rollout outcome are retained in
+[Insight history, optimistic concurrency, and cursor pagination](insight_history_and_pagination.md).
