@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -148,6 +149,15 @@ func (f *toolFixture) makeUser(t *testing.T, ctx context.Context, login string) 
 	u, err := f.store.UpsertUser(ctx, store.GitHubProfile{GitHubID: id, Email: login + "@example.com", Login: login})
 	require.NoError(t, err)
 	return u
+}
+
+func (f *toolFixture) execSQL(ctx context.Context, t *testing.T, query string, args ...any) {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, f.dsn)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, conn.Close(ctx)) }()
+	_, err = conn.Exec(ctx, query, args...)
+	require.NoError(t, err)
 }
 
 // tokenFor issues a JWT whose sub is the given user UUID and whose scope claim
@@ -364,12 +374,14 @@ func TestUIListInsightHistory(t *testing.T) {
 		ProjectID: project.ID, Key: "history", Content: "# v1", Category: "fact", Source: "repo", CreatedBy: user.ID,
 	})
 	require.NoError(t, err)
+	removedActor := f.makeUser(t, ctx, "web-history-removed-actor")
 	expected := insight.Revision
 	insight, err = f.store.UpdateInsight(ctx, store.UpdateInsightParams{
 		OrgID: org.ID, InsightID: insight.ID, Content: "# v2\n\n<script>alert('x')</script>",
-		ChangedBy: user.ID, ExpectedRevision: &expected,
+		ChangedBy: removedActor.ID, ExpectedRevision: &expected,
 	})
 	require.NoError(t, err)
+	f.execSQL(ctx, t, `DELETE FROM users WHERE id = $1`, removedActor.ID)
 	expected = insight.Revision
 	_, err = f.store.DeleteInsight(ctx, store.DeleteInsightParams{
 		OrgID: org.ID, InsightID: insight.ID, ChangedBy: user.ID, ExpectedRevision: &expected,
@@ -422,6 +434,7 @@ func TestUIListInsightHistory(t *testing.T) {
 	require.Equal(t, []int{3, 2}, []int{first.Revisions[0].Revision, first.Revisions[1].Revision})
 	require.NotEmpty(t, first.Revisions[0].DeletedAt)
 	require.Equal(t, user.ID.String(), first.Revisions[0].ChangedBy)
+	require.Empty(t, first.Revisions[1].ChangedBy)
 	require.NotEmpty(t, first.Revisions[0].ChangedAt)
 	require.Contains(t, first.Revisions[1].RenderedHTML, "<h1>v2</h1>")
 	require.NotContains(t, first.Revisions[1].RenderedHTML, "<script")
@@ -448,6 +461,12 @@ func TestUIListInsightHistory(t *testing.T) {
 	require.NotEqual(t, project.ID, otherProject.ID)
 	status, _ = callHistory(map[string]any{
 		"project": "other-web-history", "id": insight.ID.String(),
+	})
+	require.Equal(t, http.StatusNotFound, status)
+
+	f.execSQL(ctx, t, `DELETE FROM insights WHERE id = $1`, insight.ID)
+	status, _ = callHistory(map[string]any{
+		"project": "web-history", "id": insight.ID.String(),
 	})
 	require.Equal(t, http.StatusNotFound, status)
 }
@@ -1283,12 +1302,20 @@ func TestInsightHistory_PaginatesSoftDeletedInsight(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
 	require.Equal(t, 1, mutation.Revision)
 
-	res = callTool(t, ctx, writeSession, "insight_update", map[string]any{
-		"id": mutation.ID, "content": "# v2\n\n<script>alert('x')</script>", "expected_revision": 1,
+	removedActor := f.makeUser(t, ctx, "history-removed-actor")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	insightID, err := uuid.Parse(mutation.ID)
+	require.NoError(t, err)
+	expected := mutation.Revision
+	updated, err := f.store.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: org.ID, InsightID: insightID, Content: "# v2\n\n<script>alert('x')</script>",
+		ChangedBy: removedActor.ID, ExpectedRevision: &expected,
 	})
-	require.False(t, res.IsError, "content update failed: %s", resultText(t, res))
-	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
+	require.NoError(t, err)
+	mutation.Revision = updated.Revision
 	require.Equal(t, 2, mutation.Revision)
+	f.execSQL(ctx, t, `DELETE FROM users WHERE id = $1`, removedActor.ID)
 	res = callTool(t, ctx, writeSession, "insight_update", map[string]any{
 		"id": mutation.ID, "tags": []string{"history"}, "expected_revision": 2,
 	})
@@ -1349,6 +1376,7 @@ func TestInsightHistory_PaginatesSoftDeletedInsight(t *testing.T) {
 	require.False(t, res.IsError, "second history page failed: %s", resultText(t, res))
 	require.Equal(t, []int{2, 1}, []int{second.Revisions[0].Revision, second.Revisions[1].Revision})
 	require.Equal(t, "# v2\n\n<script>alert('x')</script>", second.Revisions[0].Content)
+	require.Empty(t, second.Revisions[0].ChangedBy)
 	require.Equal(t, "# v1", second.Revisions[1].Content)
 	require.Empty(t, second.NextCursor)
 
@@ -1390,6 +1418,13 @@ func TestInsightHistory_PaginatesSoftDeletedInsight(t *testing.T) {
 	require.False(t, res.IsError)
 	otherRead := f.connect(t, ctx, f.tokenFor(t, otherUser.ID, "insights:read"))
 	res = callTool(t, ctx, otherRead, "insight_history", map[string]any{
+		"project": "history-project", "id": mutation.ID,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
+
+	f.execSQL(ctx, t, `DELETE FROM insights WHERE id = $1`, mutation.ID)
+	res, _ = callHistory(map[string]any{
 		"project": "history-project", "id": mutation.ID,
 	})
 	require.True(t, res.IsError)

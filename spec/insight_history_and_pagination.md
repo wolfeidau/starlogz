@@ -168,7 +168,7 @@ Cursor pagination applies to:
 - MCP `insight_search`;
 - Connect `ListInsights`;
 - Connect `SearchInsights`; and
-- the proposed MCP and Connect insight-history operations.
+- MCP and Connect insight-history operations.
 
 `cursor` is an optional input. `next_cursor` is an additive response field and
 is omitted when no later page exists. A request without a cursor returns the
@@ -576,7 +576,10 @@ Pending pre-production validation:
 - descending, bounded history traversal for live and soft-deleted insights;
 - cursor scope binding, terminal empty pages, and invalid cursor rejection;
 - project authorization and not-found behavior for inaccessible history;
-- nullable baseline actors and privacy-safe history telemetry;
+- nullable baseline and removed actors, including MCP and Connect transport
+  responses;
+- hard-deleted targets returning not found through MCP and Connect;
+- privacy-safe history telemetry;
 - create, keyed update, patch update, delete, and restore revision sequences;
 - baseline coverage for live and soft-deleted pre-feature rows;
 - semantic no-op suppression with derived-link repair for content-bearing calls;
@@ -611,17 +614,19 @@ tests and browser verification.
 
 ## Review questions
 
+History exposes nullable `changed_by` user IDs. Actor presentation for shared
+organizations remains a future dashboard concern rather than a transport
+contract blocker.
+
 1. Should Connect map future revision conflicts to `ABORTED`, `FAILED_PRECONDITION`, or
    a typed error detail?
 2. Is preserving legacy last-write-wins indefinitely acceptable, or should a
    later API version require `expected_revision` for destructive mutations?
-3. Should revision history expose `changed_by` user IDs now, or defer actor
-   identity until shared organizations define collaborator presentation?
-4. Is revision-aware export/import a general-availability gate, and how should
+3. Is revision-aware export/import a general-availability gate, and how should
    history merge with an existing destination insight?
-5. Should dashboard restore be part of this program or remain deferred until a
+4. Should dashboard restore be part of this program or remain deferred until a
    broader dashboard write contract is designed?
-6. Is one release of audit/revision dual recording sufficient before removing
+5. Is one release of audit/revision dual recording sufficient before removing
    `audit_insights`, and must a metadata-only audit continue for privileged
    direct SQL writes?
 
