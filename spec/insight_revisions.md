@@ -1,7 +1,7 @@
 # Insight revisions and optimistic concurrency
 
 > Status: Current contract
-> Last reviewed: 2026-07-18
+> Last reviewed: 2026-07-19
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz records accepted insight state changes as immutable full snapshots and
@@ -162,5 +162,5 @@ bounded JSON body:
 A missing keyed target has current revision `0`. Conflict responses and
 telemetry exclude insight content, keys, tags, and actor identifiers.
 
-The design rationale and remaining rollout plan remain in
+The design rationale and rollout outcome are retained in
 [Insight history, optimistic concurrency, and cursor pagination](insight_history_and_pagination.md).
