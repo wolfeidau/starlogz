@@ -39,14 +39,16 @@ preserve that atomicity.
 
 ## Implementation progress
 
-The first two rollout slices are implemented: MCP and Connect list and search
+The first three rollout slices are implemented: MCP and Connect list and search
 operations accept opaque, filter-bound cursors; list traversal uses
 `updated_at DESC, id DESC`; search traversal uses lossless PostgreSQL `real`
 rank followed by the same deterministic tie-breakers; and both fetch
 `limit + 1`. Migration 18 adds the matching partial live-row list index using a
 retry-safe concurrent build. The dashboard continues both result types through
-an explicit **Load more** action. All revision work remains proposed. The
-implemented behavior is authoritative in [Cursor pagination](pagination.md).
+an explicit **Load more** action. Migration 19 adds the current revision value,
+typed revision ledger, and baseline snapshots. Revision writes, concurrency,
+history APIs, and restore remain proposed. The implemented pagination behavior
+is authoritative in [Cursor pagination](pagination.md).
 
 ## Goals
 
@@ -278,8 +280,11 @@ primary key (insight_id, revision)
 
 Each row is the complete resulting state at that revision, including the
 current revision. `changed_by` records the authenticated actor; it uses null on
-user removal so history does not block identity erasure. `changed_at` uses the
-mutation transaction timestamp.
+user removal so history does not block identity erasure. A backfilled baseline
+uses null because the existing schema cannot identify the actor responsible for
+the latest state without guessing. `changed_at` uses the mutation transaction
+timestamp. A baseline uses `deleted_at` for a soft-deleted row and `updated_at`
+otherwise, preserving the latest known state-change time.
 
 History rows do not contain generated search vectors and have no content, tag,
 operation, timestamp, or actor indexes initially. The composite primary key
@@ -473,8 +478,8 @@ into a project with existing revisions remain review questions.
    pagination without changing default limits.
 2. **Implemented:** Add search pagination, query-bound cursors, lossless rank
    continuation, and dashboard continuation.
-3. Add `insights.revision`, the typed revision table, and one `baseline`
-   snapshot for every existing live or soft-deleted insight.
+3. **Implemented:** Add `insights.revision`, the typed revision table, and one
+   `baseline` snapshot for every existing live or soft-deleted insight.
 4. Add revision writes and optional concurrency preconditions to existing
    mutation paths while retaining `audit_insights` for comparison.
 5. Add MCP and Connect history reads, then MCP restore.
@@ -483,6 +488,11 @@ into a project with existing revisions remain review questions.
 7. Add revision-aware export/import.
 8. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
+
+Steps 3 and 4 are one deployment boundary. Deploying the baseline migration
+without revision-aware mutation paths would allow later changes to diverge from
+the ledger. Migration 19 must not be deployed until step 4 is present in the
+same release.
 
 The baseline migration can materially increase startup migration time and WAL.
 Before production rollout, measure row count, content bytes, expected revision

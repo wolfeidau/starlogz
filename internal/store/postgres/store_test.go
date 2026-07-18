@@ -107,6 +107,133 @@ func TestMigrateRepairsInvalidConcurrentIndex(t *testing.T) {
 	require.Equal(t, indexOID, reusedIndexOID)
 }
 
+func TestMigrateAddsInsightRevisionBaselines(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 3)
+
+	liveUpdatedAt := time.Date(2026, time.July, 17, 10, 11, 12, 0, time.UTC)
+	live, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "live",
+		Content:   "live content",
+		Tags:      []string{"one", "two"},
+		Category:  "fact",
+		Source:    "repo",
+		CreatedBy: u.ID,
+		CreatedAt: liveUpdatedAt.Add(-time.Hour),
+		UpdatedAt: liveUpdatedAt,
+	})
+	require.NoError(t, err)
+
+	deleted, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID,
+		Key:       "deleted",
+		Content:   "deleted content",
+		Tags:      []string{"three"},
+		Category:  "decision",
+		Source:    "user",
+		CreatedBy: u.ID,
+		CreatedAt: liveUpdatedAt.Add(-2 * time.Hour),
+		UpdatedAt: liveUpdatedAt.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.DeleteInsight(ctx, p.OrgID, deleted.ID))
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	var deletedAt time.Time
+	require.NoError(t, pool.QueryRow(ctx, `SELECT deleted_at FROM insights WHERE id = $1`, deleted.ID).Scan(&deletedAt))
+
+	_, err = pool.Exec(ctx, `DROP TABLE insight_revisions`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `ALTER TABLE insights DROP COLUMN revision`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 19`)
+	require.NoError(t, err)
+
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+
+	type baseline struct {
+		CurrentRevision int
+		Revision        int
+		Operation       string
+		Key             string
+		Content         string
+		Tags            []string
+		Category        string
+		Source          string
+		DeletedAt       *time.Time
+		ChangedBy       *uuid.UUID
+		ChangedAt       time.Time
+	}
+	readBaseline := func(insightID uuid.UUID) baseline {
+		t.Helper()
+		var got baseline
+		err := pool.QueryRow(ctx, `
+			SELECT i.revision, r.revision, r.operation, COALESCE(r.key, ''), r.content,
+			       r.tags, r.category, r.source, r.deleted_at, r.changed_by, r.changed_at
+			FROM insights i
+			JOIN insight_revisions r ON r.insight_id = i.id AND r.revision = i.revision
+			WHERE i.id = $1`, insightID).Scan(
+			&got.CurrentRevision,
+			&got.Revision,
+			&got.Operation,
+			&got.Key,
+			&got.Content,
+			&got.Tags,
+			&got.Category,
+			&got.Source,
+			&got.DeletedAt,
+			&got.ChangedBy,
+			&got.ChangedAt,
+		)
+		require.NoError(t, err)
+		return got
+	}
+
+	liveBaseline := readBaseline(live.ID)
+	require.Equal(t, 1, liveBaseline.CurrentRevision)
+	require.Equal(t, 1, liveBaseline.Revision)
+	require.Equal(t, "baseline", liveBaseline.Operation)
+	require.Equal(t, "live", liveBaseline.Key)
+	require.Equal(t, "live content", liveBaseline.Content)
+	require.Equal(t, []string{"one", "two"}, liveBaseline.Tags)
+	require.Equal(t, "fact", liveBaseline.Category)
+	require.Equal(t, "repo", liveBaseline.Source)
+	require.Nil(t, liveBaseline.DeletedAt)
+	require.Nil(t, liveBaseline.ChangedBy)
+	require.True(t, liveUpdatedAt.Equal(liveBaseline.ChangedAt))
+
+	deletedBaseline := readBaseline(deleted.ID)
+	require.Equal(t, "baseline", deletedBaseline.Operation)
+	require.Equal(t, "deleted", deletedBaseline.Key)
+	require.Equal(t, "deleted content", deletedBaseline.Content)
+	require.Equal(t, []string{"three"}, deletedBaseline.Tags)
+	require.Equal(t, "decision", deletedBaseline.Category)
+	require.Equal(t, "user", deletedBaseline.Source)
+	require.NotNil(t, deletedBaseline.DeletedAt)
+	require.Equal(t, deletedAt, *deletedBaseline.DeletedAt)
+	require.Nil(t, deletedBaseline.ChangedBy)
+	require.Equal(t, deletedAt, deletedBaseline.ChangedAt)
+
+	_, err = pool.Exec(ctx, `UPDATE insights SET revision = 0 WHERE id = $1`, live.ID)
+	require.Error(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO insight_revisions (
+			insight_id, revision, operation, key, content, tags, category, source, changed_at
+		)
+		VALUES ($1, 0, 'baseline', 'invalid', 'invalid', '{}', 'fact', 'repo', now())`, live.ID)
+	require.Error(t, err)
+
+	_, err = pool.Exec(ctx, `DELETE FROM insights WHERE id = $1`, live.ID)
+	require.NoError(t, err)
+	var revisionCount int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM insight_revisions WHERE insight_id = $1`, live.ID).Scan(&revisionCount))
+	require.Zero(t, revisionCount)
+}
+
 func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
