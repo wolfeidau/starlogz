@@ -39,14 +39,21 @@ preserve that atomicity.
 
 ## Implementation progress
 
-The first two rollout slices are implemented: MCP and Connect list and search
+The first four rollout slices are code-complete: MCP and Connect list and search
 operations accept opaque, filter-bound cursors; list traversal uses
 `updated_at DESC, id DESC`; search traversal uses lossless PostgreSQL `real`
 rank followed by the same deterministic tie-breakers; and both fetch
 `limit + 1`. Migration 18 adds the matching partial live-row list index using a
 retry-safe concurrent build. The dashboard continues both result types through
-an explicit **Load more** action. All revision work remains proposed. The
-implemented behavior is authoritative in [Cursor pagination](pagination.md).
+an explicit **Load more** action. Migration 19 adds the current revision value,
+typed revision ledger, and baseline snapshots. Existing mutation paths now
+write snapshots atomically, suppress semantic no-ops, expose revisions, and
+accept optional concurrency preconditions. Slices 3 and 4 form one releasable
+unit, but production release remains gated on the migration measurements below.
+History APIs and restore remain proposed. The implemented pagination behavior is
+authoritative in [Cursor pagination](pagination.md); implemented revision and
+concurrency behavior is authoritative in
+[Insight revisions and optimistic concurrency](insight_revisions.md).
 
 ## Goals
 
@@ -278,8 +285,11 @@ primary key (insight_id, revision)
 
 Each row is the complete resulting state at that revision, including the
 current revision. `changed_by` records the authenticated actor; it uses null on
-user removal so history does not block identity erasure. `changed_at` uses the
-mutation transaction timestamp.
+user removal so history does not block identity erasure. A backfilled baseline
+uses null because the existing schema cannot identify the actor responsible for
+the latest state without guessing. `changed_at` uses the mutation transaction
+timestamp. A baseline uses `deleted_at` for a soft-deleted row and `updated_at`
+otherwise, preserving the latest known state-change time.
 
 History rows do not contain generated search vectors and have no content, tag,
 operation, timestamp, or actor indexes initially. The composite primary key
@@ -296,12 +306,14 @@ the parent row and all history.
 - `delete`: the state after soft deletion, including `deleted_at`.
 - `restore`: a new live state copied from a selected earlier snapshot.
 
-A semantic no-op does not update `updated_at`, increment `revision`, create a
-history row, or resynchronize unchanged links. No-op detection compares the
-normalized persisted fields affected by the operation.
+A semantic no-op does not update `updated_at`, increment `revision`, or create a
+history row. No-op detection compares the normalized persisted fields affected
+by the operation. A content-bearing no-op still repairs the derived link
+projection: keyed writes regenerate warnings, while no-op `insight_update`
+responses omit them. Tag-only no-ops do not touch links.
 
-Revision insertion, current-row mutation, link synchronization when content
-changes, warnings, and commit all share one transaction. Failure of any part
+Revision insertion, current-row mutation, link synchronization when content is
+supplied, warnings, and commit all share one transaction. Failure of any part
 rolls back the entire mutation.
 
 ### Existing audit log
@@ -321,7 +333,12 @@ independently auditable. If they must, retain a metadata-only operational audit
 path rather than duplicating insight content snapshots. Application roles
 should not be permitted to bypass the revision-writing transaction.
 
-## Optimistic concurrency contract
+## Optimistic concurrency design
+
+The implemented external behavior in this section is authoritative in
+[Insight revisions and optimistic concurrency](insight_revisions.md). This
+proposal retains the design rationale and its relationship to future history
+and restore operations.
 
 ### Revision exposure
 
@@ -356,20 +373,35 @@ For `insight_update` and `insight_delete`:
 For keyless `insight_write`, omitted or `0` creates a new insight; a positive
 expected revision is invalid because there is no existing target.
 
-The store performs the comparison in the mutation statement:
+The store selects the live target `FOR UPDATE`, compares the optional
+precondition with the locked current revision, and retains the row lock through
+the current-state mutation, link synchronization, revision insert, and commit.
+The mutating statement also predicates the locked revision:
 
 ```text
-WHERE id = requested_id AND revision = expected_revision
+WHERE id = requested_id AND revision = locked_revision
 ```
 
+When a precondition is supplied, `locked_revision` equals `expected_revision`.
 The update increments revision and returns the changed row atomically. A
 revision mismatch never mutates content, links, timestamps, or history.
 
-The public MCP and Connect representation of `revision_conflict` remains a
-review question below. Internally it must retain expected and current revision
-values without logging insight content.
+MCP returns a tool execution error with `isError: true` and a bounded JSON body:
 
-## History and restore contract
+```json
+{
+  "code": "revision_conflict",
+  "expected_revision": 2,
+  "current_revision": 3
+}
+```
+
+This follows the MCP distinction between actionable tool execution errors and
+protocol errors. Connect conflict mapping remains deferred until a Connect write
+RPC exists. Internally the error retains expected and current revision values
+without logging insight content.
+
+## Proposed history and restore contract
 
 ### `insight_history`
 
@@ -473,10 +505,10 @@ into a project with existing revisions remain review questions.
    pagination without changing default limits.
 2. **Implemented:** Add search pagination, query-bound cursors, lossless rank
    continuation, and dashboard continuation.
-3. Add `insights.revision`, the typed revision table, and one `baseline`
-   snapshot for every existing live or soft-deleted insight.
-4. Add revision writes and optional concurrency preconditions to existing
-   mutation paths while retaining `audit_insights` for comparison.
+3. **Implemented:** Add `insights.revision`, the typed revision table, and one
+   `baseline` snapshot for every existing live or soft-deleted insight.
+4. **Implemented:** Add revision writes and optional concurrency preconditions
+   to existing mutation paths while retaining `audit_insights` for comparison.
 5. Add MCP and Connect history reads, then MCP restore.
 6. Add dashboard history review; add dashboard restore only after the web write
    boundary is accepted.
@@ -484,12 +516,28 @@ into a project with existing revisions remain review questions.
 8. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
 
+Steps 3 and 4 are one deployment boundary and are implemented in the same
+release unit. Migration 19 must not be separated from the revision-aware
+mutation paths because later changes would diverge from the ledger.
+
 The baseline migration can materially increase startup migration time and WAL.
 Before production rollout, measure row count, content bytes, expected revision
 table size, migration duration, WAL volume, and lock behavior against a
 production-shaped copy. If the single migration exceeds the deployment window,
 split schema creation, dual writes, bounded backfill, and constraint validation
 across releases.
+
+The single-transaction migration deliberately retains its table lock through
+the baseline copy so an older application instance cannot mutate an insight
+between schema change and snapshot creation. Releasing that lock earlier is not
+a safe optimization; the staged fallback must establish dual writes before a
+bounded backfill.
+
+An older invocation already waiting on that lock can resume after migration
+commit and bypass revision writes. The single-user development deployment
+accepts this operational risk only when the operator blocks new requests and
+drains the sole writer before migration. A production or multi-writer rollout
+must use equivalent traffic quiescence or the staged dual-write fallback.
 
 ## Verification
 
@@ -520,7 +568,7 @@ Pending pre-production validation:
 
 - create, keyed update, patch update, delete, and restore revision sequences;
 - baseline coverage for live and soft-deleted pre-feature rows;
-- semantic no-op suppression;
+- semantic no-op suppression with derived-link repair for content-bearing calls;
 - stale expected-revision conflicts with no partial mutation;
 - concurrent updates where exactly one caller with the same expected revision
   succeeds;
@@ -552,20 +600,17 @@ tests and browser verification.
 
 ## Review questions
 
-1. Should MCP conflicts use structured tool-error results with
-   `revision_conflict`, expected revision, and current revision, or retain
-   protocol errors with a stable message?
-2. Should Connect map revision conflicts to `ABORTED`, `FAILED_PRECONDITION`, or
+1. Should Connect map future revision conflicts to `ABORTED`, `FAILED_PRECONDITION`, or
    a typed error detail?
-3. Is preserving legacy last-write-wins indefinitely acceptable, or should a
+2. Is preserving legacy last-write-wins indefinitely acceptable, or should a
    later API version require `expected_revision` for destructive mutations?
-4. Should revision history expose `changed_by` user IDs now, or defer actor
+3. Should revision history expose `changed_by` user IDs now, or defer actor
    identity until shared organizations define collaborator presentation?
-5. Is revision-aware export/import a general-availability gate, and how should
+4. Is revision-aware export/import a general-availability gate, and how should
    history merge with an existing destination insight?
-6. Should dashboard restore be part of this program or remain deferred until a
+5. Should dashboard restore be part of this program or remain deferred until a
    broader dashboard write contract is designed?
-7. Is one release of audit/revision dual recording sufficient before removing
+6. Is one release of audit/revision dual recording sufficient before removing
    `audit_insights`, and must a metadata-only audit continue for privileged
    direct SQL writes?
 
@@ -578,6 +623,8 @@ tests and browser verification.
 - [PostgreSQL unsupported SQL features](https://www.postgresql.org/docs/current/unsupported-features-sql-standard.html)
 - [PostgreSQL audit-trigger example](https://wiki.postgresql.org/wiki/Audit_trigger)
 - [PostgreSQL `UPDATE`](https://www.postgresql.org/docs/current/sql-update.html)
+- [PostgreSQL `SELECT` locking clause](https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE)
+- [MCP tool error handling](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling)
 
 ### Pagination and indexes
 

@@ -541,6 +541,7 @@ type Insight struct {
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	RenderedHtml  string                 `protobuf:"bytes,9,opt,name=rendered_html,json=renderedHtml,proto3" json:"rendered_html,omitempty"`
+	Revision      int32                  `protobuf:"varint,10,opt,name=revision,proto3" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -636,6 +637,13 @@ func (x *Insight) GetRenderedHtml() string {
 		return x.RenderedHtml
 	}
 	return ""
+}
+
+func (x *Insight) GetRevision() int32 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
 }
 
 type GetInsightRequest struct {
@@ -1295,7 +1303,7 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\rsource_counts\x18\x04 \x03(\v2\x18.starlogz.v1.CountBucketR\fsourceCounts\x123\n" +
 	"\btop_tags\x18\x05 \x03(\v2\x18.starlogz.v1.CountBucketR\atopTags\x12D\n" +
 	"\x0frecent_activity\x18\x06 \x03(\v2\x1b.starlogz.v1.ActivityBucketR\x0erecentActivity\x12=\n" +
-	"\x0frecent_insights\x18\a \x03(\v2\x14.starlogz.v1.InsightR\x0erecentInsights\"\xa8\x02\n" +
+	"\x0frecent_insights\x18\a \x03(\v2\x14.starlogz.v1.InsightR\x0erecentInsights\"\xc4\x02\n" +
 	"\aInsight\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x18\n" +
@@ -1307,7 +1315,9 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12#\n" +
-	"\rrendered_html\x18\t \x01(\tR\frenderedHtml\"\x9e\x01\n" +
+	"\rrendered_html\x18\t \x01(\tR\frenderedHtml\x12\x1a\n" +
+	"\brevision\x18\n" +
+	" \x01(\x05R\brevision\"\x9e\x01\n" +
 	"\x11GetInsightRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x10\n" +
 	"\x02id\x18\x02 \x01(\tH\x00R\x02id\x12\x12\n" +

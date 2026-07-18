@@ -48,7 +48,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolProjectEnsure, ms.projectEnsure))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_write",
-		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier. Requires category and source.",
+		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier and expected_revision for optimistic concurrency. Requires category and source.",
 		InputSchema: insightWriteSchema,
 	}, trackTool(ms, wideevent.ToolInsightWrite, ms.insightWrite))
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -68,7 +68,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolInsightList, ms.insightList))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_delete",
-		Description: "Soft-deletes an insight by ID. The insight no longer appears in list or search results.",
+		Description: "Soft-deletes an insight by ID. Supply expected_revision for optimistic concurrency. The insight no longer appears in list or search results.",
 		InputSchema: insightDeleteSchema,
 	}, trackTool(ms, wideevent.ToolInsightDelete, ms.insightDelete))
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -82,7 +82,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolInsightListTags, ms.insightListTags))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_update",
-		Description: "Updates the content and/or tags of an existing insight. Supply only the fields you want to change.",
+		Description: "Updates the content and/or tags of an existing insight. Supply only the fields you want to change and expected_revision for optimistic concurrency.",
 		InputSchema: insightUpdateSchema,
 	}, trackTool(ms, wideevent.ToolInsightUpdate, ms.insightUpdate))
 	return ms
@@ -94,7 +94,7 @@ func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Conte
 		result, output, err := handler(ctx, req, input)
 		outcome, reason := wideevent.OutcomeSuccess, wideevent.ReasonCompleted
 		attributes := map[string]string{wideevent.AttributeTool: tool}
-		if err != nil {
+		if err != nil || result != nil && result.IsError {
 			outcome, reason = wideevent.OutcomeFailure, wideevent.ReasonFailed
 		} else if metadata, ok := output.(toolEventMetadata); ok {
 			attributes[wideevent.AttributeResultCountBucket] = resultCountBucket(metadata.resultCount)
@@ -144,12 +144,13 @@ type projectEnsureInput struct {
 }
 
 type insightWriteInput struct {
-	Project  string   `json:"project"`
-	Content  string   `json:"content"`
-	Key      string   `json:"key"`
-	Tags     []string `json:"tags"`
-	Category string   `json:"category"`
-	Source   string   `json:"source"`
+	Project          string   `json:"project"`
+	Content          string   `json:"content"`
+	Key              string   `json:"key"`
+	Tags             []string `json:"tags"`
+	Category         string   `json:"category"`
+	Source           string   `json:"source"`
+	ExpectedRevision *int     `json:"expected_revision"`
 }
 
 type insightSearchInput struct {
@@ -177,7 +178,8 @@ type insightListInput struct {
 }
 
 type insightDeleteInput struct {
-	ID string `json:"id"`
+	ID               string `json:"id"`
+	ExpectedRevision *int   `json:"expected_revision"`
 }
 
 type projectListInput struct{}
@@ -188,9 +190,10 @@ type insightListTagsInput struct {
 }
 
 type insightUpdateInput struct {
-	ID      string   `json:"id"`
-	Content string   `json:"content"`
-	Tags    []string `json:"tags"`
+	ID               string   `json:"id"`
+	Content          string   `json:"content"`
+	Tags             []string `json:"tags"`
+	ExpectedRevision *int     `json:"expected_revision"`
 }
 
 func inputSchemaFor[T any]() *jsonschema.Schema {
@@ -220,6 +223,8 @@ var (
 		s.Properties["content"].MinLength = jsonschema.Ptr(1)
 		s.Properties["category"].Enum = []any{"fact", "decision", "insight", "preference", "context", "general"}
 		s.Properties["source"].Enum = []any{"user", "repo", "agent", "command"}
+		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(0.0)
+		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{projectSchemaProperty, "content", "category", "source"}
 		return s
 	}()
@@ -266,6 +271,8 @@ var (
 		s := inputSchemaFor[insightDeleteInput]()
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
+		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{"id"}
 		return s
 	}()
@@ -283,6 +290,8 @@ var (
 		s := inputSchemaFor[insightUpdateInput]()
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
+		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{"id"}
 		return s
 	}()
@@ -309,6 +318,7 @@ type insightResponse struct {
 	Category     string                        `json:"category"`
 	Source       string                        `json:"source"`
 	UpdatedAt    string                        `json:"updated_at"`
+	Revision     int                           `json:"revision"`
 	LinkWarnings *[]insightLinkWarningResponse `json:"warnings,omitempty"`
 }
 
@@ -382,24 +392,43 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
+	if in.Key == "" && in.ExpectedRevision != nil && *in.ExpectedRevision > 0 {
+		return nil, nil, store.ErrInvalidExpectedRevision
+	}
 	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
-	project, err := ms.store.EnsureProject(ctx, org.ID, user.ID, in.Project, in.Project)
+	var project *store.Project
+	if in.ExpectedRevision != nil && *in.ExpectedRevision > 0 {
+		project, err = ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
+		if errors.Is(err, store.ErrNotFound) {
+			result, _, resultErr := revisionConflictResult(&store.RevisionConflictError{
+				Expected: *in.ExpectedRevision,
+				Current:  0,
+			})
+			return result, nil, resultErr
+		}
+	} else {
+		project, err = ms.store.EnsureProject(ctx, org.ID, user.ID, in.Project, in.Project)
+	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("ensure project: %w", err)
+		return nil, nil, fmt.Errorf("resolve project: %w", err)
 	}
 	tags := normaliseTags(in.Tags)
 	insight, err := ms.store.WriteInsight(ctx, store.WriteInsightParams{
-		ProjectID: project.ID,
-		Key:       in.Key,
-		Content:   in.Content,
-		Tags:      tags,
-		Category:  in.Category,
-		Source:    in.Source,
-		CreatedBy: user.ID,
+		ProjectID:        project.ID,
+		Key:              in.Key,
+		Content:          in.Content,
+		Tags:             tags,
+		Category:         in.Category,
+		Source:           in.Source,
+		CreatedBy:        user.ID,
+		ExpectedRevision: in.ExpectedRevision,
 	})
+	if result, ok, resultErr := revisionConflictResult(err); ok {
+		return result, nil, resultErr
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("write insight: %w", err)
 	}
@@ -407,6 +436,7 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	return jsonResult(map[string]any{
 		"id":       insight.ID.String(),
 		"updated":  !insight.CreatedAt.Equal(insight.UpdatedAt),
+		"revision": insight.Revision,
 		"warnings": warnings,
 	})
 }
@@ -478,6 +508,7 @@ func toInsightGetResponse(detail *store.InsightDetail) insightGetResponse {
 		Insight: insightResponse{
 			ID: insight.ID.String(), Key: insight.Key, Content: insight.Content, Tags: insight.Tags,
 			Category: insight.Category, Source: insight.Source, UpdatedAt: insight.UpdatedAt.Format(time.RFC3339),
+			Revision: insight.Revision,
 		},
 		Links: links, Backlinks: backlinks, LinkCount: detail.LinkCount, BacklinkCount: detail.BacklinkCount,
 		LinksTruncated: detail.LinksTruncated, BacklinksTruncated: detail.BacklinksTruncated,
@@ -584,7 +615,7 @@ func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -592,14 +623,19 @@ func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
 	}
-	err = ms.store.DeleteInsight(ctx, org.ID, insightID)
+	revision, err := ms.store.DeleteInsight(ctx, store.DeleteInsightParams{
+		OrgID: org.ID, InsightID: insightID, ChangedBy: user.ID, ExpectedRevision: in.ExpectedRevision,
+	})
+	if result, ok, resultErr := revisionConflictResult(err); ok {
+		return result, nil, resultErr
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("insight %q not found or already deleted", in.ID)
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("delete insight: %w", err)
 	}
-	return jsonResult(map[string]any{})
+	return jsonResult(map[string]any{"revision": revision})
 }
 
 func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, _ projectListInput) (*mcp.CallToolResult, any, error) {
@@ -672,7 +708,7 @@ func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
-	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -685,11 +721,16 @@ func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest
 		tags = normaliseTags(in.Tags)
 	}
 	insight, err := ms.store.UpdateInsight(ctx, store.UpdateInsightParams{
-		OrgID:     org.ID,
-		InsightID: insightID,
-		Content:   in.Content,
-		Tags:      tags,
+		OrgID:            org.ID,
+		InsightID:        insightID,
+		Content:          in.Content,
+		Tags:             tags,
+		ChangedBy:        user.ID,
+		ExpectedRevision: in.ExpectedRevision,
 	})
+	if result, ok, resultErr := revisionConflictResult(err); ok {
+		return result, nil, resultErr
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil, fmt.Errorf("insight %q not found or already deleted", in.ID)
 	}
@@ -704,8 +745,9 @@ func (ms *mcpServer) insightUpdate(ctx context.Context, req *mcp.CallToolRequest
 		Category:  insight.Category,
 		Source:    insight.Source,
 		UpdatedAt: insight.UpdatedAt.Format(time.RFC3339),
+		Revision:  insight.Revision,
 	}
-	if in.Content != "" {
+	if insight.ContentChanged {
 		warnings := toInsightLinkWarningResponses(insight.LinkWarnings)
 		response.LinkWarnings = &warnings
 	}
@@ -748,6 +790,7 @@ func toInsightResponses(insights []*store.Insight) []insightResponse {
 			Category:  f.Category,
 			Source:    f.Source,
 			UpdatedAt: f.UpdatedAt.Format(time.RFC3339),
+			Revision:  f.Revision,
 		}
 	}
 	return out
@@ -761,4 +804,20 @@ func jsonResult(v any) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
 	}, nil, nil
+}
+
+func revisionConflictResult(err error) (*mcp.CallToolResult, bool, error) {
+	var conflict *store.RevisionConflictError
+	if !errors.As(err, &conflict) {
+		return nil, false, nil
+	}
+	result, _, marshalErr := jsonResult(map[string]any{
+		"code":              "revision_conflict",
+		"expected_revision": conflict.Expected,
+		"current_revision":  conflict.Current,
+	})
+	if result != nil {
+		result.IsError = true
+	}
+	return result, true, marshalErr
 }

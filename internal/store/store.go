@@ -13,6 +13,20 @@ import (
 // ErrNotFound is returned when a queried row does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrInvalidExpectedRevision is returned for a precondition that cannot apply to the mutation.
+var ErrInvalidExpectedRevision = errors.New("invalid expected revision")
+
+const MaxInsightRevision = 1<<31 - 1
+
+type RevisionConflictError struct {
+	Expected int
+	Current  int
+}
+
+func (e *RevisionConflictError) Error() string {
+	return "revision conflict"
+}
+
 // Store is the interface satisfied by the postgres.Store implementation.
 type Store interface {
 	Ping(ctx context.Context) error
@@ -53,7 +67,7 @@ type Store interface {
 	GetInsight(ctx context.Context, p GetInsightParams) (*InsightDetail, error)
 	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
-	DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error
+	DeleteInsight(ctx context.Context, p DeleteInsightParams) (int, error)
 	SearchInsights(ctx context.Context, p SearchInsightsParams) (*InsightSearchPage, error)
 	ListInsights(ctx context.Context, p ListInsightsParams) (*InsightPage, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
@@ -129,17 +143,19 @@ type Project struct {
 
 // Insight is a text assertion stored against a project.
 type Insight struct {
-	ID           uuid.UUID
-	ProjectID    uuid.UUID
-	Key          string // empty string when no key
-	Content      string
-	Tags         []string
-	Category     string
-	Source       string
-	CreatedBy    uuid.UUID
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	LinkWarnings []InsightLinkWarning
+	ID             uuid.UUID
+	ProjectID      uuid.UUID
+	Key            string // empty string when no key
+	Content        string
+	Tags           []string
+	Category       string
+	Source         string
+	CreatedBy      uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Revision       int
+	ContentChanged bool
+	LinkWarnings   []InsightLinkWarning
 }
 
 type ListInsightsParams struct {
@@ -245,6 +261,8 @@ type WriteInsightParams struct {
 	Category  string
 	Source    string
 	CreatedBy uuid.UUID
+	// ExpectedRevision distinguishes an omitted last-write-wins mutation from an explicit precondition.
+	ExpectedRevision *int
 	// CreatedAt and UpdatedAt let a caller preserve timestamps from another
 	// source (e.g. Store.ImportProjects). Zero value = use the DB default (now()).
 	// Only honoured on insert; an update-by-key write always sets updated_at to now().
@@ -274,10 +292,19 @@ type ImportProject struct {
 // UpdateInsightParams holds the inputs for Store.UpdateInsight.
 // Empty Content means no change. Nil Tags means no change; non-nil (including empty) replaces tags.
 type UpdateInsightParams struct {
-	OrgID     uuid.UUID
-	InsightID uuid.UUID
-	Content   string
-	Tags      []string
+	OrgID            uuid.UUID
+	InsightID        uuid.UUID
+	Content          string
+	Tags             []string
+	ChangedBy        uuid.UUID
+	ExpectedRevision *int
+}
+
+type DeleteInsightParams struct {
+	OrgID            uuid.UUID
+	InsightID        uuid.UUID
+	ChangedBy        uuid.UUID
+	ExpectedRevision *int
 }
 
 // TagCount holds a tag name and its usage frequency within a project.

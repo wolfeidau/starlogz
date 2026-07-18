@@ -47,7 +47,12 @@ The core entity is `Insight` (`internal/store/store.go`):
 | `created_by` | UUID   | FK → users                                                      |
 | `created_at` | timestamptz | |
 | `updated_at` | timestamptz | |
+| `revision` | integer | Positive optimistic-concurrency value; starts at 1 and increments on accepted state changes. |
 | `deleted_at` | timestamptz | NULL = live; set on soft-delete                             |
+
+`insight_revisions` stores immutable full snapshots keyed by
+`(insight_id, revision)`. Current-state list and search remain backed by
+`insights`.
 
 ---
 
@@ -60,12 +65,12 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `whoami`           | any           | Returns user ID and token scopes |
 | `project_ensure`   | `insights:read`  | Creates a project if missing; returns it either way |
 | `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
-| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. Returns link warnings as an additive array. |
+| `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. Accepts optional `expected_revision`; returns revision and link warnings. |
 | `insight_get`      | `insights:read`  | Gets one insight by ID or key with bounded outgoing links and backlinks. |
 | `insight_search`   | `insights:read`  | Full-text search over live insights by `rank DESC, updated_at DESC, id DESC`. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`; opaque cursor continuation is optional. |
 | `insight_list`     | `insights:read`  | Lists live insights by `updated_at DESC, id DESC`. Optional tag filter and opaque cursor continuation. |
-| `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Content changes return link warnings; tag-only updates omit them. |
-| `insight_delete`   | `insights:write` | Soft-deletes an insight |
+| `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Accepts optional `expected_revision`; content changes return link warnings and tag-only updates omit them. |
+| `insight_delete`   | `insights:write` | Soft-deletes an insight. Accepts optional `expected_revision` and returns the deletion revision. |
 | `insight_list_tags`| `insights:read`  | Returns tags ordered by usage frequency |
 
 ---
@@ -227,7 +232,10 @@ require.NoError(t, err)
 require.Equal(t, http.StatusCreated, resp.StatusCode)
 ```
 
-Do not mock the database. Tests that touch Postgres use a real database via `testcontainers-go` (postgres module). Each test gets its own container via `newTestStore(t)` in `internal/store/store_test.go`.
+Do not mock the database. Tests that touch Postgres use a real database via
+`testcontainers-go` (postgres module). Each test gets its own cloned database
+from a migrated template via `newTestStore(t)` in
+`internal/store/postgres/store_test.go`.
 
 ### End-to-end (MCP Inspector)
 
