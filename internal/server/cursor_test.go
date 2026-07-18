@@ -161,16 +161,17 @@ func TestInsightHistoryCursorEmptyValueStartsFirstPage(t *testing.T) {
 
 func TestInsightSearchCursorRoundTripPreservesRealRank(t *testing.T) {
 	projectID := uuid.New()
+	const privateTag = "private/tag:db"
 	want := &store.InsightSearchCursor{
 		Rank:      math.Float32frombits(0x3dcccccd),
 		UpdatedAt: time.Date(2026, 7, 18, 12, 34, 56, 789123000, time.UTC),
 		ID:        uuid.New(),
 	}
-	encoded, err := encodeInsightSearchCursor(projectID, "postgres query", store.SearchQueryModeAll, []string{"db", "go"}, store.SearchTagModeAny, want)
+	encoded, err := encodeInsightSearchCursor(projectID, "postgres query", store.SearchQueryModeAll, []string{privateTag, "go"}, store.SearchTagModeAny, want)
 	require.NoError(t, err)
 	require.NotContains(t, encoded, "=")
 
-	decoded, err := decodeInsightSearchCursor(encoded, projectID, "postgres query", store.SearchQueryModeAll, []string{"go", "db", "db"}, store.SearchTagModeAny)
+	decoded, err := decodeInsightSearchCursor(encoded, projectID, "postgres query", store.SearchQueryModeAll, []string{"go", privateTag, privateTag}, store.SearchTagModeAny)
 	require.NoError(t, err)
 	require.Equal(t, math.Float32bits(want.Rank), math.Float32bits(decoded.Rank))
 	require.Equal(t, want.UpdatedAt, decoded.UpdatedAt)
@@ -180,7 +181,7 @@ func TestInsightSearchCursorRoundTripPreservesRealRank(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), projectID.String())
 	require.NotContains(t, string(payload), "postgres query")
-	require.NotContains(t, string(payload), "db")
+	require.NotContains(t, string(payload), privateTag)
 }
 
 func TestInsightSearchCursorRejectsInvalidValuesAndChangedFilters(t *testing.T) {
