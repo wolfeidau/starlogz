@@ -575,37 +575,171 @@ func TestSearchInsights(t *testing.T) {
 	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "Redis is an in-memory store", Tags: []string{"cache"}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	results, err := st.SearchInsights(ctx, p.ID, "relational database", store.SearchQueryModeAll, nil, store.SearchTagModeAll, 10)
+	results, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "relational database", QueryMode: store.SearchQueryModeAll, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	require.Contains(t, results[0].Content, "PostgreSQL")
+	require.Len(t, results.Insights, 1)
+	require.Contains(t, results.Insights[0].Content, "PostgreSQL")
 
 	// Tag filter should narrow results.
-	tagged, err := st.SearchInsights(ctx, p.ID, "database", store.SearchQueryModeAll, []string{"cache"}, store.SearchTagModeAll, 10)
+	tagged, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "database", QueryMode: store.SearchQueryModeAll, Tags: []string{"cache"}, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Empty(t, tagged, "cache tag should exclude PostgreSQL result")
+	require.Empty(t, tagged.Insights, "cache tag should exclude PostgreSQL result")
 
 	// Tag names should be searchable even when absent from content.
-	byTagName, err := st.SearchInsights(ctx, p.ID, "cache", store.SearchQueryModeAll, nil, store.SearchTagModeAll, 10)
+	byTagName, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "cache", QueryMode: store.SearchQueryModeAll, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, byTagName, 1, "searching by tag name should find insights tagged with that word")
-	require.Contains(t, byTagName[0].Content, "Redis")
+	require.Len(t, byTagName.Insights, 1, "searching by tag name should find insights tagged with that word")
+	require.Contains(t, byTagName.Insights[0].Content, "Redis")
 
-	web, err := st.SearchInsights(ctx, p.ID, "relational OR redis", store.SearchQueryModeWeb, nil, store.SearchTagModeAll, 10)
+	web, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "relational OR redis", QueryMode: store.SearchQueryModeWeb, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, web, 2)
+	require.Len(t, web.Insights, 2)
 
 	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "PostgreSQL replication", Tags: []string{"db", "operations"}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
-	allTags, err := st.SearchInsights(ctx, p.ID, "postgresql", store.SearchQueryModeAll, []string{"db", "operations"}, store.SearchTagModeAll, 10)
+	allTags, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "postgresql", QueryMode: store.SearchQueryModeAll, Tags: []string{"db", "operations"}, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, allTags, 1)
-	require.Contains(t, allTags[0].Content, "replication")
+	require.Len(t, allTags.Insights, 1)
+	require.Contains(t, allTags.Insights[0].Content, "replication")
 
-	anyTags, err := st.SearchInsights(ctx, p.ID, "postgresql", store.SearchQueryModeAll, []string{"db", "operations"}, store.SearchTagModeAny, 10)
+	anyTags, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "postgresql", QueryMode: store.SearchQueryModeAll, Tags: []string{"db", "operations"}, TagMode: store.SearchTagModeAny, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, anyTags, 2)
+	require.Len(t, anyTags.Insights, 2)
+}
+
+func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 31)
+	updatedAt := time.Date(2026, 7, 18, 12, 0, 0, 123456000, time.UTC)
+	searchTag := uuid.NewString()
+
+	contents := []string{
+		"pagination pagination pagination",
+		"pagination pagination",
+		"pagination token alpha",
+		"pagination token beta",
+	}
+	for _, content := range contents {
+		insight, err := st.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: p.ID, Content: content, Tags: []string{searchTag}, CreatedBy: u.ID,
+			CreatedAt: updatedAt, UpdatedAt: updatedAt,
+		})
+		require.NoError(t, err)
+		require.NotEqual(t, uuid.Nil, insight.ID)
+	}
+
+	base := store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "pagination", QueryMode: store.SearchQueryModeAll,
+		Tags: []string{searchTag}, TagMode: store.SearchTagModeAll,
+	}
+	all := base
+	all.Limit = 10
+	allPage, err := st.SearchInsights(ctx, all)
+	require.NoError(t, err)
+	require.Len(t, allPage.Insights, 4)
+	require.Equal(t, contents[0], allPage.Insights[0].Content)
+	require.Equal(t, contents[1], allPage.Insights[1].Content)
+	equalRankIDs := []string{allPage.Insights[2].ID.String(), allPage.Insights[3].ID.String()}
+	require.True(t, sort.IsSorted(sort.Reverse(sort.StringSlice(equalRankIDs))))
+	expected := make([]string, len(allPage.Insights))
+	for i, insight := range allPage.Insights {
+		expected[i] = insight.ID.String()
+	}
+
+	zero := base
+	zero.Limit = 0
+	page, err := st.SearchInsights(ctx, zero)
+	require.NoError(t, err)
+	require.Empty(t, page.Insights)
+	require.Nil(t, page.NextCursor)
+
+	exact := base
+	exact.Limit = 4
+	page, err = st.SearchInsights(ctx, exact)
+	require.NoError(t, err)
+	require.Len(t, page.Insights, 4)
+	require.Nil(t, page.NextCursor)
+
+	limitPlusOne := base
+	limitPlusOne.Limit = 3
+	page, err = st.SearchInsights(ctx, limitPlusOne)
+	require.NoError(t, err)
+	require.Len(t, page.Insights, 3)
+	require.NotNil(t, page.NextCursor)
+
+	var seen []string
+	var boundaryRanks []float32
+	after := (*store.InsightSearchCursor)(nil)
+	for {
+		request := base
+		request.Limit = 1
+		request.After = after
+		page, err = st.SearchInsights(ctx, request)
+		require.NoError(t, err)
+		for _, insight := range page.Insights {
+			seen = append(seen, insight.ID.String())
+		}
+		if page.NextCursor == nil {
+			break
+		}
+		boundaryRanks = append(boundaryRanks, page.NextCursor.Rank)
+		after = page.NextCursor
+	}
+	require.Equal(t, expected, seen)
+	require.Len(t, map[string]struct{}{seen[0]: {}, seen[1]: {}, seen[2]: {}, seen[3]: {}}, 4)
+	require.Len(t, boundaryRanks, 3)
+	require.Greater(t, boundaryRanks[0], boundaryRanks[1])
+	require.Greater(t, boundaryRanks[1], boundaryRanks[2])
+}
+
+func TestSearchInsightsCursorDocumentsConcurrentMutationLimitation(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 32)
+	updatedAt := time.Date(2025, 7, 18, 12, 0, 0, 0, time.UTC)
+	searchTag := uuid.NewString()
+
+	for range 3 {
+		_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: p.ID, Content: "pagination token", Tags: []string{searchTag}, CreatedBy: u.ID,
+			CreatedAt: updatedAt, UpdatedAt: updatedAt,
+		})
+		require.NoError(t, err)
+	}
+
+	base := store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "pagination", QueryMode: store.SearchQueryModeAll,
+		Tags: []string{searchTag}, TagMode: store.SearchTagModeAll,
+	}
+	baseline := base
+	baseline.Limit = 10
+	baselinePage, err := st.SearchInsights(ctx, baseline)
+	require.NoError(t, err)
+	require.Len(t, baselinePage.Insights, 3)
+
+	first := base
+	first.Limit = 1
+	firstPage, err := st.SearchInsights(ctx, first)
+	require.NoError(t, err)
+	require.NotNil(t, firstPage.NextCursor)
+	require.Equal(t, baselinePage.Insights[0].ID, firstPage.Insights[0].ID)
+
+	moved := baselinePage.Insights[1]
+	_, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: moved.ID, Content: moved.Content,
+	})
+	require.NoError(t, err)
+
+	continuation := base
+	continuation.Limit = 10
+	continuation.After = firstPage.NextCursor
+	remaining, err := st.SearchInsights(ctx, continuation)
+	require.NoError(t, err)
+	require.Len(t, remaining.Insights, 1)
+	require.Equal(t, baselinePage.Insights[2].ID, remaining.Insights[0].ID)
+	require.NotEqual(t, moved.ID, remaining.Insights[0].ID)
 }
 
 func TestListInsights(t *testing.T) {

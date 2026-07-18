@@ -58,7 +58,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolInsightGet, ms.insightGet))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
-		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance.",
+		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance and supports opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
 	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -159,6 +159,7 @@ type insightSearchInput struct {
 	Tags      []string `json:"tags"`
 	TagMode   string   `json:"tag_mode"`
 	Limit     int      `json:"limit"`
+	Cursor    string   `json:"cursor"`
 }
 
 type insightGetInput struct {
@@ -239,6 +240,7 @@ var (
 		return s
 	}()
 
+	// Cursor bounds remain in the decoder so MCP reports the stable invalid_cursor code.
 	insightSearchSchema = func() *jsonschema.Schema {
 		s := inputSchemaFor[insightSearchInput]()
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
@@ -256,8 +258,6 @@ var (
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
-		s.Properties["cursor"].MinLength = jsonschema.Ptr(1)
-		s.Properties["cursor"].MaxLength = jsonschema.Ptr(maxCursorLength)
 		s.Required = []string{projectSchemaProperty}
 		return s
 	}()
@@ -512,12 +512,29 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	if tagMode == "" {
 		tagMode = store.SearchTagModeAll
 	}
-	insights, err := ms.store.SearchInsights(ctx, project.ID, in.Query, queryMode, normaliseTags(in.Tags), tagMode, limit)
+	query := in.Query
+	tags := canonicalSearchTags(normaliseTags(in.Tags))
+	after, err := decodeInsightSearchCursor(in.Cursor, project.ID, query, queryMode, tags, tagMode)
+	if err != nil {
+		return nil, nil, errInvalidCursor
+	}
+	page, err := ms.store.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: project.ID, Query: query, QueryMode: queryMode,
+		Tags: tags, TagMode: tagMode, Limit: limit, After: after,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("search insights: %w", err)
 	}
-	result, _, err := jsonResult(map[string]any{"insights": toInsightResponses(insights)})
-	return result, toolEventMetadata{resultCount: len(insights)}, err
+	output := map[string]any{"insights": toInsightResponses(page.Insights)}
+	if page.NextCursor != nil {
+		nextCursor, err := encodeInsightSearchCursor(project.ID, query, queryMode, tags, tagMode, page.NextCursor)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode next cursor: %w", err)
+		}
+		output["next_cursor"] = nextCursor
+	}
+	result, _, err := jsonResult(output)
+	return result, toolEventMetadata{resultCount: len(page.Insights)}, err
 }
 
 func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, in insightListInput) (*mcp.CallToolResult, any, error) {

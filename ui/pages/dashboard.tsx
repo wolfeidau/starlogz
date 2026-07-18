@@ -7,10 +7,8 @@ import {
   getInsight,
   getProjectDashboard,
   getSession,
-  listInsights,
   listProjects,
   listTags,
-  searchInsights,
 } from "../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
 import type {
   ActivityBucket,
@@ -19,6 +17,10 @@ import type {
   Project,
 } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { useDashboardNavigation } from "./dashboard_navigation";
+import {
+  LoadMoreButton,
+  useDashboardInsightPages,
+} from "./dashboard_pagination";
 import {
   formatTimestamp,
   InsightDetail,
@@ -205,21 +207,12 @@ function DashboardView() {
     { project: activeProject, limit: 60 },
     { enabled: isAuthenticated && activeProject !== "" },
   );
-  const search = useQuery(
-    searchInsights,
-    {
-      project: activeProject,
-      query,
-      tags: selectedTag ? [selectedTag] : [],
-      limit: 100,
-    },
-    { enabled: isAuthenticated && activeProject !== "" && query.trim() !== "" },
-  );
-  const listed = useQuery(
-    listInsights,
-    { project: activeProject, tag: selectedTag, limit: 100 },
-    { enabled: isAuthenticated && activeProject !== "" && query.trim() === "" },
-  );
+  const insightPages = useDashboardInsightPages({
+    isAuthenticated,
+    activeProject,
+    query,
+    selectedTag,
+  });
   const detail = useQuery(
     getInsight,
     {
@@ -252,10 +245,7 @@ function DashboardView() {
     );
   }
 
-  const insights =
-    query.trim() === ""
-      ? (listed.data?.insights ?? [])
-      : (search.data?.insights ?? []);
+  const insights = insightPages.insights;
   const topTags = tags.data?.tags ?? dashboard.data?.topTags ?? [];
 
   return (
@@ -337,17 +327,25 @@ function DashboardView() {
           <h2>{query.trim() === "" ? "Insights" : "Search Results"}</h2>
           <span>{insights.length} shown</span>
         </div>
-        {listed.isLoading || search.isLoading ? (
+        {insightPages.isLoading ? (
           <div className="center-state">Loading insights</div>
         ) : insights.length === 0 ? (
           <div className="empty-panel">No matching insights.</div>
         ) : (
-          <InsightTable
-            insights={insights}
-            onOpenInsight={(key) =>
-              navigate(activeProject, { case: "key", value: key })
-            }
-          />
+          <>
+            <InsightTable
+              insights={insights}
+              onOpenInsight={(key) =>
+                navigate(activeProject, { case: "key", value: key })
+              }
+            />
+            {insightPages.hasNextPage && (
+              <LoadMoreButton
+                loading={insightPages.isFetchingNextPage}
+                onLoadMore={() => void insightPages.fetchNextPage()}
+              />
+            )}
+          </>
         )}
       </section>
 

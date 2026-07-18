@@ -25,7 +25,7 @@ All tools require `insights:read`. Write tools require `insights:write`.
 | `project_ensure` | `insights:read` | Creates a project if it does not exist; returns it either way. Use when you want a custom display name. |
 | `insight_write` | `insights:write` | Writes an insight to a project. Auto-creates the project if it does not exist. Provide a `key` for upsert semantics. Requires `category` and `source`. |
 | `insight_get` | `insights:read` | Retrieves one insight by ID or key with bounded outgoing links and backlinks. |
-| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns results ordered by relevance. |
+| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns deterministic relevance ordering with optional opaque cursor continuation. |
 | `insight_list` | `insights:read` | Lists live insights by most recent update. Optional tag filter and opaque cursor continuation. |
 | `insight_update` | `insights:write` | Updates content and/or tags of an existing insight. |
 | `insight_delete` | `insights:write` | Soft-deletes an insight by ID. Does not appear in search or list after deletion. |

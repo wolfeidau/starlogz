@@ -39,12 +39,14 @@ preserve that atomicity.
 
 ## Implementation progress
 
-The first rollout slice is implemented in the working tree: MCP and Connect
-list operations accept opaque, filter-bound cursors; the store uses
-`updated_at DESC, id DESC` keyset traversal with `limit + 1`; and migration 18
-adds the matching partial live-row index using a retry-safe concurrent build.
-Search pagination and all revision work remain proposed. The implemented
-behavior is authoritative in [Cursor pagination](pagination.md).
+The first two rollout slices are implemented: MCP and Connect list and search
+operations accept opaque, filter-bound cursors; list traversal uses
+`updated_at DESC, id DESC`; search traversal uses lossless PostgreSQL `real`
+rank followed by the same deterministic tie-breakers; and both fetch
+`limit + 1`. Migration 18 adds the matching partial live-row list index using a
+retry-safe concurrent build. The dashboard continues both result types through
+an explicit **Load more** action. All revision work remains proposed. The
+implemented behavior is authoritative in [Cursor pagination](pagination.md).
 
 ## Goals
 
@@ -466,11 +468,11 @@ into a project with existing revisions remain review questions.
 
 ## Migration and rollout
 
-1. Add cursor codecs, deterministic ordering, the matching live-row index with
-   a retry-safe concurrent build, store page types, and list pagination without
-   changing default limits.
-2. Add search pagination, query-bound cursors, lossless rank continuation, and
-   dashboard continuation.
+1. **Implemented:** Add cursor codecs, deterministic ordering, the matching
+   live-row index with a retry-safe concurrent build, store page types, and list
+   pagination without changing default limits.
+2. **Implemented:** Add search pagination, query-bound cursors, lossless rank
+   continuation, and dashboard continuation.
 3. Add `insights.revision`, the typed revision table, and one `baseline`
    snapshot for every existing live or soft-deleted insight.
 4. Add revision writes and optional concurrency preconditions to existing
@@ -493,15 +495,26 @@ across releases.
 
 ### Cursor correctness
 
+Completed automated verification covers:
+
 - deterministic list traversal where multiple rows share `updated_at`;
-- deterministic search traversal where multiple rows share rank;
+- deterministic search traversal across different ranks and equal-rank rows;
 - no gaps or duplicates across a static multi-page dataset;
 - correct `next_cursor` behavior at zero, exact-limit, and limit-plus-one sizes;
 - invalid version, operation, encoding, rank, and filter binding rejection;
 - unchanged behavior when cursor is omitted;
-- explicit tests demonstrating the documented concurrent-mutation limitation;
+- MCP empty and oversized cursors using the documented `invalid_cursor`
+  contract;
+- transport-backed dashboard list and search continuation; and
+- a deterministic test demonstrating the documented concurrent-mutation
+  limitation.
+
+Pending pre-production validation:
+
 - `EXPLAIN (ANALYZE, BUFFERS)` verification for first and deep pages on
-  production-shaped data.
+  production-shaped data; and
+- browser verification of dashboard list and search continuation against the
+  deployed Connect API.
 
 ### Revision correctness
 

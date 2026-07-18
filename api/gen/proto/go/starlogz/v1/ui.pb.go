@@ -1038,6 +1038,7 @@ type SearchInsightsRequest struct {
 	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
 	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1100,9 +1101,17 @@ func (x *SearchInsightsRequest) GetLimit() int32 {
 	return 0
 }
 
+func (x *SearchInsightsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type SearchInsightsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Insights      []*Insight             `protobuf:"bytes,1,rep,name=insights,proto3" json:"insights,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1142,6 +1151,13 @@ func (x *SearchInsightsResponse) GetInsights() []*Insight {
 		return x.Insights
 	}
 	return nil
+}
+
+func (x *SearchInsightsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
 }
 
 type ListTagsRequest struct {
@@ -1326,14 +1342,17 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\x14ListInsightsResponse\x120\n" +
 	"\binsights\x18\x01 \x03(\v2\x14.starlogz.v1.InsightR\binsights\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"q\n" +
+	"nextCursor\"\x89\x01\n" +
 	"\x15SearchInsightsRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12\x12\n" +
 	"\x04tags\x18\x03 \x03(\tR\x04tags\x12\x14\n" +
-	"\x05limit\x18\x04 \x01(\x05R\x05limit\"J\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"k\n" +
 	"\x16SearchInsightsResponse\x120\n" +
-	"\binsights\x18\x01 \x03(\v2\x14.starlogz.v1.InsightR\binsights\"A\n" +
+	"\binsights\x18\x01 \x03(\v2\x14.starlogz.v1.InsightR\binsights\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"A\n" +
 	"\x0fListTagsRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"@\n" +

@@ -278,6 +278,80 @@ func TestUIListInsightsCursorPagination(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status)
 }
 
+func TestUISearchInsightsCursorPagination(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "web-search-cursor-user")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	project, err := f.store.EnsureProject(ctx, org.ID, user.ID, "web-search-cursor", "Web Search Cursor")
+	require.NoError(t, err)
+	for _, content := range []string{"searchable first", "searchable second", "searchable third"} {
+		_, err := f.store.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: project.ID, Content: content, Tags: []string{"go", "page"},
+			Category: "fact", Source: "repo", CreatedBy: user.ID,
+		})
+		require.NoError(t, err)
+	}
+
+	rawToken := "opaque-search-cursor-browser-session-" + uuid.NewString()
+	now := time.Now()
+	_, err = f.store.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(7 * 24 * time.Hour), ExpiresAt: now.Add(30 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	type searchResponse struct {
+		Insights []struct {
+			ID string `json:"id"`
+		} `json:"insights"`
+		NextCursor string `json:"nextCursor"`
+	}
+	callSearch := func(body map[string]any) (int, searchResponse) {
+		t.Helper()
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			f.ts.URL+"/starlogz.v1.UIService/SearchInsights", strings.NewReader(string(payload)))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "starlogz_session", Value: rawToken})
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		var decoded searchResponse
+		if resp.StatusCode == http.StatusOK {
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&decoded))
+		}
+		return resp.StatusCode, decoded
+	}
+
+	status, first := callSearch(map[string]any{"project": "web-search-cursor", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1})
+	require.Equal(t, http.StatusOK, status)
+	require.Len(t, first.Insights, 1)
+	require.NotEmpty(t, first.NextCursor)
+
+	status, second := callSearch(map[string]any{"project": "web-search-cursor", "query": "searchable", "tags": []string{"page", "go", "go"}, "limit": 1, "cursor": first.NextCursor})
+	require.Equal(t, http.StatusOK, status)
+	require.Len(t, second.Insights, 1)
+	require.NotEqual(t, first.Insights[0].ID, second.Insights[0].ID)
+	require.NotEmpty(t, second.NextCursor)
+
+	status, third := callSearch(map[string]any{"project": "web-search-cursor", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1, "cursor": second.NextCursor})
+	require.Equal(t, http.StatusOK, status)
+	require.Len(t, third.Insights, 1)
+	require.NotEqual(t, first.Insights[0].ID, third.Insights[0].ID)
+	require.NotEqual(t, second.Insights[0].ID, third.Insights[0].ID)
+	require.Empty(t, third.NextCursor)
+
+	status, _ = callSearch(map[string]any{"project": "web-search-cursor", "query": "searchable", "tags": []string{"other"}, "limit": 1, "cursor": first.NextCursor})
+	require.Equal(t, http.StatusBadRequest, status)
+
+	status, _ = callSearch(map[string]any{"project": "web-search-cursor", "query": "", "limit": 1, "cursor": first.NextCursor})
+	require.Equal(t, http.StatusBadRequest, status)
+}
+
 func TestUIGetInsightAndRenderedHTML(t *testing.T) {
 	ctx := t.Context()
 	f := newToolFixture(t)
@@ -720,14 +794,16 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	require.ElementsMatch(t, []any{"all", "any"}, schemaProperty(t, insightSearch, "tag_mode")["enum"])
 	requireSchemaNumber(t, 0, schemaProperty(t, insightSearch, "limit")["minimum"])
 	requireSchemaNumber(t, 100, schemaProperty(t, insightSearch, "limit")["maximum"])
+	require.NotContains(t, schemaProperty(t, insightSearch, "cursor"), "minLength")
+	require.NotContains(t, schemaProperty(t, insightSearch, "cursor"), "maxLength")
 
 	insightList := inputSchemaMap(t, list.Tools, "insight_list")
 	require.ElementsMatch(t, []string{"project"}, schemaRequired(t, insightList))
 	requireSchemaNumber(t, 1, schemaProperty(t, insightList, "project")["minLength"])
 	requireSchemaNumber(t, 0, schemaProperty(t, insightList, "limit")["minimum"])
 	requireSchemaNumber(t, 200, schemaProperty(t, insightList, "limit")["maximum"])
-	requireSchemaNumber(t, 1, schemaProperty(t, insightList, "cursor")["minLength"])
-	requireSchemaNumber(t, 1024, schemaProperty(t, insightList, "cursor")["maxLength"])
+	require.NotContains(t, schemaProperty(t, insightList, "cursor"), "minLength")
+	require.NotContains(t, schemaProperty(t, insightList, "cursor"), "maxLength")
 
 	insightDelete := inputSchemaMap(t, list.Tools, "insight_delete")
 	require.ElementsMatch(t, []string{"id"}, schemaRequired(t, insightDelete))
@@ -1358,11 +1434,100 @@ func TestInsightList_CursorPagination(t *testing.T) {
 	require.Len(t, seen, 3)
 	require.Len(t, map[string]struct{}{seen[0]: {}, seen[1]: {}, seen[2]: {}}, 3)
 
+	empty := callTool(t, ctx, sess, "insight_list", map[string]any{
+		"project": "cursor-list", "tag": "page", "limit": 1, "cursor": "",
+	})
+	require.False(t, empty.IsError, "empty cursor should request the first page: %s", resultText(t, empty))
+	var emptyPage listResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, empty)), &emptyPage))
+	require.Equal(t, seen[0], emptyPage.Insights[0].ID)
+
+	oversized := callTool(t, ctx, sess, "insight_list", map[string]any{
+		"project": "cursor-list", "tag": "page", "limit": 1, "cursor": strings.Repeat("a", 1025),
+	})
+	require.True(t, oversized.IsError)
+	require.Contains(t, resultText(t, oversized), "invalid_cursor")
+
 	invalid := callTool(t, ctx, sess, "insight_list", map[string]any{
 		"project": "cursor-list",
 		"tag":     "different",
 		"limit":   1,
 		"cursor":  "not-a-cursor",
+	})
+	require.True(t, invalid.IsError)
+	require.Contains(t, resultText(t, invalid), "invalid_cursor")
+}
+
+func TestInsightSearch_CursorPagination(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "cursor-search-user")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	for _, content := range []string{"searchable first", "searchable second", "searchable third"} {
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("cursor-search", content, map[string]any{"tags": []string{"Page", "Go"}}))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	}
+
+	type searchResponse struct {
+		Insights []struct {
+			ID string `json:"id"`
+		} `json:"insights"`
+		NextCursor string `json:"next_cursor"`
+	}
+
+	var seen []string
+	cursor := ""
+	for {
+		args := map[string]any{
+			"project": "cursor-search", "query": "searchable", "query_mode": "all",
+			"tags": []string{"page", "go"}, "tag_mode": "all", "limit": 1,
+		}
+		if cursor != "" {
+			args["cursor"] = cursor
+			args["tags"] = []string{"GO", "PAGE", "GO"}
+		}
+		res := callTool(t, ctx, sess, "insight_search", args)
+		require.False(t, res.IsError, "insight_search failed: %s", resultText(t, res))
+		var page searchResponse
+		require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &page))
+		require.Len(t, page.Insights, 1)
+		seen = append(seen, page.Insights[0].ID)
+		cursor = page.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	require.Len(t, seen, 3)
+	require.Len(t, map[string]struct{}{seen[0]: {}, seen[1]: {}, seen[2]: {}}, 3)
+
+	empty := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1, "cursor": "",
+	})
+	require.False(t, empty.IsError, "empty cursor should request the first page: %s", resultText(t, empty))
+	var emptyPage searchResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, empty)), &emptyPage))
+	require.Equal(t, seen[0], emptyPage.Insights[0].ID)
+
+	oversized := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1,
+		"cursor": strings.Repeat("a", 1025),
+	})
+	require.True(t, oversized.IsError)
+	require.Contains(t, resultText(t, oversized), "invalid_cursor")
+
+	first := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1,
+	})
+	require.False(t, first.IsError)
+	var firstPage searchResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, first)), &firstPage))
+	require.NotEmpty(t, firstPage.NextCursor)
+
+	invalid := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "different", "tags": []string{"go", "page"}, "limit": 1,
+		"cursor": firstPage.NextCursor,
 	})
 	require.True(t, invalid.IsError)
 	require.Contains(t, resultText(t, invalid), "invalid_cursor")
