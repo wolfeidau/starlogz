@@ -1169,6 +1169,7 @@ func TestInsightWriteAndUpdate_ReturnLinkWarnings(t *testing.T) {
 	}
 	var written struct {
 		ID       string    `json:"id"`
+		Revision int       `json:"revision"`
 		Warnings []warning `json:"warnings"`
 	}
 	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs(
@@ -1182,6 +1183,20 @@ func TestInsightWriteAndUpdate_ReturnLinkWarnings(t *testing.T) {
 		{Code: "unresolved_insight_link", TargetKey: "missing"},
 		{Code: "self_insight_link", TargetKey: "source"},
 	}, written.Warnings)
+
+	res = callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+		"demo",
+		"[[insight:missing]] [[insight:source]]",
+		map[string]any{"key": "source", "expected_revision": written.Revision},
+	))
+	require.False(t, res.IsError, "no-op insight_write failed: %s", resultText(t, res))
+	var noOp struct {
+		Revision int       `json:"revision"`
+		Warnings []warning `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &noOp))
+	require.Equal(t, written.Revision, noOp.Revision)
+	require.Equal(t, written.Warnings, noOp.Warnings)
 
 	upd := callTool(t, ctx, sess, "insight_update", map[string]any{
 		"id":      written.ID,

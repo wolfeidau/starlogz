@@ -70,10 +70,12 @@ key and the source project. Therefore:
 A source linking to its own key produces `self_insight_link` and no stored
 relationship.
 
-Content mutations synchronize relationships in the same transaction as the
+Content-bearing writes synchronize relationships in the same transaction as the
 insight write. This includes insert, keyed upsert, content update, and import.
-Tag-only updates do not touch relationships. A synchronization failure rolls
-back the content mutation.
+A keyed upsert or content-supplied update also repairs missing relationship rows
+when the persisted insight fields are a semantic no-op; this repair does not
+change the insight timestamp or revision. Tag-only updates do not touch
+relationships. A synchronization failure rolls back the write.
 
 Ordering is deterministic:
 
@@ -84,10 +86,11 @@ Ordering is deterministic:
 Counts are calculated before limits. A truncated response always returns the
 first entries in these orders.
 
-Migration 17 did not backfill existing content. A later content update or keyed
-upsert activates extraction. Legacy content may therefore render a navigable
-link before its structured outgoing relationship or backlink exists. The
-dashboard must not fabricate the missing relationship metadata.
+Migration 17 did not backfill existing content. A later keyed upsert or
+content-supplied update activates extraction even when the persisted content is
+identical. Until then, legacy content may render a navigable link before its
+structured outgoing relationship or backlink exists. The dashboard must not
+fabricate the missing relationship metadata.
 
 ## Write warnings
 
@@ -115,7 +118,9 @@ Supported codes are:
 | `self_insight_link` | The source points to its own key; no edge is stored. |
 
 Warnings do not reject otherwise valid content. Repeated occurrences are
-deduplicated by warning code and target key. Tag-only updates omit link warnings.
+deduplicated by warning code and target key. A no-op keyed upsert regenerates
+warnings while repairing relationships. Tag-only and semantic no-op
+`insight_update` responses omit link warnings.
 
 ## `insight_get`
 

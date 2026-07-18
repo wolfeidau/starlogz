@@ -777,7 +777,11 @@ func TestInsightLinks_WarningsAndSynchronization(t *testing.T) {
 		CreatedBy: u.ID,
 	})
 	require.NoError(t, err)
-	require.Empty(t, source.LinkWarnings, "semantic no-op must not resynchronize links")
+	require.Equal(t, []store.InsightLinkWarning{
+		{Code: store.InsightLinkWarningUnresolved, TargetKey: "missing"},
+		{Code: store.InsightLinkWarningSelf, TargetKey: "source"},
+		{Code: store.InsightLinkWarningUnresolved, TargetKey: "target-a"},
+	}, source.LinkWarnings, "semantic no-op must refresh derived link warnings")
 
 	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Key: "target-a", Content: "recreated", CreatedBy: u.ID,
@@ -801,6 +805,86 @@ func TestInsightLinks_WarningsAndSynchronization(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, map[string]int{"INSERT": 2, "DELETE": 2}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
+}
+
+func TestInsightLinks_NoOpRepairsLegacyProjection(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 35)
+
+	_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "target", Content: "target", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	source, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "source", Content: "[[insight:target]] [[insight:missing]]", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `DELETE FROM insight_links WHERE source_insight_id = $1`, source.ID)
+	require.NoError(t, err)
+
+	expectedRevision := source.Revision
+	repaired, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: source.Key, Content: source.Content, CreatedBy: u.ID,
+		ExpectedRevision: &expectedRevision,
+	})
+	require.NoError(t, err)
+	require.Equal(t, source.Revision, repaired.Revision)
+	require.True(t, source.UpdatedAt.Equal(repaired.UpdatedAt))
+	require.False(t, repaired.ContentChanged)
+	require.Equal(t, []store.InsightLinkWarning{
+		{Code: store.InsightLinkWarningUnresolved, TargetKey: "missing"},
+	}, repaired.LinkWarnings)
+	require.Len(t, readInsightRevisions(t, pool, source.ID), 1)
+
+	detail, err := st.GetInsight(ctx, store.GetInsightParams{
+		ProjectID: p.ID, InsightID: source.ID, RelationLimit: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, detail.LinkCount)
+	require.Equal(t, "missing", detail.Links[0].TargetKey)
+	require.False(t, detail.Links[0].Resolved)
+	require.Equal(t, "target", detail.Links[1].TargetKey)
+	require.True(t, detail.Links[1].Resolved)
+
+	_, err = pool.Exec(ctx, `DELETE FROM insight_links WHERE source_insight_id = $1`, source.ID)
+	require.NoError(t, err)
+	repaired, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: source.ID, Content: source.Content,
+		ChangedBy: u.ID, ExpectedRevision: &expectedRevision,
+	})
+	require.NoError(t, err)
+	require.Equal(t, source.Revision, repaired.Revision)
+	require.True(t, source.UpdatedAt.Equal(repaired.UpdatedAt))
+	require.False(t, repaired.ContentChanged)
+	require.Len(t, readInsightRevisions(t, pool, source.ID), 1)
+
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{
+		ProjectID: p.ID, InsightID: source.ID, RelationLimit: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, detail.LinkCount)
+
+	_, err = pool.Exec(ctx, `DELETE FROM insight_links WHERE source_insight_id = $1`, source.ID)
+	require.NoError(t, err)
+	repaired, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: source.ID, Content: source.Content, Tags: []string{"updated"},
+		ChangedBy: u.ID, ExpectedRevision: &expectedRevision,
+	})
+	require.NoError(t, err)
+	require.Equal(t, source.Revision+1, repaired.Revision)
+	require.False(t, repaired.ContentChanged)
+	require.Len(t, readInsightRevisions(t, pool, source.ID), 2)
+
+	detail, err = st.GetInsight(ctx, store.GetInsightParams{
+		ProjectID: p.ID, InsightID: source.ID, RelationLimit: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, detail.LinkCount)
 }
 
 func TestInsightLinks_KeylessSourceAndProjectIsolation(t *testing.T) {

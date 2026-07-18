@@ -51,7 +51,9 @@ write snapshots atomically, suppress semantic no-ops, expose revisions, and
 accept optional concurrency preconditions. Slices 3 and 4 form one releasable
 unit, but production release remains gated on the migration measurements below.
 History APIs and restore remain proposed. The implemented pagination behavior is
-authoritative in [Cursor pagination](pagination.md).
+authoritative in [Cursor pagination](pagination.md); implemented revision and
+concurrency behavior is authoritative in
+[Insight revisions and optimistic concurrency](insight_revisions.md).
 
 ## Goals
 
@@ -304,12 +306,14 @@ the parent row and all history.
 - `delete`: the state after soft deletion, including `deleted_at`.
 - `restore`: a new live state copied from a selected earlier snapshot.
 
-A semantic no-op does not update `updated_at`, increment `revision`, create a
-history row, resynchronize unchanged links, or regenerate link warnings. No-op
-detection compares the normalized persisted fields affected by the operation.
+A semantic no-op does not update `updated_at`, increment `revision`, or create a
+history row. No-op detection compares the normalized persisted fields affected
+by the operation. A content-bearing no-op still repairs the derived link
+projection: keyed writes regenerate warnings, while no-op `insight_update`
+responses omit them. Tag-only no-ops do not touch links.
 
-Revision insertion, current-row mutation, link synchronization when content
-changes, warnings, and commit all share one transaction. Failure of any part
+Revision insertion, current-row mutation, link synchronization when content is
+supplied, warnings, and commit all share one transaction. Failure of any part
 rolls back the entire mutation.
 
 ### Existing audit log
@@ -329,7 +333,12 @@ independently auditable. If they must, retain a metadata-only operational audit
 path rather than duplicating insight content snapshots. Application roles
 should not be permitted to bypass the revision-writing transaction.
 
-## Optimistic concurrency contract
+## Optimistic concurrency design
+
+The implemented external behavior in this section is authoritative in
+[Insight revisions and optimistic concurrency](insight_revisions.md). This
+proposal retains the design rationale and its relationship to future history
+and restore operations.
 
 ### Revision exposure
 
@@ -392,7 +401,7 @@ protocol errors. Connect conflict mapping remains deferred until a Connect write
 RPC exists. Internally the error retains expected and current revision values
 without logging insight content.
 
-## History and restore contract
+## Proposed history and restore contract
 
 ### `insight_history`
 
@@ -524,6 +533,12 @@ between schema change and snapshot creation. Releasing that lock earlier is not
 a safe optimization; the staged fallback must establish dual writes before a
 bounded backfill.
 
+An older invocation already waiting on that lock can resume after migration
+commit and bypass revision writes. The single-user development deployment
+accepts this operational risk only when the operator blocks new requests and
+drains the sole writer before migration. A production or multi-writer rollout
+must use equivalent traffic quiescence or the staged dual-write fallback.
+
 ## Verification
 
 ### Cursor correctness
@@ -553,7 +568,7 @@ Pending pre-production validation:
 
 - create, keyed update, patch update, delete, and restore revision sequences;
 - baseline coverage for live and soft-deleted pre-feature rows;
-- semantic no-op suppression;
+- semantic no-op suppression with derived-link repair for content-bearing calls;
 - stale expected-revision conflicts with no partial mutation;
 - concurrent updates where exactly one caller with the same expected revision
   succeeds;

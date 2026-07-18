@@ -1241,7 +1241,7 @@ func updateInsightByKeyTx(ctx context.Context, db dbtx, current *store.Insight, 
 	}
 	contentChanged := current.Content != p.Content
 	if !contentChanged && slices.Equal(current.Tags, tags) && current.Category == category && current.Source == source {
-		return current, nil
+		return syncInsightContentTx(ctx, db, current)
 	}
 	row := db.QueryRow(ctx, `
 		UPDATE insights
@@ -1255,12 +1255,10 @@ func updateInsightByKeyTx(ctx context.Context, db dbtx, current *store.Insight, 
 	if err != nil {
 		return nil, err
 	}
-	if contentChanged {
-		insight.ContentChanged = true
-		insight, err = syncInsightContentTx(ctx, db, insight)
-		if err != nil {
-			return nil, err
-		}
+	insight.ContentChanged = contentChanged
+	insight, err = syncInsightContentTx(ctx, db, insight)
+	if err != nil {
+		return nil, err
 	}
 	if err := insertInsightRevisionTx(ctx, db, insight.ID, "update", p.CreatedBy); err != nil {
 		return nil, err
@@ -1664,6 +1662,12 @@ func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) 
 	}
 	contentChanged := content != current.Content
 	if !contentChanged && slices.Equal(tags, current.Tags) {
+		if p.Content != "" {
+			current, err = syncInsightContentTx(ctx, tx, current)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit no-op update tx: %w", err)
 		}
@@ -1680,8 +1684,8 @@ func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) 
 	if err != nil {
 		return nil, err
 	}
-	if contentChanged {
-		insight.ContentChanged = true
+	if p.Content != "" {
+		insight.ContentChanged = contentChanged
 		insight, err = syncInsightContentTx(ctx, tx, insight)
 		if err != nil {
 			return nil, err
