@@ -50,6 +50,11 @@ func TestTrackToolEmitsSuccessAndFailure(t *testing.T) {
 	})
 	_, _, err = get(t.Context(), &mcp.CallToolRequest{}, struct{}{})
 	require.NoError(t, err)
+	restore := trackTool(ms, wideevent.ToolInsightRestore, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{}, nil, nil
+	})
+	_, _, err = restore(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	require.NoError(t, err)
 
 	toolFailure := trackTool(ms, wideevent.ToolInsightUpdate, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{IsError: true}, nil, nil
@@ -63,7 +68,7 @@ func TestTrackToolEmitsSuccessAndFailure(t *testing.T) {
 	_, _, err = failure(t.Context(), &mcp.CallToolRequest{}, struct{}{})
 	require.EqualError(t, err, "failed")
 
-	require.Len(t, publisher.events, 6)
+	require.Len(t, publisher.events, 7)
 	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[0].Outcome)
 	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolWhoami}, publisher.events[0].Attributes)
 	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[1].Outcome)
@@ -76,12 +81,13 @@ func TestTrackToolEmitsSuccessAndFailure(t *testing.T) {
 		wideevent.AttributeResultCountBucket: wideevent.ResultCount51To100,
 	}, publisher.events[2].Attributes)
 	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightGet}, publisher.events[3].Attributes)
-	require.Equal(t, wideevent.OutcomeFailure, publisher.events[4].Outcome)
-	require.Equal(t, wideevent.ReasonFailed, publisher.events[4].Reason)
-	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightUpdate}, publisher.events[4].Attributes)
+	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightRestore}, publisher.events[4].Attributes)
 	require.Equal(t, wideevent.OutcomeFailure, publisher.events[5].Outcome)
 	require.Equal(t, wideevent.ReasonFailed, publisher.events[5].Reason)
-	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightSearch}, publisher.events[5].Attributes)
+	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightUpdate}, publisher.events[5].Attributes)
+	require.Equal(t, wideevent.OutcomeFailure, publisher.events[6].Outcome)
+	require.Equal(t, wideevent.ReasonFailed, publisher.events[6].Reason)
+	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightSearch}, publisher.events[6].Attributes)
 }
 
 func TestResultCountBucket(t *testing.T) {

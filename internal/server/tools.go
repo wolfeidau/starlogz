@@ -62,6 +62,11 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 		InputSchema: insightHistorySchema,
 	}, trackTool(ms, wideevent.ToolInsightHistory, ms.insightHistory))
 	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "insight_restore",
+		Description: "Restores an insight from an immutable revision as a new live revision. Requires optimistic concurrency.",
+		InputSchema: insightRestoreSchema,
+	}, trackTool(ms, wideevent.ToolInsightRestore, ms.insightRestore))
+	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
 		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance and supports opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
@@ -182,6 +187,13 @@ type insightHistoryInput struct {
 	Cursor  string `json:"cursor"`
 }
 
+type insightRestoreInput struct {
+	Project          string `json:"project"`
+	ID               string `json:"id"`
+	TargetRevision   int    `json:"target_revision"`
+	ExpectedRevision int    `json:"expected_revision"`
+}
+
 type insightListInput struct {
 	Project string `json:"project"`
 	Tag     string `json:"tag"`
@@ -217,8 +229,10 @@ func inputSchemaFor[T any]() *jsonschema.Schema {
 }
 
 const (
-	projectSchemaProperty = "project"
-	uuidSchemaFormat      = "uuid"
+	projectSchemaProperty  = "project"
+	revisionResultProperty = "revision"
+	toolErrorCodeProperty  = "code"
+	uuidSchemaFormat       = "uuid"
 )
 
 var (
@@ -265,6 +279,19 @@ var (
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
 		s.Required = []string{projectSchemaProperty, "id"}
+		return s
+	}()
+
+	insightRestoreSchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightRestoreInput]()
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].Format = uuidSchemaFormat
+		s.Properties["target_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["target_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
+		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
+		s.Required = []string{projectSchemaProperty, "id", "target_revision", "expected_revision"}
 		return s
 	}()
 
@@ -479,10 +506,10 @@ func (ms *mcpServer) insightWrite(ctx context.Context, req *mcp.CallToolRequest,
 	}
 	warnings := toInsightLinkWarningResponses(insight.LinkWarnings)
 	return jsonResult(map[string]any{
-		"id":       insight.ID.String(),
-		"updated":  !insight.CreatedAt.Equal(insight.UpdatedAt),
-		"revision": insight.Revision,
-		"warnings": warnings,
+		"id":                   insight.ID.String(),
+		"updated":              !insight.CreatedAt.Equal(insight.UpdatedAt),
+		revisionResultProperty: insight.Revision,
+		"warnings":             warnings,
 	})
 }
 
@@ -606,6 +633,58 @@ func (ms *mcpServer) insightHistory(ctx context.Context, req *mcp.CallToolReques
 	}
 	result, _, err := jsonResult(response)
 	return result, toolEventMetadata{resultCount: len(page.Revisions)}, err
+}
+
+func (ms *mcpServer) insightRestore(ctx context.Context, req *mcp.CallToolRequest, in insightRestoreInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_restore call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+	if err := requireScope(req, "insights:write"); err != nil {
+		return nil, nil, err
+	}
+	if ms.store == nil {
+		return nil, nil, fmt.Errorf("database not configured")
+	}
+	user, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	insightID, err := uuid.Parse(in.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
+	}
+	project, err := ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("project %q not found", in.Project)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get project: %w", err)
+	}
+	insight, err := ms.store.RestoreInsight(ctx, store.RestoreInsightParams{
+		ProjectID: project.ID, InsightID: insightID, TargetRevision: in.TargetRevision,
+		ExpectedRevision: in.ExpectedRevision, ChangedBy: user.ID,
+	})
+	if result, ok, resultErr := revisionConflictResult(err); ok {
+		return result, nil, resultErr
+	}
+	if errors.Is(err, store.ErrInsightKeyConflict) {
+		result, resultErr := codedToolErrorResult(map[string]any{toolErrorCodeProperty: "key_conflict"})
+		return result, nil, resultErr
+	}
+	if errors.Is(err, store.ErrInsightRevisionNotFound) {
+		result, resultErr := codedToolErrorResult(map[string]any{
+			toolErrorCodeProperty: "revision_not_found", "target_revision": in.TargetRevision,
+		})
+		return result, nil, resultErr
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("insight not found")
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("restore insight: %w", err)
+	}
+	warnings := toInsightLinkWarningResponses(insight.LinkWarnings)
+	return jsonResult(map[string]any{
+		"id": insight.ID.String(), revisionResultProperty: insight.Revision, "warnings": warnings,
+	})
 }
 
 func toInsightHistoryResponse(page *store.InsightHistoryPage) insightHistoryResponse {
@@ -749,7 +828,7 @@ func (ms *mcpServer) insightDelete(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return nil, nil, fmt.Errorf("delete insight: %w", err)
 	}
-	return jsonResult(map[string]any{"revision": revision})
+	return jsonResult(map[string]any{revisionResultProperty: revision})
 }
 
 func (ms *mcpServer) projectList(ctx context.Context, req *mcp.CallToolRequest, _ projectListInput) (*mcp.CallToolResult, any, error) {
@@ -925,13 +1004,18 @@ func revisionConflictResult(err error) (*mcp.CallToolResult, bool, error) {
 	if !errors.As(err, &conflict) {
 		return nil, false, nil
 	}
-	result, _, marshalErr := jsonResult(map[string]any{
-		"code":              "revision_conflict",
-		"expected_revision": conflict.Expected,
-		"current_revision":  conflict.Current,
+	result, marshalErr := codedToolErrorResult(map[string]any{
+		toolErrorCodeProperty: "revision_conflict",
+		"expected_revision":   conflict.Expected,
+		"current_revision":    conflict.Current,
 	})
+	return result, true, marshalErr
+}
+
+func codedToolErrorResult(body map[string]any) (*mcp.CallToolResult, error) {
+	result, _, err := jsonResult(body)
 	if result != nil {
 		result.IsError = true
 	}
-	return result, true, marshalErr
+	return result, err
 }

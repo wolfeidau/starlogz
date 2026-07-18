@@ -1,7 +1,7 @@
 # Wide event contract
 
 > Status: Current contract
-> Last reviewed: 2026-07-16
+> Last reviewed: 2026-07-18
 > Authority: Behavioral contract; current code, tests, and Terraform provide implementation evidence.
 
 Starlogz emits one bounded completion event for each recognized core OAuth, UI session, and MCP tool flow. These events provide operational counts and failure rates without storing user content or authentication material.
@@ -75,7 +75,9 @@ HTTP events derive the reason from the response status. MCP tool errors use `fai
 Successful `insight_history`, `insight_search`, and `insight_list` calls also
 include `result_count_bucket`. The approved buckets are `0`, `1-10`, `11-50`,
 `51-100`, and `101-200`. Failed calls omit the bucket because there is no valid
-result set. Other tools cannot include it.
+result set. Other tools cannot include it. `insight_restore` emits only its
+bounded tool name; target and current revisions, content, keys, tags, warnings,
+and actors are not event attributes.
 
 Events never contain insight content, search queries, tags, emails, tokens, OAuth parameters, arbitrary error strings, request or response bodies, headers, query strings, authorization identities, or raw IP addresses.
 

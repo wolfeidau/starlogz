@@ -28,7 +28,7 @@ const (
 	uiStateCookie           = "starlogz_ui_state"
 	uiVerifierCookie        = "starlogz_ui_verifier"
 	uiScope                 = "insights:read insights:write"
-	oauthCodeValue          = "code"
+	authorizationCodeValue  = "code"
 	defaultUISessionIdleTTL = 7 * 24 * time.Hour
 	defaultUISessionTTL     = 30 * 24 * time.Hour
 	uiSessionTouchInterval  = time.Hour
@@ -72,7 +72,7 @@ func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
 		q := url.Values{
 			"client_id":             {uiClientID},
 			"redirect_uri":          {redirectURI},
-			"response_type":         {oauthCodeValue},
+			"response_type":         {authorizationCodeValue},
 			"scope":                 {uiScope},
 			"state":                 {state},
 			"code_challenge":        {challenge},
@@ -95,7 +95,7 @@ func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http
 			http.Error(w, q.Get("error"), http.StatusBadRequest)
 			return
 		}
-		code := q.Get(oauthCodeValue)
+		code := q.Get(authorizationCodeValue)
 		state := q.Get("state")
 		if code == "" || state == "" {
 			http.Error(w, "missing code or state", http.StatusBadRequest)
@@ -215,7 +215,7 @@ func (s *Server) ensureUIClient(ctx context.Context, redirectURI string, now tim
 		ClientName:              "starlogz UI",
 		RedirectURIs:            []string{redirectURI},
 		GrantTypes:              []string{"authorization_code"},
-		ResponseTypes:           []string{oauthCodeValue},
+		ResponseTypes:           []string{authorizationCodeValue},
 		TokenEndpointAuthMethod: "none",
 		Scope:                   uiScope,
 		IssuedAt:                now,

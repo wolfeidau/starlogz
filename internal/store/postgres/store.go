@@ -1837,10 +1837,105 @@ func (s *Store) DeleteInsight(ctx context.Context, p store.DeleteInsightParams) 
 	return revision, nil
 }
 
+func (s *Store) RestoreInsight(ctx context.Context, p store.RestoreInsightParams) (*store.Insight, error) {
+	s.logger(ctx).DebugContext(ctx, "restoring insight", slog.String("insight_id", p.InsightID.String()), slog.String("project_id", p.ProjectID.String()))
+	if p.TargetRevision <= 0 || p.TargetRevision > store.MaxInsightRevision {
+		return nil, store.ErrInvalidTargetRevision
+	}
+	if p.ExpectedRevision <= 0 || p.ExpectedRevision > store.MaxInsightRevision {
+		return nil, store.ErrInvalidExpectedRevision
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin restore insight tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, deleted, err := getInsightForRestoreTx(ctx, tx, p.ProjectID, p.InsightID)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkExpectedRevision(&p.ExpectedRevision, current.Revision); err != nil {
+		return nil, err
+	}
+
+	target := &store.InsightRevision{InsightID: current.ID, Revision: p.TargetRevision}
+	err = tx.QueryRow(ctx, `
+		SELECT COALESCE(key, ''), content, tags, category, source
+		FROM insight_revisions
+		WHERE insight_id = $1 AND revision = $2`, current.ID, p.TargetRevision).Scan(
+		&target.Key, &target.Content, &target.Tags, &target.Category, &target.Source,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrInsightRevisionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get restore target: %w", err)
+	}
+
+	if !deleted && current.Key == target.Key && current.Content == target.Content &&
+		slices.Equal(current.Tags, target.Tags) && current.Category == target.Category && current.Source == target.Source {
+		current, err = syncInsightContentTx(ctx, tx, current)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit no-op restore insight tx: %w", err)
+		}
+		return current, nil
+	}
+
+	insight, err := scanInsight(tx.QueryRow(ctx, `
+		UPDATE insights
+		SET key = NULLIF($3, ''), content = $4, tags = $5, category = $6, source = $7,
+		    deleted_at = NULL, updated_at = now(), revision = revision + 1
+		WHERE id = $1 AND revision = $2
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source,
+		          created_by, created_at, updated_at, revision`,
+		current.ID, current.Revision, target.Key, target.Content, target.Tags, target.Category, target.Source))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "insights_project_key_live" {
+			return nil, store.ErrInsightKeyConflict
+		}
+		return nil, err
+	}
+	insight.ContentChanged = insight.Content != current.Content
+	insight, err = syncInsightContentTx(ctx, tx, insight)
+	if err != nil {
+		return nil, err
+	}
+	if err := insertInsightRevisionTx(ctx, tx, insight.ID, "restore", p.ChangedBy); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit restore insight tx: %w", err)
+	}
+	return insight, nil
+}
+
+func getInsightForRestoreTx(ctx context.Context, db dbtx, projectID, insightID uuid.UUID) (*store.Insight, bool, error) {
+	var deleted bool
+	insight, err := scanInsightFields(db.QueryRow(ctx, `
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source,
+		       created_by, created_at, updated_at, revision, deleted_at IS NOT NULL
+		FROM insights
+		WHERE id = $1 AND project_id = $2
+		FOR UPDATE`, insightID, projectID), &deleted)
+	return insight, deleted, err
+}
+
 func scanInsight(row pgx.Row) (*store.Insight, error) {
+	return scanInsightFields(row)
+}
+
+func scanInsightFields(row pgx.Row, extra ...any) (*store.Insight, error) {
 	var idStr, projectIDStr, createdByStr string
 	f := &store.Insight{}
-	err := row.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision)
+	targets := []any{&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision}
+	targets = append(targets, extra...)
+	err := row.Scan(targets...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

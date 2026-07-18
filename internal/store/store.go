@@ -16,6 +16,12 @@ var ErrNotFound = errors.New("not found")
 // ErrInvalidExpectedRevision is returned for a precondition that cannot apply to the mutation.
 var ErrInvalidExpectedRevision = errors.New("invalid expected revision")
 
+var (
+	ErrInvalidTargetRevision   = errors.New("invalid target revision")
+	ErrInsightRevisionNotFound = errors.New("insight revision not found")
+	ErrInsightKeyConflict      = errors.New("insight key conflict")
+)
+
 const MaxInsightRevision = 1<<31 - 1
 
 type RevisionConflictError struct {
@@ -68,6 +74,7 @@ type Store interface {
 	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, p DeleteInsightParams) (int, error)
+	RestoreInsight(ctx context.Context, p RestoreInsightParams) (*Insight, error)
 	ListInsightHistory(ctx context.Context, p ListInsightHistoryParams) (*InsightHistoryPage, error)
 	SearchInsights(ctx context.Context, p SearchInsightsParams) (*InsightSearchPage, error)
 	ListInsights(ctx context.Context, p ListInsightsParams) (*InsightPage, error)
@@ -340,6 +347,14 @@ type DeleteInsightParams struct {
 	InsightID        uuid.UUID
 	ChangedBy        uuid.UUID
 	ExpectedRevision *int
+}
+
+type RestoreInsightParams struct {
+	ProjectID        uuid.UUID
+	InsightID        uuid.UUID
+	TargetRevision   int
+	ExpectedRevision int
+	ChangedBy        uuid.UUID
 }
 
 // TagCount holds a tag name and its usage frequency within a project.
