@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,7 +21,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
-	"github.com/wolfeidau/starlogz/internal/commands"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -2075,28 +2073,27 @@ func TestInsightSearch_CursorPagination(t *testing.T) {
 	require.Contains(t, resultText(t, invalid), "invalid_cursor")
 }
 
-func TestInsightList_CursorPaginationForImportedPreEpochTimestamps(t *testing.T) {
+func TestInsightList_CursorPaginationForPreEpochTimestamps(t *testing.T) {
 	ctx := t.Context()
 	f := newToolFixture(t)
 	user := f.makeUser(t, ctx, "pre-epoch-cursor-user")
 	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
 	require.NoError(t, err)
-
-	input := filepath.Join(t.TempDir(), "pre-epoch.json")
-	document := []byte(`{
-		"project": {
-			"slug": "pre-epoch-list",
-			"name": "Pre-epoch list",
-			"insights": [
-				{"content":"first","tags":["historic"],"category":"fact","source":"repo","created_at":"1960-01-02T03:04:05Z","updated_at":"1960-01-02T03:04:05Z"},
-				{"content":"second","tags":["historic"],"category":"fact","source":"repo","created_at":"1960-01-02T03:04:05Z","updated_at":"1960-01-02T03:04:05Z"},
-				{"content":"third","tags":["historic"],"category":"fact","source":"repo","created_at":"1960-01-02T03:04:05Z","updated_at":"1960-01-02T03:04:05Z"}
-			]
-		}
-	}`)
-	require.NoError(t, os.WriteFile(input, document, 0o600))
-	importCmd := &commands.ImportCmd{DatabaseURL: f.dsn, Input: input, OrgID: org.ID.String(), CreatedBy: user.ID.String()}
-	require.NoError(t, importCmd.Run(ctx, &commands.Globals{Logger: slog.New(slog.DiscardHandler)}))
+	project, err := f.store.EnsureProject(ctx, org.ID, user.ID, "pre-epoch-list", "Pre-epoch list")
+	require.NoError(t, err)
+	for _, content := range []string{"first", "second", "third"} {
+		_, err := f.store.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: project.ID,
+			Content:   content,
+			Tags:      []string{"historic"},
+			Category:  "fact",
+			Source:    "repo",
+			CreatedBy: user.ID,
+		})
+		require.NoError(t, err)
+	}
+	preEpoch := time.Date(1960, time.January, 2, 3, 4, 5, 0, time.UTC)
+	f.execSQL(ctx, t, `UPDATE insights SET created_at = $2, updated_at = $2 WHERE project_id = $1`, project.ID, preEpoch)
 
 	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read"))
 	var seen []string

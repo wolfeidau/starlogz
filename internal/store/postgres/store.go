@@ -1279,20 +1279,13 @@ func createInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (
 	if source == "" {
 		source = "user"
 	}
-	var createdAt, updatedAt *time.Time
-	if !p.CreatedAt.IsZero() {
-		createdAt = &p.CreatedAt
-	}
-	if !p.UpdatedAt.IsZero() {
-		updatedAt = &p.UpdatedAt
-	}
 	row := db.QueryRow(ctx, `
-		INSERT INTO insights (project_id, key, content, tags, category, source, created_by, created_at, updated_at)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, COALESCE($8, now()), COALESCE($9, now()))
+		INSERT INTO insights (project_id, key, content, tags, category, source, created_by)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7)
 		ON CONFLICT (project_id, key) WHERE key IS NOT NULL AND deleted_at IS NULL DO NOTHING
 		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source,
 		          created_by, created_at, updated_at, revision`,
-		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy, createdAt, updatedAt)
+		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy)
 	insight, err := scanInsight(row)
 	if err != nil {
 		return nil, err
@@ -1330,50 +1323,6 @@ func checkExpectedRevision(expected *int, current int) error {
 		return &store.RevisionConflictError{Expected: *expected, Current: current}
 	}
 	return nil
-}
-
-// ImportProjects ensures each project (by slug) exists under orgID and writes its insights,
-// attributing everything to createdBy, all within a single transaction so a failure partway
-// through — e.g. an invalid category on one insight — leaves no partial data behind.
-func (s *Store) ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []store.ImportProject) (projectCount, insightCount int, err error) {
-	s.logger(ctx).DebugContext(ctx, "importing projects", slog.String("org_id", orgID.String()), slog.String("created_by", createdBy.String()), slog.Int("project_count", len(projects)))
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	for _, ip := range projects {
-		project, err := ensureProjectTx(ctx, tx, orgID, createdBy, ip.Slug, ip.Name)
-		if err != nil {
-			return 0, 0, fmt.Errorf("ensure project %q: %w", ip.Slug, err)
-		}
-
-		for _, ii := range ip.Insights {
-			_, err := writeInsightTx(ctx, tx, store.WriteInsightParams{
-				ProjectID: project.ID,
-				Key:       ii.Key,
-				Content:   ii.Content,
-				Tags:      ii.Tags,
-				Category:  ii.Category,
-				Source:    ii.Source,
-				CreatedBy: createdBy,
-				CreatedAt: ii.CreatedAt,
-				UpdatedAt: ii.UpdatedAt,
-			})
-			if err != nil {
-				return 0, 0, fmt.Errorf("write insight in project %q: %w", ip.Slug, err)
-			}
-			insightCount++
-		}
-		projectCount++
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, fmt.Errorf("commit tx: %w", err)
-	}
-	return projectCount, insightCount, nil
 }
 
 func (s *Store) ListInsightHistory(ctx context.Context, p store.ListInsightHistoryParams) (*store.InsightHistoryPage, error) {

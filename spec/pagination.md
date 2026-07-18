@@ -42,7 +42,7 @@ the cursor is applied. Cursor values, decoded fields, filter hashes, and ranks
 are excluded from logs and wide events.
 
 The timestamp field must be present, but its value may be zero or negative.
-This preserves traversal for imported insights at the Unix epoch or earlier.
+This preserves traversal for insights written at the Unix epoch or earlier.
 
 ## Search contract
 
