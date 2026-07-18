@@ -520,10 +520,10 @@ into a project with existing revisions remain review questions.
 5. **Implemented:** Add MCP and Connect history reads with revision cursor
    continuation.
 6. **Implemented:** Add MCP restore.
-7. Add dashboard history review; add dashboard restore only after the web write
-   boundary is accepted.
-8. Add revision-aware export/import.
-9. Validate revision/audit parity, then drop `audit_insights` in a later
+7. **Implemented:** Add the read-only dashboard history panel.
+8. Add dashboard restore only after the web write boundary is accepted.
+9. Add revision-aware export/import.
+10. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
 
 Steps 3 and 4 are one deployment boundary and are implemented in the same

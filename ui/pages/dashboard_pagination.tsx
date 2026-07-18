@@ -57,9 +57,11 @@ export function useDashboardInsightPages({
 
 export function LoadMoreButton({
   loading,
+  label = "Load more",
   onLoadMore,
 }: {
   loading: boolean;
+  label?: string;
   onLoadMore: () => void;
 }) {
   return (
@@ -70,7 +72,7 @@ export function LoadMoreButton({
         disabled={loading}
         onClick={onLoadMore}
       >
-        {loading ? "Loading" : "Load more"}
+        {loading ? "Loading" : label}
       </button>
     </div>
   );

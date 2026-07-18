@@ -112,7 +112,7 @@ export function InsightHistory({
 
       {history.isLoading ? (
         <div className="history-state">Loading history</div>
-      ) : history.error ? (
+      ) : history.error && revisions.length === 0 ? (
         <div className="history-state history-error">
           History is unavailable. Try again later.
         </div>
@@ -147,9 +147,15 @@ export function InsightHistory({
                 </li>
               ))}
             </ol>
-            {history.hasNextPage && (
+            {history.isFetchNextPageError && (
+              <p className="history-pagination-error" role="alert">
+                Unable to load more history. Loaded revisions remain available.
+              </p>
+            )}
+            {(history.hasNextPage || history.isFetchNextPageError) && (
               <LoadMoreButton
                 loading={history.isFetchingNextPage}
+                label={history.isFetchNextPageError ? "Retry" : "Load more"}
                 onLoadMore={() => void history.fetchNextPage()}
               />
             )}

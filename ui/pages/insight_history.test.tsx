@@ -144,4 +144,71 @@ describe("insight history", () => {
     );
     expect(screen.queryByText(/private content/)).toBeNull();
   });
+
+  test("retains loaded revisions and retries a failed continuation", async () => {
+    const requests: string[] = [];
+    let continuationAttempts = 0;
+    renderHistory((router) => {
+      router.rpc(UIService.method.listInsightHistory, (request) => {
+        requests.push(request.cursor);
+        if (!request.cursor) {
+          return {
+            insightId: request.id,
+            currentRevision: 2,
+            revisions: [
+              {
+                revision: 2,
+                operation: "update",
+                category: "fact",
+                source: "repo",
+                renderedHtml: "<p>Loaded revision</p>",
+              },
+            ],
+            nextCursor: "history-next",
+          };
+        }
+        continuationAttempts++;
+        if (continuationAttempts === 1) {
+          throw new Error("private continuation failure");
+        }
+        return {
+          insightId: request.id,
+          currentRevision: 2,
+          revisions: [
+            {
+              revision: 1,
+              operation: "create",
+              category: "fact",
+              source: "repo",
+              renderedHtml: "<p>Older revision</p>",
+            },
+          ],
+        };
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Loaded revision")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Unable to load more history. Loaded revisions remain available.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(screen.getByText("Loaded revision")).toBeTruthy();
+    expect(screen.queryByText(/private continuation failure/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Revision 1/ })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Revision 1/ }));
+    expect(screen.getByText("Older revision")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(requests).toEqual(["", "history-next", "history-next"]);
+  });
 });
