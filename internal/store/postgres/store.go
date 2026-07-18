@@ -1376,6 +1376,95 @@ func (s *Store) ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, 
 	return projectCount, insightCount, nil
 }
 
+func (s *Store) ListInsightHistory(ctx context.Context, p store.ListInsightHistoryParams) (*store.InsightHistoryPage, error) {
+	s.logger(ctx).DebugContext(ctx, "listing insight history", slog.String("project_id", p.ProjectID.String()), slog.String("insight_id", p.InsightID.String()), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil))
+
+	if p.Limit <= 0 {
+		return &store.InsightHistoryPage{}, nil
+	}
+
+	query := `
+		SELECT insight.id::text, COALESCE(insight.key, ''), insight.revision, insight.deleted_at,
+		       history.revision, history.operation, COALESCE(history.key, ''), history.content,
+		       history.tags, history.category, history.source, history.deleted_at,
+		       COALESCE(history.changed_by::text, ''), history.changed_at
+		FROM insights insight
+		JOIN insight_revisions history ON history.insight_id = insight.id
+		WHERE insight.project_id = $1 AND insight.id = $2`
+	args := []any{p.ProjectID, p.InsightID}
+	if p.After != nil {
+		args = append(args, p.After.Revision)
+		query += fmt.Sprintf(" AND history.revision < $%d", len(args))
+	}
+	args = append(args, p.Limit+1)
+	query += fmt.Sprintf(" ORDER BY history.revision DESC LIMIT $%d", len(args))
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list insight history: %w", err)
+	}
+	defer rows.Close()
+
+	page := &store.InsightHistoryPage{}
+	for rows.Next() {
+		var insightID, changedBy string
+		var deletedAt *time.Time
+		revision := &store.InsightRevision{}
+		if err := rows.Scan(
+			&insightID, &page.Key, &page.CurrentRevision, &page.DeletedAt,
+			&revision.Revision, &revision.Operation, &revision.Key, &revision.Content,
+			&revision.Tags, &revision.Category, &revision.Source, &deletedAt,
+			&changedBy, &revision.ChangedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan insight history: %w", err)
+		}
+		if page.InsightID == uuid.Nil {
+			page.InsightID, err = uuid.Parse(insightID)
+			if err != nil {
+				return nil, fmt.Errorf("parse insight id: %w", err)
+			}
+		}
+		revision.InsightID = page.InsightID
+		revision.DeletedAt = deletedAt
+		if changedBy != "" {
+			actor, err := uuid.Parse(changedBy)
+			if err != nil {
+				return nil, fmt.Errorf("parse insight revision actor: %w", err)
+			}
+			revision.ChangedBy = &actor
+		}
+		page.Revisions = append(page.Revisions, revision)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate insight history: %w", err)
+	}
+	if len(page.Revisions) == 0 {
+		var insightID string
+		err := s.pool.QueryRow(ctx, `
+			SELECT id::text, COALESCE(key, ''), revision, deleted_at
+			FROM insights
+			WHERE project_id = $1 AND id = $2`, p.ProjectID, p.InsightID).Scan(
+			&insightID, &page.Key, &page.CurrentRevision, &page.DeletedAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get insight history target: %w", err)
+		}
+		page.InsightID, err = uuid.Parse(insightID)
+		if err != nil {
+			return nil, fmt.Errorf("parse insight id: %w", err)
+		}
+		return page, nil
+	}
+	if len(page.Revisions) > p.Limit {
+		page.Revisions = page.Revisions[:p.Limit]
+		page.NextCursor = &store.InsightHistoryCursor{Revision: page.Revisions[len(page.Revisions)-1].Revision}
+	}
+	return page, nil
+}
+
 // SearchInsights runs a full-text search over live insights in a project.
 func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams) (*store.InsightSearchPage, error) {
 	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", p.ProjectID.String()), slog.Int("query_length", len(p.Query)), slog.String("query_mode", string(p.QueryMode)), slog.Int("tag_count", len(p.Tags)), slog.String("tag_mode", string(p.TagMode)), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil))

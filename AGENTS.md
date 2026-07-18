@@ -24,7 +24,7 @@ internal/server/                  HTTP mux, MCP tool handlers, health endpoint
 internal/server/public/           generated dashboard assets embedded in the server binary
 internal/store/                   store interface + types (Insight, WriteInsightParams, …)
 internal/store/postgres/          PostgreSQL implementation + migration runner
-internal/store/postgres/migrations/  embedded SQL migration files (1–18)
+internal/store/postgres/migrations/  embedded SQL migration files (1–19)
 internal/telemetry/               OTel init (traces + metrics via OTLP gRPC)
 spec/                             current contracts and implemented decision records
 ui/                               React dashboard source and generated Connect clients
@@ -67,6 +67,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `project_list`     | `insights:read`  | Lists projects in the caller's personal org |
 | `insight_write`    | `insights:write` | Writes an insight; auto-creates project. Requires `category` and `source`. With `key`, upserts in-place — suited for single authoritative values (e.g. `preferred-language`). Without `key`, appends a new row — suited for logs, decisions, and observations. Accepts optional `expected_revision`; returns revision and link warnings. |
 | `insight_get`      | `insights:read`  | Gets one insight by ID or key with bounded outgoing links and backlinks. |
+| `insight_history`  | `insights:read`  | Lists immutable revisions for an insight by ID, including soft-deleted insights, with opaque cursor continuation. |
 | `insight_search`   | `insights:read`  | Full-text search over live insights by `rank DESC, updated_at DESC, id DESC`. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`; opaque cursor continuation is optional. |
 | `insight_list`     | `insights:read`  | Lists live insights by `updated_at DESC, id DESC`. Optional tag filter and opaque cursor continuation. |
 | `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Accepts optional `expected_revision`; content changes return link warnings and tag-only updates omit them. |

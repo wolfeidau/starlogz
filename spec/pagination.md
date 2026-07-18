@@ -6,7 +6,9 @@
 
 Starlogz supports cursor pagination for MCP `insight_list` and
 `insight_search`, and Connect `ListInsights` and `SearchInsights`. Other
-collection operations retain their existing bounds.
+current-state collection operations retain their existing bounds. Revision
+cursor behavior for MCP and Connect history reads is defined in
+[Insight revisions and optimistic concurrency](insight_revisions.md).
 
 ## List contract
 

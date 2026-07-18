@@ -56,6 +56,7 @@ func TestInsightListCursorRejectsInvalidValues(t *testing.T) {
 		require.NoError(t, err)
 		return base64.RawURLEncoding.EncodeToString(decoded)
 	}
+	revision := 1
 
 	tests := map[string]struct {
 		value     string
@@ -69,6 +70,7 @@ func TestInsightListCursorRejectsInvalidValues(t *testing.T) {
 		"missing time":    {value: mutate(func(p *cursorPayload) { p.UpdatedAtUS = nil }), projectID: projectID, tag: "go"},
 		"wrong operation": {value: mutate(func(p *cursorPayload) { p.Kind = "insight_search" }), projectID: projectID, tag: "go"},
 		"wrong version":   {value: mutate(func(p *cursorPayload) { p.Version++ }), projectID: projectID, tag: "go"},
+		"history field":   {value: mutate(func(p *cursorPayload) { p.Revision = &revision }), projectID: projectID, tag: "go"},
 		"trailing object": {value: base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}{}`)), projectID: projectID, tag: "go"},
 	}
 
@@ -83,6 +85,76 @@ func TestInsightListCursorRejectsInvalidValues(t *testing.T) {
 
 func TestInsightListCursorEmptyValueStartsFirstPage(t *testing.T) {
 	decoded, err := decodeInsightListCursor("", uuid.New(), strings.Repeat("x", 20))
+	require.NoError(t, err)
+	require.Nil(t, decoded)
+}
+
+func TestInsightHistoryCursorRoundTrip(t *testing.T) {
+	projectID := uuid.New()
+	insightID := uuid.New()
+	want := &store.InsightHistoryCursor{Revision: 7}
+	encoded, err := encodeInsightHistoryCursor(projectID, insightID, want)
+	require.NoError(t, err)
+	require.NotContains(t, encoded, "=")
+
+	decoded, err := decodeInsightHistoryCursor(encoded, projectID, insightID)
+	require.NoError(t, err)
+	require.Equal(t, want, decoded)
+
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), projectID.String())
+	require.NotContains(t, string(payload), insightID.String())
+}
+
+func TestInsightHistoryCursorRejectsInvalidValues(t *testing.T) {
+	projectID := uuid.New()
+	insightID := uuid.New()
+	encoded, err := encodeInsightHistoryCursor(projectID, insightID, &store.InsightHistoryCursor{Revision: 7})
+	require.NoError(t, err)
+	mutate := func(change func(*cursorPayload)) string {
+		t.Helper()
+		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+		require.NoError(t, err)
+		var payload cursorPayload
+		require.NoError(t, json.Unmarshal(decoded, &payload))
+		change(&payload)
+		decoded, err = json.Marshal(payload)
+		require.NoError(t, err)
+		return base64.RawURLEncoding.EncodeToString(decoded)
+	}
+	zero := 0
+	tooLarge := store.MaxInsightRevision + 1
+	timestamp := time.Now().UnixMicro()
+
+	tests := map[string]struct {
+		value     string
+		projectID uuid.UUID
+		insightID uuid.UUID
+	}{
+		"malformed":        {value: "not-base64", projectID: projectID, insightID: insightID},
+		"too long":         {value: strings.Repeat("a", maxCursorLength+1), projectID: projectID, insightID: insightID},
+		"changed project":  {value: encoded, projectID: uuid.New(), insightID: insightID},
+		"changed insight":  {value: encoded, projectID: projectID, insightID: uuid.New()},
+		"missing revision": {value: mutate(func(p *cursorPayload) { p.Revision = nil }), projectID: projectID, insightID: insightID},
+		"zero revision":    {value: mutate(func(p *cursorPayload) { p.Revision = &zero }), projectID: projectID, insightID: insightID},
+		"large revision":   {value: mutate(func(p *cursorPayload) { p.Revision = &tooLarge }), projectID: projectID, insightID: insightID},
+		"wrong operation":  {value: mutate(func(p *cursorPayload) { p.Kind = insightListCursorKind }), projectID: projectID, insightID: insightID},
+		"wrong version":    {value: mutate(func(p *cursorPayload) { p.Version++ }), projectID: projectID, insightID: insightID},
+		"timestamp field":  {value: mutate(func(p *cursorPayload) { p.UpdatedAtUS = &timestamp }), projectID: projectID, insightID: insightID},
+		"id field":         {value: mutate(func(p *cursorPayload) { p.ID = uuid.NewString() }), projectID: projectID, insightID: insightID},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeInsightHistoryCursor(test.value, test.projectID, test.insightID)
+			require.ErrorIs(t, err, errInvalidCursor)
+		})
+	}
+}
+
+func TestInsightHistoryCursorEmptyValueStartsFirstPage(t *testing.T) {
+	decoded, err := decodeInsightHistoryCursor("", uuid.New(), uuid.New())
 	require.NoError(t, err)
 	require.Nil(t, decoded)
 }

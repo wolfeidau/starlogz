@@ -238,6 +238,53 @@ func (s *uiService) GetInsight(ctx context.Context, req *connect.Request[starlog
 	}), nil
 }
 
+func (s *uiService) ListInsightHistory(ctx context.Context, req *connect.Request[starlogzv1.ListInsightHistoryRequest]) (*connect.Response[starlogzv1.ListInsightHistoryResponse], error) {
+	_, _, org, err := s.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	if err != nil {
+		return nil, err
+	}
+	insightID, err := uuid.Parse(req.Msg.GetId())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid insight ID: %w", err))
+	}
+	limit := int(req.Msg.GetLimit())
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	after, err := decodeInsightHistoryCursor(req.Msg.GetCursor(), project.ID, insightID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+	}
+	page, err := s.store.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: project.ID, InsightID: insightID, Limit: limit, After: after,
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("insight not found"))
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list insight history: %w", err))
+	}
+	revisions, err := toProtoInsightRevisions(page.Revisions, project.Slug)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	response := &starlogzv1.ListInsightHistoryResponse{
+		InsightId: page.InsightID.String(), Key: page.Key, CurrentRevision: int32Count(page.CurrentRevision),
+		Deleted: page.DeletedAt != nil, Revisions: revisions,
+	}
+	if page.NextCursor != nil {
+		response.NextCursor, err = encodeInsightHistoryCursor(project.ID, insightID, page.NextCursor)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
+		}
+	}
+	return connect.NewResponse(response), nil
+}
+
 func (s *uiService) ListTags(ctx context.Context, req *connect.Request[starlogzv1.ListTagsRequest]) (*connect.Response[starlogzv1.ListTagsResponse], error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
@@ -333,6 +380,28 @@ func toProtoInsight(in *store.Insight, project string) (*starlogzv1.Insight, err
 		Category: in.Category, Source: in.Source, CreatedAt: timestamppb.New(in.CreatedAt),
 		UpdatedAt: timestamppb.New(in.UpdatedAt), RenderedHtml: rendered, Revision: int32Count(in.Revision),
 	}, nil
+}
+
+func toProtoInsightRevisions(revisions []*store.InsightRevision, project string) ([]*starlogzv1.InsightRevision, error) {
+	out := make([]*starlogzv1.InsightRevision, len(revisions))
+	for i, revision := range revisions {
+		rendered, err := insightlinks.Render(revision.Content, project)
+		if err != nil {
+			return nil, fmt.Errorf("render insight %s revision %d: %w", revision.InsightID, revision.Revision, err)
+		}
+		out[i] = &starlogzv1.InsightRevision{
+			Revision: int32Count(revision.Revision), Operation: revision.Operation, Key: revision.Key,
+			Content: revision.Content, Tags: revision.Tags, Category: revision.Category,
+			Source: revision.Source, ChangedAt: timestamppb.New(revision.ChangedAt), RenderedHtml: rendered,
+		}
+		if revision.DeletedAt != nil {
+			out[i].DeletedAt = timestamppb.New(*revision.DeletedAt)
+		}
+		if revision.ChangedBy != nil {
+			out[i].ChangedBy = revision.ChangedBy.String()
+		}
+	}
+	return out, nil
 }
 
 func toProtoCountBuckets(buckets []store.CountBucket) []*starlogzv1.CountBucket {

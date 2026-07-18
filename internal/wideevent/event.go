@@ -39,6 +39,7 @@ const (
 	ToolProjectList            = "project_list"
 	ToolInsightWrite           = "insight_write"
 	ToolInsightGet             = "insight_get"
+	ToolInsightHistory         = "insight_history"
 	ToolInsightSearch          = "insight_search"
 	ToolInsightList            = "insight_list"
 	ToolInsightUpdate          = "insight_update"
@@ -242,7 +243,7 @@ var (
 	}
 	allowedTools = map[string]struct{}{
 		ToolWhoami: {}, ToolProjectEnsure: {}, ToolProjectList: {},
-		ToolInsightWrite: {}, ToolInsightGet: {}, ToolInsightSearch: {}, ToolInsightList: {},
+		ToolInsightWrite: {}, ToolInsightGet: {}, ToolInsightHistory: {}, ToolInsightSearch: {}, ToolInsightList: {},
 		ToolInsightUpdate: {}, ToolInsightDelete: {}, ToolInsightListTags: {},
 	}
 	allowedResultCountBuckets = map[string]struct{}{
@@ -328,7 +329,7 @@ func validateAttributes(name Name, outcome Outcome, attributes map[string]string
 		}
 	}
 	bucket, hasBucket := attributes[AttributeResultCountBucket]
-	countedTool := tool == ToolInsightSearch || tool == ToolInsightList
+	countedTool := tool == ToolInsightHistory || tool == ToolInsightSearch || tool == ToolInsightList
 	if outcome == OutcomeSuccess && countedTool && !hasBucket {
 		return fmt.Errorf("result_count_bucket is required for successful %q events", tool)
 	}

@@ -920,6 +920,282 @@ func (x *GetInsightResponse) GetBacklinksTruncated() bool {
 	return false
 }
 
+type ListInsightHistoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListInsightHistoryRequest) Reset() {
+	*x = ListInsightHistoryRequest{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListInsightHistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListInsightHistoryRequest) ProtoMessage() {}
+
+func (x *ListInsightHistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListInsightHistoryRequest.ProtoReflect.Descriptor instead.
+func (*ListInsightHistoryRequest) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListInsightHistoryRequest) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *ListInsightHistoryRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ListInsightHistoryRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListInsightHistoryRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type InsightRevision struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Revision      int32                  `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
+	Operation     string                 `protobuf:"bytes,2,opt,name=operation,proto3" json:"operation,omitempty"`
+	Key           string                 `protobuf:"bytes,3,opt,name=key,proto3" json:"key,omitempty"`
+	Content       string                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	Tags          []string               `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"`
+	Category      string                 `protobuf:"bytes,6,opt,name=category,proto3" json:"category,omitempty"`
+	Source        string                 `protobuf:"bytes,7,opt,name=source,proto3" json:"source,omitempty"`
+	DeletedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=deleted_at,json=deletedAt,proto3" json:"deleted_at,omitempty"`
+	ChangedBy     string                 `protobuf:"bytes,9,opt,name=changed_by,json=changedBy,proto3" json:"changed_by,omitempty"`
+	ChangedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=changed_at,json=changedAt,proto3" json:"changed_at,omitempty"`
+	RenderedHtml  string                 `protobuf:"bytes,11,opt,name=rendered_html,json=renderedHtml,proto3" json:"rendered_html,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InsightRevision) Reset() {
+	*x = InsightRevision{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InsightRevision) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InsightRevision) ProtoMessage() {}
+
+func (x *InsightRevision) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InsightRevision.ProtoReflect.Descriptor instead.
+func (*InsightRevision) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *InsightRevision) GetRevision() int32 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *InsightRevision) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+func (x *InsightRevision) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *InsightRevision) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *InsightRevision) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *InsightRevision) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *InsightRevision) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *InsightRevision) GetDeletedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DeletedAt
+	}
+	return nil
+}
+
+func (x *InsightRevision) GetChangedBy() string {
+	if x != nil {
+		return x.ChangedBy
+	}
+	return ""
+}
+
+func (x *InsightRevision) GetChangedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ChangedAt
+	}
+	return nil
+}
+
+func (x *InsightRevision) GetRenderedHtml() string {
+	if x != nil {
+		return x.RenderedHtml
+	}
+	return ""
+}
+
+type ListInsightHistoryResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	InsightId       string                 `protobuf:"bytes,1,opt,name=insight_id,json=insightId,proto3" json:"insight_id,omitempty"`
+	Key             string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	CurrentRevision int32                  `protobuf:"varint,3,opt,name=current_revision,json=currentRevision,proto3" json:"current_revision,omitempty"`
+	Deleted         bool                   `protobuf:"varint,4,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	Revisions       []*InsightRevision     `protobuf:"bytes,5,rep,name=revisions,proto3" json:"revisions,omitempty"`
+	NextCursor      string                 `protobuf:"bytes,6,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ListInsightHistoryResponse) Reset() {
+	*x = ListInsightHistoryResponse{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListInsightHistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListInsightHistoryResponse) ProtoMessage() {}
+
+func (x *ListInsightHistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListInsightHistoryResponse.ProtoReflect.Descriptor instead.
+func (*ListInsightHistoryResponse) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ListInsightHistoryResponse) GetInsightId() string {
+	if x != nil {
+		return x.InsightId
+	}
+	return ""
+}
+
+func (x *ListInsightHistoryResponse) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *ListInsightHistoryResponse) GetCurrentRevision() int32 {
+	if x != nil {
+		return x.CurrentRevision
+	}
+	return 0
+}
+
+func (x *ListInsightHistoryResponse) GetDeleted() bool {
+	if x != nil {
+		return x.Deleted
+	}
+	return false
+}
+
+func (x *ListInsightHistoryResponse) GetRevisions() []*InsightRevision {
+	if x != nil {
+		return x.Revisions
+	}
+	return nil
+}
+
+func (x *ListInsightHistoryResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
 type ListInsightsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
@@ -932,7 +1208,7 @@ type ListInsightsRequest struct {
 
 func (x *ListInsightsRequest) Reset() {
 	*x = ListInsightsRequest{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[13]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -944,7 +1220,7 @@ func (x *ListInsightsRequest) String() string {
 func (*ListInsightsRequest) ProtoMessage() {}
 
 func (x *ListInsightsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[13]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -957,7 +1233,7 @@ func (x *ListInsightsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInsightsRequest.ProtoReflect.Descriptor instead.
 func (*ListInsightsRequest) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{13}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListInsightsRequest) GetProject() string {
@@ -998,7 +1274,7 @@ type ListInsightsResponse struct {
 
 func (x *ListInsightsResponse) Reset() {
 	*x = ListInsightsResponse{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[14]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1286,7 @@ func (x *ListInsightsResponse) String() string {
 func (*ListInsightsResponse) ProtoMessage() {}
 
 func (x *ListInsightsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[14]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1299,7 @@ func (x *ListInsightsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInsightsResponse.ProtoReflect.Descriptor instead.
 func (*ListInsightsResponse) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{14}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListInsightsResponse) GetInsights() []*Insight {
@@ -1053,7 +1329,7 @@ type SearchInsightsRequest struct {
 
 func (x *SearchInsightsRequest) Reset() {
 	*x = SearchInsightsRequest{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[15]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1341,7 @@ func (x *SearchInsightsRequest) String() string {
 func (*SearchInsightsRequest) ProtoMessage() {}
 
 func (x *SearchInsightsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[15]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1354,7 @@ func (x *SearchInsightsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchInsightsRequest.ProtoReflect.Descriptor instead.
 func (*SearchInsightsRequest) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{15}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SearchInsightsRequest) GetProject() string {
@@ -1126,7 +1402,7 @@ type SearchInsightsResponse struct {
 
 func (x *SearchInsightsResponse) Reset() {
 	*x = SearchInsightsResponse{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[16]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1138,7 +1414,7 @@ func (x *SearchInsightsResponse) String() string {
 func (*SearchInsightsResponse) ProtoMessage() {}
 
 func (x *SearchInsightsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[16]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1151,7 +1427,7 @@ func (x *SearchInsightsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchInsightsResponse.ProtoReflect.Descriptor instead.
 func (*SearchInsightsResponse) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{16}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SearchInsightsResponse) GetInsights() []*Insight {
@@ -1178,7 +1454,7 @@ type ListTagsRequest struct {
 
 func (x *ListTagsRequest) Reset() {
 	*x = ListTagsRequest{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[17]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1190,7 +1466,7 @@ func (x *ListTagsRequest) String() string {
 func (*ListTagsRequest) ProtoMessage() {}
 
 func (x *ListTagsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[17]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1203,7 +1479,7 @@ func (x *ListTagsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTagsRequest.ProtoReflect.Descriptor instead.
 func (*ListTagsRequest) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{17}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListTagsRequest) GetProject() string {
@@ -1229,7 +1505,7 @@ type ListTagsResponse struct {
 
 func (x *ListTagsResponse) Reset() {
 	*x = ListTagsResponse{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[18]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1241,7 +1517,7 @@ func (x *ListTagsResponse) String() string {
 func (*ListTagsResponse) ProtoMessage() {}
 
 func (x *ListTagsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[18]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1254,7 +1530,7 @@ func (x *ListTagsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTagsResponse.ProtoReflect.Descriptor instead.
 func (*ListTagsResponse) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{18}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListTagsResponse) GetTags() []*CountBucket {
@@ -1343,7 +1619,37 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"link_count\x18\x04 \x01(\x05R\tlinkCount\x12%\n" +
 	"\x0ebacklink_count\x18\x05 \x01(\x05R\rbacklinkCount\x12'\n" +
 	"\x0flinks_truncated\x18\x06 \x01(\bR\x0elinksTruncated\x12/\n" +
-	"\x13backlinks_truncated\x18\a \x01(\bR\x12backlinksTruncated\"o\n" +
+	"\x13backlinks_truncated\x18\a \x01(\bR\x12backlinksTruncated\"s\n" +
+	"\x19ListInsightHistoryRequest\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"\xf9\x02\n" +
+	"\x0fInsightRevision\x12\x1a\n" +
+	"\brevision\x18\x01 \x01(\x05R\brevision\x12\x1c\n" +
+	"\toperation\x18\x02 \x01(\tR\toperation\x12\x10\n" +
+	"\x03key\x18\x03 \x01(\tR\x03key\x12\x18\n" +
+	"\acontent\x18\x04 \x01(\tR\acontent\x12\x12\n" +
+	"\x04tags\x18\x05 \x03(\tR\x04tags\x12\x1a\n" +
+	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x16\n" +
+	"\x06source\x18\a \x01(\tR\x06source\x129\n" +
+	"\n" +
+	"deleted_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tdeletedAt\x12\x1d\n" +
+	"\n" +
+	"changed_by\x18\t \x01(\tR\tchangedBy\x129\n" +
+	"\n" +
+	"changed_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tchangedAt\x12#\n" +
+	"\rrendered_html\x18\v \x01(\tR\frenderedHtml\"\xef\x01\n" +
+	"\x1aListInsightHistoryResponse\x12\x1d\n" +
+	"\n" +
+	"insight_id\x18\x01 \x01(\tR\tinsightId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x12)\n" +
+	"\x10current_revision\x18\x03 \x01(\x05R\x0fcurrentRevision\x12\x18\n" +
+	"\adeleted\x18\x04 \x01(\bR\adeleted\x12:\n" +
+	"\trevisions\x18\x05 \x03(\v2\x1c.starlogz.v1.InsightRevisionR\trevisions\x12\x1f\n" +
+	"\vnext_cursor\x18\x06 \x01(\tR\n" +
+	"nextCursor\"o\n" +
 	"\x13ListInsightsRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x10\n" +
 	"\x03tag\x18\x02 \x01(\tR\x03tag\x12\x14\n" +
@@ -1367,7 +1673,7 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"@\n" +
 	"\x10ListTagsResponse\x12,\n" +
-	"\x04tags\x18\x01 \x03(\v2\x18.starlogz.v1.CountBucketR\x04tags2\x84\x05\n" +
+	"\x04tags\x18\x01 \x03(\v2\x18.starlogz.v1.CountBucketR\x04tags2\xf0\x05\n" +
 	"\tUIService\x12R\n" +
 	"\n" +
 	"GetSession\x12\x1e.starlogz.v1.GetSessionRequest\x1a\x1f.starlogz.v1.GetSessionResponse\"\x03\x90\x02\x01\x12X\n" +
@@ -1376,7 +1682,8 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\fListInsights\x12 .starlogz.v1.ListInsightsRequest\x1a!.starlogz.v1.ListInsightsResponse\"\x03\x90\x02\x01\x12^\n" +
 	"\x0eSearchInsights\x12\".starlogz.v1.SearchInsightsRequest\x1a#.starlogz.v1.SearchInsightsResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\n" +
-	"GetInsight\x12\x1e.starlogz.v1.GetInsightRequest\x1a\x1f.starlogz.v1.GetInsightResponse\"\x03\x90\x02\x01\x12L\n" +
+	"GetInsight\x12\x1e.starlogz.v1.GetInsightRequest\x1a\x1f.starlogz.v1.GetInsightResponse\"\x03\x90\x02\x01\x12j\n" +
+	"\x12ListInsightHistory\x12&.starlogz.v1.ListInsightHistoryRequest\x1a'.starlogz.v1.ListInsightHistoryResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\bListTags\x12\x1c.starlogz.v1.ListTagsRequest\x1a\x1d.starlogz.v1.ListTagsResponse\"\x03\x90\x02\x01B\xae\x01\n" +
 	"\x0fcom.starlogz.v1B\aUiProtoP\x01ZEgithub.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1;starlogzv1\xa2\x02\x03SXX\xaa\x02\vStarlogz.V1\xca\x02\vStarlogz\\V1\xe2\x02\x17Starlogz\\V1\\GPBMetadata\xea\x02\fStarlogz::V1b\x06proto3"
 
@@ -1392,7 +1699,7 @@ func file_starlogz_v1_ui_proto_rawDescGZIP() []byte {
 	return file_starlogz_v1_ui_proto_rawDescData
 }
 
-var file_starlogz_v1_ui_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_starlogz_v1_ui_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_starlogz_v1_ui_proto_goTypes = []any{
 	(*GetSessionRequest)(nil),           // 0: starlogz.v1.GetSessionRequest
 	(*GetSessionResponse)(nil),          // 1: starlogz.v1.GetSessionResponse
@@ -1407,16 +1714,19 @@ var file_starlogz_v1_ui_proto_goTypes = []any{
 	(*GetInsightRequest)(nil),           // 10: starlogz.v1.GetInsightRequest
 	(*InsightReference)(nil),            // 11: starlogz.v1.InsightReference
 	(*GetInsightResponse)(nil),          // 12: starlogz.v1.GetInsightResponse
-	(*ListInsightsRequest)(nil),         // 13: starlogz.v1.ListInsightsRequest
-	(*ListInsightsResponse)(nil),        // 14: starlogz.v1.ListInsightsResponse
-	(*SearchInsightsRequest)(nil),       // 15: starlogz.v1.SearchInsightsRequest
-	(*SearchInsightsResponse)(nil),      // 16: starlogz.v1.SearchInsightsResponse
-	(*ListTagsRequest)(nil),             // 17: starlogz.v1.ListTagsRequest
-	(*ListTagsResponse)(nil),            // 18: starlogz.v1.ListTagsResponse
-	(*timestamppb.Timestamp)(nil),       // 19: google.protobuf.Timestamp
+	(*ListInsightHistoryRequest)(nil),   // 13: starlogz.v1.ListInsightHistoryRequest
+	(*InsightRevision)(nil),             // 14: starlogz.v1.InsightRevision
+	(*ListInsightHistoryResponse)(nil),  // 15: starlogz.v1.ListInsightHistoryResponse
+	(*ListInsightsRequest)(nil),         // 16: starlogz.v1.ListInsightsRequest
+	(*ListInsightsResponse)(nil),        // 17: starlogz.v1.ListInsightsResponse
+	(*SearchInsightsRequest)(nil),       // 18: starlogz.v1.SearchInsightsRequest
+	(*SearchInsightsResponse)(nil),      // 19: starlogz.v1.SearchInsightsResponse
+	(*ListTagsRequest)(nil),             // 20: starlogz.v1.ListTagsRequest
+	(*ListTagsResponse)(nil),            // 21: starlogz.v1.ListTagsResponse
+	(*timestamppb.Timestamp)(nil),       // 22: google.protobuf.Timestamp
 }
 var file_starlogz_v1_ui_proto_depIdxs = []int32{
-	19, // 0: starlogz.v1.Project.created_at:type_name -> google.protobuf.Timestamp
+	22, // 0: starlogz.v1.Project.created_at:type_name -> google.protobuf.Timestamp
 	3,  // 1: starlogz.v1.ListProjectsResponse.projects:type_name -> starlogz.v1.Project
 	3,  // 2: starlogz.v1.GetProjectDashboardResponse.project:type_name -> starlogz.v1.Project
 	6,  // 3: starlogz.v1.GetProjectDashboardResponse.category_counts:type_name -> starlogz.v1.CountBucket
@@ -1424,34 +1734,39 @@ var file_starlogz_v1_ui_proto_depIdxs = []int32{
 	6,  // 5: starlogz.v1.GetProjectDashboardResponse.top_tags:type_name -> starlogz.v1.CountBucket
 	7,  // 6: starlogz.v1.GetProjectDashboardResponse.recent_activity:type_name -> starlogz.v1.ActivityBucket
 	9,  // 7: starlogz.v1.GetProjectDashboardResponse.recent_insights:type_name -> starlogz.v1.Insight
-	19, // 8: starlogz.v1.Insight.created_at:type_name -> google.protobuf.Timestamp
-	19, // 9: starlogz.v1.Insight.updated_at:type_name -> google.protobuf.Timestamp
-	19, // 10: starlogz.v1.InsightReference.updated_at:type_name -> google.protobuf.Timestamp
+	22, // 8: starlogz.v1.Insight.created_at:type_name -> google.protobuf.Timestamp
+	22, // 9: starlogz.v1.Insight.updated_at:type_name -> google.protobuf.Timestamp
+	22, // 10: starlogz.v1.InsightReference.updated_at:type_name -> google.protobuf.Timestamp
 	9,  // 11: starlogz.v1.GetInsightResponse.insight:type_name -> starlogz.v1.Insight
 	11, // 12: starlogz.v1.GetInsightResponse.links:type_name -> starlogz.v1.InsightReference
 	11, // 13: starlogz.v1.GetInsightResponse.backlinks:type_name -> starlogz.v1.InsightReference
-	9,  // 14: starlogz.v1.ListInsightsResponse.insights:type_name -> starlogz.v1.Insight
-	9,  // 15: starlogz.v1.SearchInsightsResponse.insights:type_name -> starlogz.v1.Insight
-	6,  // 16: starlogz.v1.ListTagsResponse.tags:type_name -> starlogz.v1.CountBucket
-	0,  // 17: starlogz.v1.UIService.GetSession:input_type -> starlogz.v1.GetSessionRequest
-	2,  // 18: starlogz.v1.UIService.ListProjects:input_type -> starlogz.v1.ListProjectsRequest
-	5,  // 19: starlogz.v1.UIService.GetProjectDashboard:input_type -> starlogz.v1.GetProjectDashboardRequest
-	13, // 20: starlogz.v1.UIService.ListInsights:input_type -> starlogz.v1.ListInsightsRequest
-	15, // 21: starlogz.v1.UIService.SearchInsights:input_type -> starlogz.v1.SearchInsightsRequest
-	10, // 22: starlogz.v1.UIService.GetInsight:input_type -> starlogz.v1.GetInsightRequest
-	17, // 23: starlogz.v1.UIService.ListTags:input_type -> starlogz.v1.ListTagsRequest
-	1,  // 24: starlogz.v1.UIService.GetSession:output_type -> starlogz.v1.GetSessionResponse
-	4,  // 25: starlogz.v1.UIService.ListProjects:output_type -> starlogz.v1.ListProjectsResponse
-	8,  // 26: starlogz.v1.UIService.GetProjectDashboard:output_type -> starlogz.v1.GetProjectDashboardResponse
-	14, // 27: starlogz.v1.UIService.ListInsights:output_type -> starlogz.v1.ListInsightsResponse
-	16, // 28: starlogz.v1.UIService.SearchInsights:output_type -> starlogz.v1.SearchInsightsResponse
-	12, // 29: starlogz.v1.UIService.GetInsight:output_type -> starlogz.v1.GetInsightResponse
-	18, // 30: starlogz.v1.UIService.ListTags:output_type -> starlogz.v1.ListTagsResponse
-	24, // [24:31] is the sub-list for method output_type
-	17, // [17:24] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	22, // 14: starlogz.v1.InsightRevision.deleted_at:type_name -> google.protobuf.Timestamp
+	22, // 15: starlogz.v1.InsightRevision.changed_at:type_name -> google.protobuf.Timestamp
+	14, // 16: starlogz.v1.ListInsightHistoryResponse.revisions:type_name -> starlogz.v1.InsightRevision
+	9,  // 17: starlogz.v1.ListInsightsResponse.insights:type_name -> starlogz.v1.Insight
+	9,  // 18: starlogz.v1.SearchInsightsResponse.insights:type_name -> starlogz.v1.Insight
+	6,  // 19: starlogz.v1.ListTagsResponse.tags:type_name -> starlogz.v1.CountBucket
+	0,  // 20: starlogz.v1.UIService.GetSession:input_type -> starlogz.v1.GetSessionRequest
+	2,  // 21: starlogz.v1.UIService.ListProjects:input_type -> starlogz.v1.ListProjectsRequest
+	5,  // 22: starlogz.v1.UIService.GetProjectDashboard:input_type -> starlogz.v1.GetProjectDashboardRequest
+	16, // 23: starlogz.v1.UIService.ListInsights:input_type -> starlogz.v1.ListInsightsRequest
+	18, // 24: starlogz.v1.UIService.SearchInsights:input_type -> starlogz.v1.SearchInsightsRequest
+	10, // 25: starlogz.v1.UIService.GetInsight:input_type -> starlogz.v1.GetInsightRequest
+	13, // 26: starlogz.v1.UIService.ListInsightHistory:input_type -> starlogz.v1.ListInsightHistoryRequest
+	20, // 27: starlogz.v1.UIService.ListTags:input_type -> starlogz.v1.ListTagsRequest
+	1,  // 28: starlogz.v1.UIService.GetSession:output_type -> starlogz.v1.GetSessionResponse
+	4,  // 29: starlogz.v1.UIService.ListProjects:output_type -> starlogz.v1.ListProjectsResponse
+	8,  // 30: starlogz.v1.UIService.GetProjectDashboard:output_type -> starlogz.v1.GetProjectDashboardResponse
+	17, // 31: starlogz.v1.UIService.ListInsights:output_type -> starlogz.v1.ListInsightsResponse
+	19, // 32: starlogz.v1.UIService.SearchInsights:output_type -> starlogz.v1.SearchInsightsResponse
+	12, // 33: starlogz.v1.UIService.GetInsight:output_type -> starlogz.v1.GetInsightResponse
+	15, // 34: starlogz.v1.UIService.ListInsightHistory:output_type -> starlogz.v1.ListInsightHistoryResponse
+	21, // 35: starlogz.v1.UIService.ListTags:output_type -> starlogz.v1.ListTagsResponse
+	28, // [28:36] is the sub-list for method output_type
+	20, // [20:28] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_starlogz_v1_ui_proto_init() }
@@ -1469,7 +1784,7 @@ func file_starlogz_v1_ui_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_starlogz_v1_ui_proto_rawDesc), len(file_starlogz_v1_ui_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

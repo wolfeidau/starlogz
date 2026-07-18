@@ -6,7 +6,8 @@
 
 Starlogz records accepted insight state changes as immutable full snapshots and
 exposes a positive revision number for optional optimistic concurrency. History
-reads and restore operations are not part of this contract.
+reads are bounded and authorized; restore operations are not part of this
+contract.
 
 ## Revision model
 
@@ -60,6 +61,40 @@ Current insight representations include `revision`. MCP returns it from:
 message also includes revision for current read responses. Connect has no insight
 mutation RPC in this contract.
 
+## History reads
+
+MCP `insight_history` and Connect `ListInsightHistory` list immutable snapshots
+for one insight ID. History uses the insight ID rather than key because a key can
+be reused after soft deletion. Both operations require an authenticated caller,
+resolve the caller's organization and project first, and return the same
+not-found behavior for missing, hard-deleted, and inaccessible insights.
+
+Soft-deleted insights remain readable through history. Responses include the
+insight ID and key, current revision, current deletion state, bounded full
+snapshots, and an optional `next_cursor`. Each snapshot contains revision,
+operation, key, content, tags, category, source, deletion time, nullable actor
+UUID, and change time. Connect additionally returns server-sanitized rendered
+Markdown for each snapshot.
+
+Revisions are ordered by `revision DESC`. The default limit is 20 and the
+maximum is 100. Pagination fetches `limit + 1` and continues with revisions less
+than the last returned revision. The `(insight_id, revision)` primary key
+supports this scan without another index.
+
+History cursors are opaque, URL-safe, stateless, versioned, and bound to the
+operation, project, and insight ID. Empty cursors request the first page.
+Malformed, oversized, wrong-version, wrong-operation, or scope-mismatched
+cursors return `invalid_cursor`; Connect maps this to `INVALID_ARGUMENT`.
+
+Each page observes committed state at query time. A revision appended between
+pages has a higher number than the continuation boundary, so it does not repeat
+or displace older revisions on later pages. The response's current revision and
+deletion state may reflect a newer mutation than the first page.
+
+History content, actors, cursor values, and snapshot fields are excluded from
+logs and wide events. Successful MCP calls emit only the tool name and a bounded
+result-count bucket.
+
 ## Optional preconditions
 
 Existing MCP mutation tools accept optional `expected_revision`:
@@ -90,5 +125,5 @@ bounded JSON body:
 A missing keyed target has current revision `0`. Conflict responses and
 telemetry exclude insight content, keys, tags, and actor identifiers.
 
-The design rationale, migration plan, and proposed history and restore behavior
+The design rationale, migration plan, and proposed restore behavior
 remain in [Insight history, optimistic concurrency, and cursor pagination](insight_history_and_pagination.md).

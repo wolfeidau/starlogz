@@ -35,6 +35,11 @@ export const searchInsights = UIService.method.searchInsights;
 export const getInsight = UIService.method.getInsight;
 
 /**
+ * @generated from rpc starlogz.v1.UIService.ListInsightHistory
+ */
+export const listInsightHistory = UIService.method.listInsightHistory;
+
+/**
  * @generated from rpc starlogz.v1.UIService.ListTags
  */
 export const listTags = UIService.method.listTags;

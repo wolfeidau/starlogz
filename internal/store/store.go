@@ -68,6 +68,7 @@ type Store interface {
 	ImportProjects(ctx context.Context, orgID, createdBy uuid.UUID, projects []ImportProject) (projectCount, insightCount int, err error)
 	UpdateInsight(ctx context.Context, p UpdateInsightParams) (*Insight, error)
 	DeleteInsight(ctx context.Context, p DeleteInsightParams) (int, error)
+	ListInsightHistory(ctx context.Context, p ListInsightHistoryParams) (*InsightHistoryPage, error)
 	SearchInsights(ctx context.Context, p SearchInsightsParams) (*InsightSearchPage, error)
 	ListInsights(ctx context.Context, p ListInsightsParams) (*InsightPage, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
@@ -173,6 +174,40 @@ type InsightListCursor struct {
 type InsightPage struct {
 	Insights   []*Insight
 	NextCursor *InsightListCursor
+}
+
+type InsightRevision struct {
+	InsightID uuid.UUID
+	Revision  int
+	Operation string
+	Key       string
+	Content   string
+	Tags      []string
+	Category  string
+	Source    string
+	DeletedAt *time.Time
+	ChangedBy *uuid.UUID
+	ChangedAt time.Time
+}
+
+type ListInsightHistoryParams struct {
+	ProjectID uuid.UUID
+	InsightID uuid.UUID
+	Limit     int
+	After     *InsightHistoryCursor
+}
+
+type InsightHistoryCursor struct {
+	Revision int
+}
+
+type InsightHistoryPage struct {
+	InsightID       uuid.UUID
+	Key             string
+	CurrentRevision int
+	DeletedAt       *time.Time
+	Revisions       []*InsightRevision
+	NextCursor      *InsightHistoryCursor
 }
 
 type SearchInsightsParams struct {
