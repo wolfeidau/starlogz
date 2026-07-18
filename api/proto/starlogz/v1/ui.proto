@@ -93,6 +93,7 @@ message Insight {
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
   string rendered_html = 9;
+  int32 revision = 10;
 }
 
 message GetInsightRequest {

@@ -331,7 +331,7 @@ func toProtoInsight(in *store.Insight, project string) (*starlogzv1.Insight, err
 	return &starlogzv1.Insight{
 		Id: in.ID.String(), Key: in.Key, Content: in.Content, Tags: in.Tags,
 		Category: in.Category, Source: in.Source, CreatedAt: timestamppb.New(in.CreatedAt),
-		UpdatedAt: timestamppb.New(in.UpdatedAt), RenderedHtml: rendered,
+		UpdatedAt: timestamppb.New(in.UpdatedAt), RenderedHtml: rendered, Revision: int32Count(in.Revision),
 	}, nil
 }
 

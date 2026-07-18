@@ -1035,6 +1035,127 @@ func TestInsightWrite_UpsertsByKey(t *testing.T) {
 	require.True(t, result2.Updated, "second write with same key should be an update")
 }
 
+func TestInsightMutations_RevisionPreconditions(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	type mutationResult struct {
+		ID       string `json:"id"`
+		Revision int    `json:"revision"`
+	}
+	missing := callTool(t, ctx, sess, "insight_write", insightWriteArgs("missing", "content", map[string]any{
+		"key": "guarded", "expected_revision": 1,
+	}))
+	require.True(t, missing.IsError)
+	require.Contains(t, resultText(t, missing), `"current_revision":0`)
+	projects := callTool(t, ctx, sess, "project_list", map[string]any{})
+	require.False(t, projects.IsError)
+	var projectList struct {
+		Projects []any `json:"projects"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, projects)), &projectList))
+	require.Empty(t, projectList.Projects)
+
+	var created mutationResult
+	res := callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "v1", map[string]any{
+		"key": "guarded", "expected_revision": 0,
+	}))
+	require.False(t, res.IsError, "create failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &created))
+	require.Equal(t, 1, created.Revision)
+
+	res = callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "stale", map[string]any{
+		"key": "guarded", "expected_revision": 0,
+	}))
+	require.True(t, res.IsError)
+	var conflict struct {
+		Code     string `json:"code"`
+		Expected int    `json:"expected_revision"`
+		Current  int    `json:"current_revision"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &conflict))
+	require.Equal(t, "revision_conflict", conflict.Code)
+	require.Equal(t, 0, conflict.Expected)
+	require.Equal(t, 1, conflict.Current)
+
+	var updated mutationResult
+	res = callTool(t, ctx, sess, "insight_write", insightWriteArgs("demo", "v2", map[string]any{
+		"key": "guarded", "expected_revision": 1,
+	}))
+	require.False(t, res.IsError, "upsert failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &updated))
+	require.Equal(t, created.ID, updated.ID)
+	require.Equal(t, 2, updated.Revision)
+
+	get := callTool(t, ctx, sess, "insight_get", map[string]any{
+		"project": "demo", "id": created.ID,
+	})
+	require.False(t, get.IsError, "get failed: %s", resultText(t, get))
+	var detail struct {
+		Insight struct {
+			Revision int `json:"revision"`
+		} `json:"insight"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, get)), &detail))
+	require.Equal(t, 2, detail.Insight.Revision)
+
+	res = callTool(t, ctx, sess, "insight_update", map[string]any{
+		"id": created.ID, "content": "stale patch", "expected_revision": 1,
+	})
+	require.True(t, res.IsError)
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &conflict))
+	require.Equal(t, "revision_conflict", conflict.Code)
+	require.Equal(t, 2, conflict.Current)
+
+	res = callTool(t, ctx, sess, "insight_update", map[string]any{
+		"id": created.ID, "content": "revision searchable", "expected_revision": 2,
+	})
+	require.False(t, res.IsError, "update failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &updated))
+	require.Equal(t, 3, updated.Revision)
+	res = callTool(t, ctx, sess, "insight_update", map[string]any{
+		"id": created.ID, "content": "revision searchable", "expected_revision": 3,
+	})
+	require.False(t, res.IsError, "no-op update failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &updated))
+	require.Equal(t, 3, updated.Revision)
+	require.NotContains(t, resultText(t, res), `"warnings"`)
+	for _, query := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{tool: "insight_list", args: map[string]any{"project": "demo", "limit": 10}},
+		{tool: "insight_search", args: map[string]any{"project": "demo", "query": "searchable", "limit": 10}},
+	} {
+		read := callTool(t, ctx, sess, query.tool, query.args)
+		require.False(t, read.IsError, "%s failed: %s", query.tool, resultText(t, read))
+		var page struct {
+			Insights []struct {
+				Revision int `json:"revision"`
+			} `json:"insights"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(resultText(t, read)), &page))
+		require.Len(t, page.Insights, 1)
+		require.Equal(t, 3, page.Insights[0].Revision)
+	}
+
+	res = callTool(t, ctx, sess, "insight_delete", map[string]any{
+		"id": created.ID, "expected_revision": 2,
+	})
+	require.True(t, res.IsError)
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &conflict))
+	require.Equal(t, 3, conflict.Current)
+
+	res = callTool(t, ctx, sess, "insight_delete", map[string]any{
+		"id": created.ID, "expected_revision": 3,
+	})
+	require.False(t, res.IsError, "delete failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &updated))
+	require.Equal(t, 4, updated.Revision)
+}
+
 func TestInsightWriteAndUpdate_ReturnLinkWarnings(t *testing.T) {
 	ctx := t.Context()
 	f := newToolFixture(t)

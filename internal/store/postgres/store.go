@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -987,13 +988,13 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 	var row pgx.Row
 	if p.InsightID != uuid.Nil {
 		row = tx.QueryRow(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at, revision
 			FROM insights
 			WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`,
 			p.ProjectID, p.InsightID)
 	} else {
 		row = tx.QueryRow(ctx, `
-			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+			SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at, revision
 			FROM insights
 			WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL`,
 			p.ProjectID, p.Key)
@@ -1087,22 +1088,37 @@ func (s *Store) GetInsight(ctx context.Context, p store.GetInsightParams) (*stor
 }
 
 func writeInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
-	var insight *store.Insight
-	var err error
-	if p.Key != "" {
-		insight, err = updateInsightByKeyTx(ctx, db, p)
-		if err == nil {
-			return syncInsightContentTx(ctx, db, insight)
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
+	if p.ExpectedRevision != nil && (*p.ExpectedRevision < 0 || *p.ExpectedRevision > store.MaxInsightRevision) {
+		return nil, store.ErrInvalidExpectedRevision
 	}
-	insight, err = insertInsightTx(ctx, db, p)
+	if p.Key == "" {
+		if p.ExpectedRevision != nil && *p.ExpectedRevision > 0 {
+			return nil, store.ErrInvalidExpectedRevision
+		}
+		return createInsightTx(ctx, db, p)
+	}
+
+	current, err := getInsightByKeyForUpdateTx(ctx, db, p.ProjectID, p.Key)
+	if err == nil {
+		return updateInsightByKeyTx(ctx, db, current, p)
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	if p.ExpectedRevision != nil && *p.ExpectedRevision > 0 {
+		return nil, &store.RevisionConflictError{Expected: *p.ExpectedRevision, Current: 0}
+	}
+
+	insight, err := createInsightTx(ctx, db, p)
+	if err == nil || !errors.Is(err, store.ErrNotFound) {
+		return insight, err
+	}
+
+	current, err = getInsightByKeyForUpdateTx(ctx, db, p.ProjectID, p.Key)
 	if err != nil {
 		return nil, err
 	}
-	return syncInsightContentTx(ctx, db, insight)
+	return updateInsightByKeyTx(ctx, db, current, p)
 }
 
 func syncInsightContentTx(ctx context.Context, db dbtx, insight *store.Insight) (*store.Insight, error) {
@@ -1198,7 +1214,16 @@ func unresolvedInsightLinksTx(ctx context.Context, db dbtx, sourceID, projectID 
 	return targets, nil
 }
 
-func updateInsightByKeyTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
+func getInsightByKeyForUpdateTx(ctx context.Context, db dbtx, projectID uuid.UUID, key string) (*store.Insight, error) {
+	return scanInsight(db.QueryRow(ctx, `
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source,
+		       created_by, created_at, updated_at, revision
+		FROM insights
+		WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL
+		FOR UPDATE`, projectID, key))
+}
+
+func updateInsightByKeyTx(ctx context.Context, db dbtx, current *store.Insight, p store.WriteInsightParams) (*store.Insight, error) {
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
@@ -1211,16 +1236,39 @@ func updateInsightByKeyTx(ctx context.Context, db dbtx, p store.WriteInsightPara
 	if source == "" {
 		source = "user"
 	}
+	if err := checkExpectedRevision(p.ExpectedRevision, current.Revision); err != nil {
+		return nil, err
+	}
+	contentChanged := current.Content != p.Content
+	if !contentChanged && slices.Equal(current.Tags, tags) && current.Category == category && current.Source == source {
+		return current, nil
+	}
 	row := db.QueryRow(ctx, `
 		UPDATE insights
-		SET content = $3, tags = $4, category = $5, source = $6, updated_at = now()
-		WHERE project_id = $1 AND key = $2 AND deleted_at IS NULL
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
-		p.ProjectID, p.Key, p.Content, tags, category, source)
-	return scanInsight(row)
+		SET content = $3, tags = $4, category = $5, source = $6,
+		    updated_at = now(), revision = revision + 1
+		WHERE id = $1 AND revision = $2 AND deleted_at IS NULL
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source,
+		          created_by, created_at, updated_at, revision`,
+		current.ID, current.Revision, p.Content, tags, category, source)
+	insight, err := scanInsight(row)
+	if err != nil {
+		return nil, err
+	}
+	if contentChanged {
+		insight.ContentChanged = true
+		insight, err = syncInsightContentTx(ctx, db, insight)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := insertInsightRevisionTx(ctx, db, insight.ID, "update", p.CreatedBy); err != nil {
+		return nil, err
+	}
+	return insight, nil
 }
 
-func insertInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
+func createInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (*store.Insight, error) {
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
@@ -1243,9 +1291,47 @@ func insertInsightTx(ctx context.Context, db dbtx, p store.WriteInsightParams) (
 	row := db.QueryRow(ctx, `
 		INSERT INTO insights (project_id, key, content, tags, category, source, created_by, created_at, updated_at)
 		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, COALESCE($8, now()), COALESCE($9, now()))
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
+		ON CONFLICT (project_id, key) WHERE key IS NOT NULL AND deleted_at IS NULL DO NOTHING
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source,
+		          created_by, created_at, updated_at, revision`,
 		p.ProjectID, p.Key, p.Content, tags, category, source, p.CreatedBy, createdAt, updatedAt)
-	return scanInsight(row)
+	insight, err := scanInsight(row)
+	if err != nil {
+		return nil, err
+	}
+	insight, err = syncInsightContentTx(ctx, db, insight)
+	if err != nil {
+		return nil, err
+	}
+	if err := insertInsightRevisionTx(ctx, db, insight.ID, "create", p.CreatedBy); err != nil {
+		return nil, err
+	}
+	return insight, nil
+}
+
+func insertInsightRevisionTx(ctx context.Context, db dbtx, insightID uuid.UUID, operation string, changedBy uuid.UUID) error {
+	var actor any
+	if changedBy != uuid.Nil {
+		actor = changedBy
+	}
+	_, err := db.Exec(ctx, `
+		INSERT INTO insight_revisions (
+			insight_id, revision, operation, key, content, tags, category, source, deleted_at, changed_by
+		)
+		SELECT id, revision, $2, key, content, tags, category, source, deleted_at, $3
+		FROM insights
+		WHERE id = $1`, insightID, operation, actor)
+	if err != nil {
+		return fmt.Errorf("insert insight revision: %w", err)
+	}
+	return nil
+}
+
+func checkExpectedRevision(expected *int, current int) error {
+	if expected != nil && *expected != current {
+		return &store.RevisionConflictError{Expected: *expected, Current: current}
+	}
+	return nil
 }
 
 // ImportProjects ensures each project (by slug) exists under orgID and writes its insights,
@@ -1307,7 +1393,7 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 				ELSE plainto_tsquery('english', $2)
 			END AS query
 		)
-		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at, ranking.rank
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at, revision, ranking.rank
 		FROM insights
 		CROSS JOIN search_query
 		CROSS JOIN LATERAL (SELECT ts_rank(search_vector, search_query.query) AS rank) ranking
@@ -1341,7 +1427,7 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 		var idStr, projectIDStr, createdByStr string
 		item := rankedInsight{insight: &store.Insight{}}
 		f := item.insight
-		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &item.rank); err != nil {
+		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision, &item.rank); err != nil {
 			return nil, fmt.Errorf("scan insight search result: %w", err)
 		}
 		if f.ID, err = uuid.Parse(idStr); err != nil {
@@ -1380,7 +1466,7 @@ func (s *Store) ListInsights(ctx context.Context, p store.ListInsightsParams) (*
 	}
 
 	query := `
-		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at, revision
 		FROM insights
 		WHERE project_id = $1 AND deleted_at IS NULL`
 	args := []any{p.ProjectID}
@@ -1551,6 +1637,9 @@ func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID) ([]sto
 // UpdateInsight patches content and/or tags on an existing live insight, scoped to orgID.
 func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) (*store.Insight, error) {
 	s.logger(ctx).DebugContext(ctx, "updating insight", slog.String("insight_id", p.InsightID.String()), slog.Int("tag_count", len(p.Tags)), slog.String("org_id", p.OrgID.String()))
+	if p.ExpectedRevision != nil && (*p.ExpectedRevision <= 0 || *p.ExpectedRevision > store.MaxInsightRevision) {
+		return nil, store.ErrInvalidExpectedRevision
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1558,31 +1647,48 @@ func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	tags := p.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-	row := tx.QueryRow(ctx, `
-		UPDATE insights SET
-		  content    = CASE WHEN $2 <> '' THEN $2 ELSE content END,
-		  tags       = CASE WHEN $3 THEN $4 ELSE tags END,
-		  updated_at = now()
-		WHERE id = $1 AND deleted_at IS NULL
-		  AND project_id IN (SELECT id FROM projects WHERE org_id = $5)
-		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at`,
-		p.InsightID, p.Content, p.Tags != nil, tags, p.OrgID)
-	insight, err := scanInsight(row)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, store.ErrNotFound
-	}
+	current, err := getInsightForUpdateTx(ctx, tx, p.OrgID, p.InsightID)
 	if err != nil {
 		return nil, err
 	}
+	if err := checkExpectedRevision(p.ExpectedRevision, current.Revision); err != nil {
+		return nil, err
+	}
+	content := current.Content
 	if p.Content != "" {
+		content = p.Content
+	}
+	tags := current.Tags
+	if p.Tags != nil {
+		tags = p.Tags
+	}
+	contentChanged := content != current.Content
+	if !contentChanged && slices.Equal(tags, current.Tags) {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit no-op update tx: %w", err)
+		}
+		return current, nil
+	}
+
+	insight, err := scanInsight(tx.QueryRow(ctx, `
+		UPDATE insights
+		SET content = $3, tags = $4, updated_at = now(), revision = revision + 1
+		WHERE id = $1 AND revision = $2 AND deleted_at IS NULL
+		RETURNING id, project_id, COALESCE(key, ''), content, tags, category, source,
+		          created_by, created_at, updated_at, revision`,
+		current.ID, current.Revision, content, tags))
+	if err != nil {
+		return nil, err
+	}
+	if contentChanged {
+		insight.ContentChanged = true
 		insight, err = syncInsightContentTx(ctx, tx, insight)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := insertInsightRevisionTx(ctx, tx, insight.ID, "update", p.ChangedBy); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
@@ -1590,28 +1696,58 @@ func (s *Store) UpdateInsight(ctx context.Context, p store.UpdateInsightParams) 
 	return insight, nil
 }
 
-// DeleteInsight soft-deletes an insight, scoped to orgID. Returns ErrNotFound if it does not exist, is already deleted, or belongs to a different org.
-func (s *Store) DeleteInsight(ctx context.Context, orgID, insightID uuid.UUID) error {
-	s.logger(ctx).DebugContext(ctx, "deleting insight", slog.String("insight_id", insightID.String()), slog.String("org_id", orgID.String()))
-
-	ct, err := s.pool.Exec(ctx, `
-		UPDATE insights SET deleted_at = now()
+func getInsightForUpdateTx(ctx context.Context, db dbtx, orgID, insightID uuid.UUID) (*store.Insight, error) {
+	return scanInsight(db.QueryRow(ctx, `
+		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source,
+		       created_by, created_at, updated_at, revision
+		FROM insights
 		WHERE id = $1 AND deleted_at IS NULL
-		  AND project_id IN (SELECT id FROM projects WHERE org_id = $2)`,
-		insightID, orgID)
+		  AND project_id IN (SELECT id FROM projects WHERE org_id = $2)
+		FOR UPDATE`, insightID, orgID))
+}
+
+// DeleteInsight soft-deletes an insight and returns its resulting revision.
+func (s *Store) DeleteInsight(ctx context.Context, p store.DeleteInsightParams) (int, error) {
+	s.logger(ctx).DebugContext(ctx, "deleting insight", slog.String("insight_id", p.InsightID.String()), slog.String("org_id", p.OrgID.String()))
+	if p.ExpectedRevision != nil && (*p.ExpectedRevision <= 0 || *p.ExpectedRevision > store.MaxInsightRevision) {
+		return 0, store.ErrInvalidExpectedRevision
+	}
+
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("delete insight: %w", err)
+		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	if ct.RowsAffected() == 0 {
-		return store.ErrNotFound
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, err := getInsightForUpdateTx(ctx, tx, p.OrgID, p.InsightID)
+	if err != nil {
+		return 0, err
 	}
-	return nil
+	if err := checkExpectedRevision(p.ExpectedRevision, current.Revision); err != nil {
+		return 0, err
+	}
+	var revision int
+	err = tx.QueryRow(ctx, `
+		UPDATE insights
+		SET deleted_at = now(), updated_at = now(), revision = revision + 1
+		WHERE id = $1 AND revision = $2 AND deleted_at IS NULL
+		RETURNING revision`, current.ID, current.Revision).Scan(&revision)
+	if err != nil {
+		return 0, fmt.Errorf("delete insight: %w", err)
+	}
+	if err := insertInsightRevisionTx(ctx, tx, current.ID, "delete", p.ChangedBy); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit delete insight tx: %w", err)
+	}
+	return revision, nil
 }
 
 func scanInsight(row pgx.Row) (*store.Insight, error) {
 	var idStr, projectIDStr, createdByStr string
 	f := &store.Insight{}
-	err := row.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt)
+	err := row.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -1636,7 +1772,7 @@ func scanInsights(rows pgx.Rows) ([]*store.Insight, error) {
 	for rows.Next() {
 		var idStr, projectIDStr, createdByStr string
 		f := &store.Insight{}
-		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision); err != nil {
 			return nil, fmt.Errorf("scan insight: %w", err)
 		}
 		var parseErr error

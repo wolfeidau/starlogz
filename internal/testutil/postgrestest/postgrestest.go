@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -128,12 +129,12 @@ func (p *Template) dropTestDB(t *testing.T, ctx context.Context, dbName string) 
 }
 
 func (p *Template) dsnForDB(dbName string) string {
-	config, err := pgxpool.ParseConfig(p.adminDSN)
+	dsn, err := url.Parse(p.adminDSN)
 	if err != nil {
 		panic(fmt.Sprintf("parse test dsn: %v", err))
 	}
-	config.ConnConfig.Database = dbName
-	return config.ConnString()
+	dsn.Path = "/" + dbName
+	return dsn.String()
 }
 
 func validateDatabaseName(name string) {
