@@ -26,15 +26,15 @@ does not change current search ranking or pagination.
 
 ## Mutation atomicity
 
-Creates, keyed upserts, updates, imports, soft deletes, and restores write their
+Creates, keyed upserts, updates, soft deletes, and restores write their
 current row and snapshot in one transaction. Content-bearing writes synchronize
 derived insight links in that transaction. A failure in the current-row
 mutation, link synchronization, or snapshot insertion rolls back the entire
 mutation.
 
-The authenticated actor is recorded for interactive mutations. Import records
-the importing user. Removing a user sets historical actor references to null so
-revision retention does not prevent identity erasure.
+The authenticated actor is recorded for interactive mutations. Removing a
+user sets historical actor references to null so revision retention does not
+prevent identity erasure.
 
 ## Semantic no-ops
 

@@ -71,7 +71,7 @@ A source linking to its own key produces `self_insight_link` and no stored
 relationship.
 
 Content-bearing writes synchronize relationships in the same transaction as the
-insight write. This includes insert, keyed upsert, content update, and import.
+insight write. This includes insert, keyed upsert, and content update.
 A keyed upsert or content-supplied update also repairs missing relationship rows
 when the persisted insight fields are a semantic no-op; this repair does not
 change the insight timestamp or revision. Tag-only updates do not touch
@@ -164,8 +164,8 @@ insight_search -> select result -> insight_get -> traverse deliberately
 ## Server rendering and dashboard behavior
 
 Connect responses render insight Markdown to a sanitized HTML fragment at read
-time. Rendered HTML is derived from raw content and is not stored. MCP, import,
-export, and write flows continue to use raw content.
+time. Rendered HTML is derived from raw content and is not stored. MCP and write
+flows continue to use raw content.
 
 Insight links render as same-origin anchors with a stable action contract:
 

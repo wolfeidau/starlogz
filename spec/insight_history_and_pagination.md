@@ -474,21 +474,6 @@ The history panel renders only server-sanitized Markdown for a selected
 revision. Diffs are derived from raw text without placing raw content into a
 trusted-HTML boundary.
 
-## Import and export
-
-History is durable user data. General availability should include a versioned
-export shape that preserves revision number, operation, snapshot fields, and
-timestamps while continuing to omit instance-bound user and organization UUIDs.
-On import, revision actors are attributed to the importing user because source
-instance actor UUIDs are intentionally absent.
-
-The importer continues to accept the existing current-state export shape. A
-history-bearing import remains atomic across its projects, current insights,
-revisions, and reconstructed links.
-
-Exact export-version negotiation and collision behavior for importing history
-into a project with existing revisions remain review questions.
-
 ## Authorization, privacy, and telemetry
 
 - All pagination and history queries resolve the authenticated user's
@@ -520,8 +505,7 @@ into a project with existing revisions remain review questions.
    continuation.
 6. **Implemented:** Add MCP restore.
 7. **Implemented:** Add the read-only dashboard history panel.
-8. Add revision-aware export/import.
-9. Validate revision/audit parity, then drop `audit_insights` in a later
+8. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
 
 Steps 3 and 4 are one deployment boundary and are implemented in the same
@@ -595,7 +579,6 @@ Completed automated verification covers:
 
 Pending verification:
 
-- revision-aware import/export round trips; and
 - audit/revision parity during the validation release.
 
 Store behavior uses real PostgreSQL integration tests. MCP and Connect handlers
@@ -625,9 +608,7 @@ transport contract blocker.
 
 1. Is preserving legacy last-write-wins indefinitely acceptable, or should a
    later API version require `expected_revision` for destructive mutations?
-2. Is revision-aware export/import a general-availability gate, and how should
-   history merge with an existing destination insight?
-3. Is one release of audit/revision dual recording sufficient before removing
+2. Is one release of audit/revision dual recording sufficient before removing
    `audit_insights`, and must a metadata-only audit continue for privileged
    direct SQL writes?
 

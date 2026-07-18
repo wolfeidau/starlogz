@@ -71,6 +71,28 @@ func databaseNow(t *testing.T, dsn string) time.Time {
 	return now
 }
 
+type insightTimestamps struct {
+	insight              *store.Insight
+	createdAt, updatedAt time.Time
+}
+
+func setInsightTimestamps(t *testing.T, dsn string, values ...insightTimestamps) {
+	t.Helper()
+	pool, err := pgxpool.New(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	for _, value := range values {
+		_, err := pool.Exec(t.Context(), `UPDATE insights SET created_at = $2, updated_at = $3 WHERE id = $1`,
+			value.insight.ID, value.createdAt, value.updatedAt)
+		require.NoError(t, err)
+		// pgx returns timestamptz in the connection's local location; keep the
+		// fixture object in the same representation for structural assertions.
+		value.insight.CreatedAt = value.createdAt.In(time.Local)
+		value.insight.UpdatedAt = value.updatedAt.In(time.Local)
+	}
+}
+
 func TestPing(t *testing.T) {
 	st := newTestStore(t)
 	require.NoError(t, st.Ping(t.Context()))
@@ -132,8 +154,6 @@ func TestMigrateAddsInsightRevisionBaselines(t *testing.T) {
 		Category:  "fact",
 		Source:    "repo",
 		CreatedBy: u.ID,
-		CreatedAt: liveUpdatedAt.Add(-time.Hour),
-		UpdatedAt: liveUpdatedAt,
 	})
 	require.NoError(t, err)
 
@@ -145,8 +165,6 @@ func TestMigrateAddsInsightRevisionBaselines(t *testing.T) {
 		Category:  "decision",
 		Source:    "user",
 		CreatedBy: u.ID,
-		CreatedAt: liveUpdatedAt.Add(-2 * time.Hour),
-		UpdatedAt: liveUpdatedAt.Add(-time.Hour),
 	})
 	require.NoError(t, err)
 	keyless, err := st.WriteInsight(ctx, store.WriteInsightParams{
@@ -155,6 +173,10 @@ func TestMigrateAddsInsightRevisionBaselines(t *testing.T) {
 	require.NoError(t, err)
 	_, err = st.DeleteInsight(ctx, store.DeleteInsightParams{OrgID: p.OrgID, InsightID: deleted.ID, ChangedBy: u.ID})
 	require.NoError(t, err)
+	setInsightTimestamps(t, dsn,
+		insightTimestamps{insight: live, createdAt: liveUpdatedAt.Add(-time.Hour), updatedAt: liveUpdatedAt},
+		insightTimestamps{insight: deleted, createdAt: liveUpdatedAt.Add(-2 * time.Hour), updatedAt: liveUpdatedAt.Add(-time.Hour)},
+	)
 
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
@@ -1317,42 +1339,44 @@ func TestInsightLinks_KeylessSourceAndProjectIsolation(t *testing.T) {
 }
 
 func TestGetInsight_Relationships(t *testing.T) {
-	st := newTestStore(t)
+	st, dsn := newTestStoreAndDSN(t)
 	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 29)
 	base := time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC)
 
 	root, err := st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Key: "root", Content: "root", CreatedBy: u.ID,
-		CreatedAt: base, UpdatedAt: base,
 	})
 	require.NoError(t, err)
 	alpha, err := st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Key: "alpha", Content: "alpha", Category: "fact", CreatedBy: u.ID,
-		CreatedAt: base, UpdatedAt: base,
 	})
 	require.NoError(t, err)
 	beta, err := st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Key: "beta", Content: "beta", Category: "decision", CreatedBy: u.ID,
-		CreatedAt: base, UpdatedAt: base,
 	})
 	require.NoError(t, err)
 
 	source, err := st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Key: "source", Content: "[[insight:missing]] [[insight:beta]] [[insight:alpha]] [[insight:root]]", CreatedBy: u.ID,
-		CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute),
 	})
 	require.NoError(t, err)
 	keyless, err := st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Content: "[[insight:root]]", CreatedBy: u.ID,
-		CreatedAt: base.Add(2 * time.Minute), UpdatedAt: base.Add(2 * time.Minute),
 	})
 	require.NoError(t, err)
 	newest, err := st.WriteInsight(ctx, store.WriteInsightParams{
 		ProjectID: p.ID, Key: "newest", Content: "[[insight:root]]", CreatedBy: u.ID,
-		CreatedAt: base.Add(3 * time.Minute), UpdatedAt: base.Add(3 * time.Minute),
 	})
 	require.NoError(t, err)
+	setInsightTimestamps(t, dsn,
+		insightTimestamps{insight: root, createdAt: base, updatedAt: base},
+		insightTimestamps{insight: alpha, createdAt: base, updatedAt: base},
+		insightTimestamps{insight: beta, createdAt: base, updatedAt: base},
+		insightTimestamps{insight: source, createdAt: base.Add(time.Minute), updatedAt: base.Add(time.Minute)},
+		insightTimestamps{insight: keyless, createdAt: base.Add(2 * time.Minute), updatedAt: base.Add(2 * time.Minute)},
+		insightTimestamps{insight: newest, createdAt: base.Add(3 * time.Minute), updatedAt: base.Add(3 * time.Minute)},
+	)
 
 	detail, err := st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, Key: "source", RelationLimit: 2})
 	require.NoError(t, err)
@@ -1396,62 +1420,6 @@ func TestGetInsight_Relationships(t *testing.T) {
 	_, err = st.DeleteInsight(ctx, store.DeleteInsightParams{OrgID: p.OrgID, InsightID: root.ID, ChangedBy: u.ID})
 	require.NoError(t, err)
 	_, err = st.GetInsight(ctx, store.GetInsightParams{ProjectID: p.ID, InsightID: root.ID, RelationLimit: 10})
-	require.ErrorIs(t, err, store.ErrNotFound)
-}
-
-func TestImportProjects_SynchronizesInsightLinks(t *testing.T) {
-	st, dsn := newTestStoreAndDSN(t)
-	ctx := t.Context()
-	u, p := testUserAndProject(t, st, 27)
-	baseline := insightLinkAuditOperations(t, st)
-
-	projectCount, insightCount, err := st.ImportProjects(ctx, p.OrgID, u.ID, []store.ImportProject{{
-		Slug: "imported",
-		Name: "Imported",
-		Insights: []store.ImportInsight{
-			{Key: "source", Content: "[[insight:target]]"},
-			{Key: "target", Content: "target"},
-			{Content: "append-only"},
-		},
-	}})
-	require.NoError(t, err)
-	require.Equal(t, 1, projectCount)
-	require.Equal(t, 3, insightCount)
-	require.Equal(t, map[string]int{"INSERT": 1}, operationDelta(baseline, insightLinkAuditOperations(t, st)))
-	project, err := st.GetProjectBySlug(ctx, p.OrgID, "imported")
-	require.NoError(t, err)
-	page, err := st.ListInsights(ctx, store.ListInsightsParams{ProjectID: project.ID, Limit: 10})
-	require.NoError(t, err)
-	require.Len(t, page.Insights, 3)
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	for _, insight := range page.Insights {
-		require.Equal(t, 1, insight.Revision)
-		revisions := readInsightRevisions(t, pool, insight.ID)
-		require.Len(t, revisions, 1)
-		require.Equal(t, "create", revisions[0].Operation)
-		require.Equal(t, u.ID, revisions[0].ChangedBy)
-	}
-}
-
-func TestImportProjects_RollsBackInsightLinks(t *testing.T) {
-	st := newTestStore(t)
-	ctx := t.Context()
-	u, p := testUserAndProject(t, st, 28)
-	baseline := insightLinkAuditOperations(t, st)
-
-	_, _, err := st.ImportProjects(ctx, p.OrgID, u.ID, []store.ImportProject{{
-		Slug: "rollback-links",
-		Name: "Rollback Links",
-		Insights: []store.ImportInsight{
-			{Key: "source", Content: "[[insight:target]]"},
-			{Key: "invalid", Content: "invalid", Category: "not-a-category"},
-		},
-	}})
-	require.Error(t, err)
-	require.Empty(t, operationDelta(baseline, insightLinkAuditOperations(t, st)))
-	_, err = st.GetProjectBySlug(ctx, p.OrgID, "rollback-links")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
@@ -1530,7 +1498,7 @@ func TestSearchInsights(t *testing.T) {
 }
 
 func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
-	st := newTestStore(t)
+	st, dsn := newTestStoreAndDSN(t)
 	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 31)
 	updatedAt := time.Date(2026, 7, 18, 12, 0, 0, 123456000, time.UTC)
@@ -1542,13 +1510,17 @@ func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
 		"pagination token alpha",
 		"pagination token beta",
 	}
+	var written []*store.Insight
 	for _, content := range contents {
 		insight, err := st.WriteInsight(ctx, store.WriteInsightParams{
 			ProjectID: p.ID, Content: content, Tags: []string{searchTag}, CreatedBy: u.ID,
-			CreatedAt: updatedAt, UpdatedAt: updatedAt,
 		})
 		require.NoError(t, err)
 		require.NotEqual(t, uuid.Nil, insight.ID)
+		written = append(written, insight)
+	}
+	for _, insight := range written {
+		setInsightTimestamps(t, dsn, insightTimestamps{insight: insight, createdAt: updatedAt, updatedAt: updatedAt})
 	}
 
 	base := store.SearchInsightsParams{
@@ -1616,18 +1588,22 @@ func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
 }
 
 func TestSearchInsightsCursorDocumentsConcurrentMutationLimitation(t *testing.T) {
-	st := newTestStore(t)
+	st, dsn := newTestStoreAndDSN(t)
 	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 32)
 	updatedAt := time.Date(2025, 7, 18, 12, 0, 0, 0, time.UTC)
 	searchTag := uuid.NewString()
 
+	var written []*store.Insight
 	for range 3 {
-		_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		insight, err := st.WriteInsight(ctx, store.WriteInsightParams{
 			ProjectID: p.ID, Content: "pagination token", Tags: []string{searchTag}, CreatedBy: u.ID,
-			CreatedAt: updatedAt, UpdatedAt: updatedAt,
 		})
 		require.NoError(t, err)
+		written = append(written, insight)
+	}
+	for _, insight := range written {
+		setInsightTimestamps(t, dsn, insightTimestamps{insight: insight, createdAt: updatedAt, updatedAt: updatedAt})
 	}
 
 	base := store.SearchInsightsParams{
@@ -1699,7 +1675,7 @@ func TestListInsights(t *testing.T) {
 }
 
 func TestListInsightsCursorUsesUpdatedAtAndID(t *testing.T) {
-	st := newTestStore(t)
+	st, dsn := newTestStoreAndDSN(t)
 	ctx := t.Context()
 	u, p := testUserAndProject(t, st, 41)
 	updatedAt := time.Date(2026, 7, 18, 12, 0, 0, 123456000, time.UTC)
@@ -1711,11 +1687,12 @@ func TestListInsightsCursorUsesUpdatedAtAndID(t *testing.T) {
 			Content:   content,
 			Tags:      []string{"x"},
 			CreatedBy: u.ID,
-			CreatedAt: updatedAt,
-			UpdatedAt: updatedAt,
 		})
 		require.NoError(t, err)
 		written = append(written, insight)
+	}
+	for _, insight := range written {
+		setInsightTimestamps(t, dsn, insightTimestamps{insight: insight, createdAt: updatedAt, updatedAt: updatedAt})
 	}
 	sort.Slice(written, func(i, j int) bool {
 		return written[i].ID.String() > written[j].ID.String()
