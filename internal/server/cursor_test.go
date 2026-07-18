@@ -172,7 +172,7 @@ func TestInsightSearchCursorEmptyValueStartsFirstPage(t *testing.T) {
 
 func TestInsightSearchCursorTreatsNilAndEmptyTagsAsEquivalent(t *testing.T) {
 	projectID := uuid.New()
-	want := &store.InsightSearchCursor{Rank: 0.25, UpdatedAt: time.Now().UTC(), ID: uuid.New()}
+	want := &store.InsightSearchCursor{Rank: 0.25, UpdatedAt: time.Date(2026, 7, 18, 12, 34, 56, 789123000, time.UTC), ID: uuid.New()}
 	encoded, err := encodeInsightSearchCursor(projectID, "postgres", store.SearchQueryModeAll, nil, store.SearchTagModeAll, want)
 	require.NoError(t, err)
 
