@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -148,6 +149,15 @@ func (f *toolFixture) makeUser(t *testing.T, ctx context.Context, login string) 
 	u, err := f.store.UpsertUser(ctx, store.GitHubProfile{GitHubID: id, Email: login + "@example.com", Login: login})
 	require.NoError(t, err)
 	return u
+}
+
+func (f *toolFixture) execSQL(ctx context.Context, t *testing.T, query string, args ...any) {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, f.dsn)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, conn.Close(ctx)) }()
+	_, err = conn.Exec(ctx, query, args...)
+	require.NoError(t, err)
 }
 
 // tokenFor issues a JWT whose sub is the given user UUID and whose scope claim
@@ -350,6 +360,115 @@ func TestUISearchInsightsCursorPagination(t *testing.T) {
 
 	status, _ = callSearch(map[string]any{"project": "web-search-cursor", "query": "", "limit": 1, "cursor": first.NextCursor})
 	require.Equal(t, http.StatusBadRequest, status)
+}
+
+func TestUIListInsightHistory(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "web-history-user")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	project, err := f.store.EnsureProject(ctx, org.ID, user.ID, "web-history", "Web History")
+	require.NoError(t, err)
+	insight, err := f.store.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: project.ID, Key: "history", Content: "# v1", Category: "fact", Source: "repo", CreatedBy: user.ID,
+	})
+	require.NoError(t, err)
+	removedActor := f.makeUser(t, ctx, "web-history-removed-actor")
+	expected := insight.Revision
+	insight, err = f.store.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: org.ID, InsightID: insight.ID, Content: "# v2\n\n<script>alert('x')</script>",
+		ChangedBy: removedActor.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	f.execSQL(ctx, t, `DELETE FROM users WHERE id = $1`, removedActor.ID)
+	expected = insight.Revision
+	_, err = f.store.DeleteInsight(ctx, store.DeleteInsightParams{
+		OrgID: org.ID, InsightID: insight.ID, ChangedBy: user.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+
+	rawToken := "opaque-history-browser-session-" + uuid.NewString()
+	now := time.Now()
+	_, err = f.store.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(7 * 24 * time.Hour), ExpiresAt: now.Add(30 * 24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	type historyResponse struct {
+		InsightID       string `json:"insightId"`
+		Key             string `json:"key"`
+		CurrentRevision int    `json:"currentRevision"`
+		Deleted         bool   `json:"deleted"`
+		Revisions       []struct {
+			Revision     int    `json:"revision"`
+			Operation    string `json:"operation"`
+			Content      string `json:"content"`
+			ChangedBy    string `json:"changedBy"`
+			ChangedAt    string `json:"changedAt"`
+			DeletedAt    string `json:"deletedAt"`
+			RenderedHTML string `json:"renderedHtml"`
+		} `json:"revisions"`
+		NextCursor string `json:"nextCursor"`
+	}
+	callHistory := func(body map[string]any) (int, historyResponse) {
+		t.Helper()
+		resp := f.uiRequest(t, rawToken, "/starlogz.v1.UIService/ListInsightHistory", body)
+		defer func() { _ = resp.Body.Close() }()
+		var decoded historyResponse
+		if resp.StatusCode == http.StatusOK {
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&decoded))
+		}
+		return resp.StatusCode, decoded
+	}
+
+	status, first := callHistory(map[string]any{
+		"project": "web-history", "id": insight.ID.String(), "limit": 2,
+	})
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, insight.ID.String(), first.InsightID)
+	require.Equal(t, "history", first.Key)
+	require.Equal(t, 3, first.CurrentRevision)
+	require.True(t, first.Deleted)
+	require.Equal(t, []int{3, 2}, []int{first.Revisions[0].Revision, first.Revisions[1].Revision})
+	require.NotEmpty(t, first.Revisions[0].DeletedAt)
+	require.Equal(t, user.ID.String(), first.Revisions[0].ChangedBy)
+	require.Empty(t, first.Revisions[1].ChangedBy)
+	require.NotEmpty(t, first.Revisions[0].ChangedAt)
+	require.Contains(t, first.Revisions[1].RenderedHTML, "<h1>v2</h1>")
+	require.NotContains(t, first.Revisions[1].RenderedHTML, "<script")
+	require.NotEmpty(t, first.NextCursor)
+
+	status, second := callHistory(map[string]any{
+		"project": "web-history", "id": insight.ID.String(), "limit": 2, "cursor": first.NextCursor,
+	})
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, []int{1}, []int{second.Revisions[0].Revision})
+	require.Empty(t, second.NextCursor)
+
+	status, _ = callHistory(map[string]any{
+		"project": "web-history", "id": insight.ID.String(), "cursor": "not-a-cursor",
+	})
+	require.Equal(t, http.StatusBadRequest, status)
+	status, _ = callHistory(map[string]any{
+		"project": "web-history", "id": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusNotFound, status)
+
+	otherProject, err := f.store.EnsureProject(ctx, org.ID, user.ID, "other-web-history", "Other Web History")
+	require.NoError(t, err)
+	require.NotEqual(t, project.ID, otherProject.ID)
+	status, _ = callHistory(map[string]any{
+		"project": "other-web-history", "id": insight.ID.String(),
+	})
+	require.Equal(t, http.StatusNotFound, status)
+
+	f.execSQL(ctx, t, `DELETE FROM insights WHERE id = $1`, insight.ID)
+	status, _ = callHistory(map[string]any{
+		"project": "web-history", "id": insight.ID.String(),
+	})
+	require.Equal(t, http.StatusNotFound, status)
 }
 
 func TestUIGetInsightAndRenderedHTML(t *testing.T) {
@@ -786,6 +905,16 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	requireSchemaNumber(t, 100, schemaProperty(t, insightGet, "relation_limit")["maximum"])
 	require.Len(t, insightGet["oneOf"], 2)
 
+	insightHistory := inputSchemaMap(t, list.Tools, "insight_history")
+	require.ElementsMatch(t, []string{"project", "id"}, schemaRequired(t, insightHistory))
+	requireSchemaNumber(t, 1, schemaProperty(t, insightHistory, "project")["minLength"])
+	requireSchemaNumber(t, 1, schemaProperty(t, insightHistory, "id")["minLength"])
+	require.Equal(t, "uuid", schemaProperty(t, insightHistory, "id")["format"])
+	requireSchemaNumber(t, 0, schemaProperty(t, insightHistory, "limit")["minimum"])
+	requireSchemaNumber(t, 100, schemaProperty(t, insightHistory, "limit")["maximum"])
+	require.NotContains(t, schemaProperty(t, insightHistory, "cursor"), "minLength")
+	require.NotContains(t, schemaProperty(t, insightHistory, "cursor"), "maxLength")
+
 	insightSearch := inputSchemaMap(t, list.Tools, "insight_search")
 	require.ElementsMatch(t, []string{"project", "query"}, schemaRequired(t, insightSearch))
 	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "project")["minLength"])
@@ -1154,6 +1283,152 @@ func TestInsightMutations_RevisionPreconditions(t *testing.T) {
 	require.False(t, res.IsError, "delete failed: %s", resultText(t, res))
 	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &updated))
 	require.Equal(t, 4, updated.Revision)
+}
+
+func TestInsightHistory_PaginatesSoftDeletedInsight(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "history-user")
+	writeSession := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	var mutation struct {
+		ID       string `json:"id"`
+		Revision int    `json:"revision"`
+	}
+	res := callTool(t, ctx, writeSession, "insight_write", insightWriteArgs(
+		"history-project", "# v1", map[string]any{"key": "history"},
+	))
+	require.False(t, res.IsError, "write failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
+	require.Equal(t, 1, mutation.Revision)
+
+	removedActor := f.makeUser(t, ctx, "history-removed-actor")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	insightID, err := uuid.Parse(mutation.ID)
+	require.NoError(t, err)
+	expected := mutation.Revision
+	updated, err := f.store.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: org.ID, InsightID: insightID, Content: "# v2\n\n<script>alert('x')</script>",
+		ChangedBy: removedActor.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	mutation.Revision = updated.Revision
+	require.Equal(t, 2, mutation.Revision)
+	f.execSQL(ctx, t, `DELETE FROM users WHERE id = $1`, removedActor.ID)
+	res = callTool(t, ctx, writeSession, "insight_update", map[string]any{
+		"id": mutation.ID, "tags": []string{"history"}, "expected_revision": 2,
+	})
+	require.False(t, res.IsError, "tag update failed: %s", resultText(t, res))
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &mutation))
+	require.Equal(t, 3, mutation.Revision)
+	res = callTool(t, ctx, writeSession, "insight_delete", map[string]any{
+		"id": mutation.ID, "expected_revision": 3,
+	})
+	require.False(t, res.IsError, "delete failed: %s", resultText(t, res))
+
+	type historyRevision struct {
+		Revision  int      `json:"revision"`
+		Operation string   `json:"operation"`
+		Content   string   `json:"content"`
+		Tags      []string `json:"tags"`
+		DeletedAt string   `json:"deleted_at"`
+		ChangedBy string   `json:"changed_by"`
+		ChangedAt string   `json:"changed_at"`
+	}
+	type historyResponse struct {
+		InsightID       string            `json:"insight_id"`
+		Key             string            `json:"key"`
+		CurrentRevision int               `json:"current_revision"`
+		Deleted         bool              `json:"deleted"`
+		Revisions       []historyRevision `json:"revisions"`
+		NextCursor      string            `json:"next_cursor"`
+	}
+	readSession := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read"))
+	callHistory := func(args map[string]any) (*mcp.CallToolResult, historyResponse) {
+		t.Helper()
+		result := callTool(t, ctx, readSession, "insight_history", args)
+		var response historyResponse
+		if !result.IsError {
+			require.NoError(t, json.Unmarshal([]byte(resultText(t, result)), &response))
+		}
+		return result, response
+	}
+
+	res, first := callHistory(map[string]any{
+		"project": "history-project", "id": mutation.ID, "limit": 2,
+	})
+	require.False(t, res.IsError, "first history page failed: %s", resultText(t, res))
+	require.Equal(t, mutation.ID, first.InsightID)
+	require.Equal(t, "history", first.Key)
+	require.Equal(t, 4, first.CurrentRevision)
+	require.True(t, first.Deleted)
+	require.Equal(t, []int{4, 3}, []int{first.Revisions[0].Revision, first.Revisions[1].Revision})
+	require.Equal(t, []string{"delete", "update"}, []string{first.Revisions[0].Operation, first.Revisions[1].Operation})
+	require.NotEmpty(t, first.Revisions[0].DeletedAt)
+	require.Equal(t, user.ID.String(), first.Revisions[0].ChangedBy)
+	require.NotEmpty(t, first.Revisions[0].ChangedAt)
+	require.NotEmpty(t, first.NextCursor)
+
+	res, second := callHistory(map[string]any{
+		"project": "history-project", "id": mutation.ID, "limit": 2, "cursor": first.NextCursor,
+	})
+	require.False(t, res.IsError, "second history page failed: %s", resultText(t, res))
+	require.Equal(t, []int{2, 1}, []int{second.Revisions[0].Revision, second.Revisions[1].Revision})
+	require.Equal(t, "# v2\n\n<script>alert('x')</script>", second.Revisions[0].Content)
+	require.Empty(t, second.Revisions[0].ChangedBy)
+	require.Equal(t, "# v1", second.Revisions[1].Content)
+	require.Empty(t, second.NextCursor)
+
+	res, _ = callHistory(map[string]any{
+		"project": "history-project", "id": mutation.ID, "limit": 2, "cursor": "",
+	})
+	require.False(t, res.IsError, "empty cursor should request first page: %s", resultText(t, res))
+	for _, cursor := range []string{"not-a-cursor", strings.Repeat("a", 1025)} {
+		res, _ = callHistory(map[string]any{
+			"project": "history-project", "id": mutation.ID, "limit": 2, "cursor": cursor,
+		})
+		require.True(t, res.IsError)
+		require.Contains(t, resultText(t, res), "invalid_cursor")
+	}
+
+	var other struct {
+		ID string `json:"id"`
+	}
+	res = callTool(t, ctx, writeSession, "insight_write", insightWriteArgs(
+		"history-project", "other", map[string]any{"key": "other"},
+	))
+	require.False(t, res.IsError)
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &other))
+	res, _ = callHistory(map[string]any{
+		"project": "history-project", "id": other.ID, "limit": 2, "cursor": first.NextCursor,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "invalid_cursor")
+
+	res, _ = callHistory(map[string]any{
+		"project": "history-project", "id": uuid.NewString(), "limit": 2,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
+
+	otherUser := f.makeUser(t, ctx, "history-other-user")
+	otherWrite := f.connect(t, ctx, f.tokenFor(t, otherUser.ID, "insights:read insights:write"))
+	res = callTool(t, ctx, otherWrite, "insight_write", insightWriteArgs("history-project", "scoped", nil))
+	require.False(t, res.IsError)
+	otherRead := f.connect(t, ctx, f.tokenFor(t, otherUser.ID, "insights:read"))
+	res = callTool(t, ctx, otherRead, "insight_history", map[string]any{
+		"project": "history-project", "id": mutation.ID,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
+
+	f.execSQL(ctx, t, `DELETE FROM insights WHERE id = $1`, mutation.ID)
+	res, _ = callHistory(map[string]any{
+		"project": "history-project", "id": mutation.ID,
+	})
+	require.True(t, res.IsError)
+	require.Contains(t, resultText(t, res), "insight not found")
 }
 
 func TestInsightWriteAndUpdate_ReturnLinkWarnings(t *testing.T) {

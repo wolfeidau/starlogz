@@ -57,6 +57,11 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 		InputSchema: insightGetSchema,
 	}, trackTool(ms, wideevent.ToolInsightGet, ms.insightGet))
 	mcp.AddTool(ms.server, &mcp.Tool{
+		Name:        "insight_history",
+		Description: "Lists immutable revisions for an insight, newest first, with opaque cursor continuation. Includes soft-deleted insights.",
+		InputSchema: insightHistorySchema,
+	}, trackTool(ms, wideevent.ToolInsightHistory, ms.insightHistory))
+	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
 		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance and supports opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
@@ -170,6 +175,13 @@ type insightGetInput struct {
 	RelationLimit int    `json:"relation_limit"`
 }
 
+type insightHistoryInput struct {
+	Project string `json:"project"`
+	ID      string `json:"id"`
+	Limit   int    `json:"limit"`
+	Cursor  string `json:"cursor"`
+}
+
 type insightListInput struct {
 	Project string `json:"project"`
 	Tag     string `json:"tag"`
@@ -242,6 +254,17 @@ var (
 			{Required: []string{"id"}, Not: &jsonschema.Schema{Required: []string{"key"}}},
 			{Required: []string{"key"}, Not: &jsonschema.Schema{Required: []string{"id"}}},
 		}
+		return s
+	}()
+
+	insightHistorySchema = func() *jsonschema.Schema {
+		s := inputSchemaFor[insightHistoryInput]()
+		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].Format = uuidSchemaFormat
+		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
+		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Required = []string{projectSchemaProperty, "id"}
 		return s
 	}()
 
@@ -325,6 +348,28 @@ type insightResponse struct {
 type insightLinkWarningResponse struct {
 	Code      string `json:"code"`
 	TargetKey string `json:"target_key"`
+}
+
+type insightRevisionResponse struct {
+	Revision  int      `json:"revision"`
+	Operation string   `json:"operation"`
+	Key       string   `json:"key,omitempty"`
+	Content   string   `json:"content"`
+	Tags      []string `json:"tags"`
+	Category  string   `json:"category"`
+	Source    string   `json:"source"`
+	DeletedAt string   `json:"deleted_at,omitempty"`
+	ChangedBy string   `json:"changed_by,omitempty"`
+	ChangedAt string   `json:"changed_at"`
+}
+
+type insightHistoryResponse struct {
+	InsightID       string                    `json:"insight_id"`
+	Key             string                    `json:"key,omitempty"`
+	CurrentRevision int                       `json:"current_revision"`
+	Deleted         bool                      `json:"deleted"`
+	Revisions       []insightRevisionResponse `json:"revisions"`
+	NextCursor      string                    `json:"next_cursor,omitempty"`
 }
 
 type insightLinkResponse struct {
@@ -512,6 +557,75 @@ func toInsightGetResponse(detail *store.InsightDetail) insightGetResponse {
 		},
 		Links: links, Backlinks: backlinks, LinkCount: detail.LinkCount, BacklinkCount: detail.BacklinkCount,
 		LinksTruncated: detail.LinksTruncated, BacklinksTruncated: detail.BacklinksTruncated,
+	}
+}
+
+func (ms *mcpServer) insightHistory(ctx context.Context, req *mcp.CallToolRequest, in insightHistoryInput) (*mcp.CallToolResult, any, error) {
+	ms.logger(ctx).InfoContext(ctx, "insight_history call", slog.String("user_id", req.Extra.TokenInfo.UserID))
+	if ms.store == nil {
+		return nil, nil, fmt.Errorf("database not configured")
+	}
+	insightID, err := uuid.Parse(in.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid insight ID: %w", err)
+	}
+	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	project, err := ms.store.GetProjectBySlug(ctx, org.ID, in.Project)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("project %q not found", in.Project)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get project: %w", err)
+	}
+	limit := in.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	after, err := decodeInsightHistoryCursor(in.Cursor, project.ID, insightID)
+	if err != nil {
+		return nil, nil, errInvalidCursor
+	}
+	page, err := ms.store.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: project.ID, InsightID: insightID, Limit: limit, After: after,
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("insight not found")
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("list insight history: %w", err)
+	}
+	response := toInsightHistoryResponse(page)
+	if page.NextCursor != nil {
+		response.NextCursor, err = encodeInsightHistoryCursor(project.ID, insightID, page.NextCursor)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode next cursor: %w", err)
+		}
+	}
+	result, _, err := jsonResult(response)
+	return result, toolEventMetadata{resultCount: len(page.Revisions)}, err
+}
+
+func toInsightHistoryResponse(page *store.InsightHistoryPage) insightHistoryResponse {
+	revisions := make([]insightRevisionResponse, len(page.Revisions))
+	for i, revision := range page.Revisions {
+		revisions[i] = insightRevisionResponse{
+			Revision: revision.Revision, Operation: revision.Operation, Key: revision.Key,
+			Content: revision.Content, Tags: revision.Tags, Category: revision.Category,
+			Source: revision.Source, ChangedAt: revision.ChangedAt.Format(time.RFC3339Nano),
+		}
+		if revision.DeletedAt != nil {
+			revisions[i].DeletedAt = revision.DeletedAt.Format(time.RFC3339Nano)
+		}
+		if revision.ChangedBy != nil {
+			revisions[i].ChangedBy = revision.ChangedBy.String()
+		}
+	}
+	return insightHistoryResponse{
+		InsightID: page.InsightID.String(), Key: page.Key, CurrentRevision: page.CurrentRevision,
+		Deleted: page.DeletedAt != nil, Revisions: revisions,
 	}
 }
 

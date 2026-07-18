@@ -50,9 +50,10 @@ typed revision ledger, and baseline snapshots. Existing mutation paths now
 write snapshots atomically, suppress semantic no-ops, expose revisions, and
 accept optional concurrency preconditions. Slices 3 and 4 form one releasable
 unit, but production release remains gated on the migration measurements below.
-History APIs and restore remain proposed. The implemented pagination behavior is
-authoritative in [Cursor pagination](pagination.md); implemented revision and
-concurrency behavior is authoritative in
+MCP and Connect history reads are also implemented; restore remains proposed.
+The implemented pagination behavior is authoritative in
+[Cursor pagination](pagination.md); implemented revision, concurrency, and
+history-read behavior is authoritative in
 [Insight revisions and optimistic concurrency](insight_revisions.md).
 
 ## Goals
@@ -167,7 +168,7 @@ Cursor pagination applies to:
 - MCP `insight_search`;
 - Connect `ListInsights`;
 - Connect `SearchInsights`; and
-- the proposed MCP and Connect insight-history operations.
+- MCP and Connect insight-history operations.
 
 `cursor` is an optional input. `next_cursor` is an additive response field and
 is omitted when no later page exists. A request without a cursor returns the
@@ -401,9 +402,13 @@ protocol errors. Connect conflict mapping remains deferred until a Connect write
 RPC exists. Internally the error retains expected and current revision values
 without logging insight content.
 
-## Proposed history and restore contract
+## History reads and proposed restore contract
 
 ### `insight_history`
+
+The implemented history-read behavior is authoritative in
+[Insight revisions and optimistic concurrency](insight_revisions.md). This
+section retains its design rationale and relationship to restore.
 
 The read-scoped tool accepts:
 
@@ -492,9 +497,9 @@ into a project with existing revisions remain review questions.
   scope from the token payload.
 - Search queries, tags, cursor payloads, filter hashes, ranks, insight content,
   revisions, and actor IDs remain excluded from access logs and wide events.
-- `insight_history` and `insight_restore` are added to the bounded tool-name
-  allowlist. Successful history calls may use the existing result-count bucket;
-  restore does not emit content or revision attributes.
+- `insight_history` is in the bounded tool-name allowlist and successful calls
+  use the existing result-count bucket. Proposed restore events must not emit
+  content or revision attributes.
 - Conflict and invalid-cursor errors expose bounded codes, not arbitrary
   database or decoding errors.
 
@@ -509,11 +514,13 @@ into a project with existing revisions remain review questions.
    `baseline` snapshot for every existing live or soft-deleted insight.
 4. **Implemented:** Add revision writes and optional concurrency preconditions
    to existing mutation paths while retaining `audit_insights` for comparison.
-5. Add MCP and Connect history reads, then MCP restore.
-6. Add dashboard history review; add dashboard restore only after the web write
+5. **Implemented:** Add MCP and Connect history reads with revision cursor
+   continuation.
+6. Add MCP restore.
+7. Add dashboard history review; add dashboard restore only after the web write
    boundary is accepted.
-7. Add revision-aware export/import.
-8. Validate revision/audit parity, then drop `audit_insights` in a later
+8. Add revision-aware export/import.
+9. Validate revision/audit parity, then drop `audit_insights` in a later
    migration without deleting historical audit rows.
 
 Steps 3 and 4 are one deployment boundary and are implemented in the same
@@ -566,6 +573,13 @@ Pending pre-production validation:
 
 ### Revision correctness
 
+- descending, bounded history traversal for live and soft-deleted insights;
+- cursor scope binding, terminal empty pages, and invalid cursor rejection;
+- project authorization and not-found behavior for inaccessible history;
+- nullable baseline and removed actors, including MCP and Connect transport
+  responses;
+- hard-deleted targets returning not found through MCP and Connect;
+- privacy-safe history telemetry;
 - create, keyed update, patch update, delete, and restore revision sequences;
 - baseline coverage for live and soft-deleted pre-feature rows;
 - semantic no-op suppression with derived-link repair for content-bearing calls;
@@ -600,17 +614,19 @@ tests and browser verification.
 
 ## Review questions
 
+History exposes nullable `changed_by` user IDs. Actor presentation for shared
+organizations remains a future dashboard concern rather than a transport
+contract blocker.
+
 1. Should Connect map future revision conflicts to `ABORTED`, `FAILED_PRECONDITION`, or
    a typed error detail?
 2. Is preserving legacy last-write-wins indefinitely acceptable, or should a
    later API version require `expected_revision` for destructive mutations?
-3. Should revision history expose `changed_by` user IDs now, or defer actor
-   identity until shared organizations define collaborator presentation?
-4. Is revision-aware export/import a general-availability gate, and how should
+3. Is revision-aware export/import a general-availability gate, and how should
    history merge with an existing destination insight?
-5. Should dashboard restore be part of this program or remain deferred until a
+4. Should dashboard restore be part of this program or remain deferred until a
    broader dashboard write contract is designed?
-6. Is one release of audit/revision dual recording sufficient before removing
+5. Is one release of audit/revision dual recording sufficient before removing
    `audit_insights`, and must a metadata-only audit continue for privileged
    direct SQL writes?
 

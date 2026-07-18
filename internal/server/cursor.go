@@ -18,10 +18,11 @@ import (
 var errInvalidCursor = errors.New("invalid_cursor")
 
 const (
-	cursorVersion           = 1
-	maxCursorLength         = 1024
-	insightListCursorKind   = "insight_list"
-	insightSearchCursorKind = "insight_search"
+	cursorVersion            = 1
+	maxCursorLength          = 1024
+	insightHistoryCursorKind = "insight_history"
+	insightListCursorKind    = "insight_list"
+	insightSearchCursorKind  = "insight_search"
 )
 
 type cursorPayload struct {
@@ -29,8 +30,9 @@ type cursorPayload struct {
 	Kind        string  `json:"o"`
 	FilterHash  string  `json:"f"`
 	RankBits    *uint32 `json:"r,omitempty"`
-	UpdatedAtUS *int64  `json:"u"`
-	ID          string  `json:"i"`
+	UpdatedAtUS *int64  `json:"u,omitempty"`
+	ID          string  `json:"i,omitempty"`
+	Revision    *int    `json:"n,omitempty"`
 }
 
 type decodedCursor struct {
@@ -73,6 +75,43 @@ func insightListFilterHash(projectID uuid.UUID, tag string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
+func encodeInsightHistoryCursor(projectID, insightID uuid.UUID, cursor *store.InsightHistoryCursor) (string, error) {
+	payload := cursorPayload{
+		Version:    cursorVersion,
+		Kind:       insightHistoryCursorKind,
+		FilterHash: insightHistoryFilterHash(projectID, insightID),
+		Revision:   &cursor.Revision,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodeInsightHistoryCursor(value string, projectID, insightID uuid.UUID) (*store.InsightHistoryCursor, error) {
+	payload, err := decodeCursorPayload(value)
+	if err != nil || payload == nil {
+		return nil, err
+	}
+	if payload.Version != cursorVersion || payload.Kind != insightHistoryCursorKind ||
+		payload.FilterHash != insightHistoryFilterHash(projectID, insightID) || payload.Revision == nil ||
+		*payload.Revision <= 0 || *payload.Revision > store.MaxInsightRevision || payload.RankBits != nil ||
+		payload.UpdatedAtUS != nil || payload.ID != "" {
+		return nil, errInvalidCursor
+	}
+	return &store.InsightHistoryCursor{Revision: *payload.Revision}, nil
+}
+
+func insightHistoryFilterHash(projectID, insightID uuid.UUID) string {
+	filter := make([]byte, 0, len(insightHistoryCursorKind)+len(projectID)+len(insightID))
+	filter = append(filter, insightHistoryCursorKind...)
+	filter = append(filter, projectID[:]...)
+	filter = append(filter, insightID[:]...)
+	sum := sha256.Sum256(filter)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 func encodeInsightSearchCursor(projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, cursor *store.InsightSearchCursor) (string, error) {
 	updatedAtUS := cursor.UpdatedAt.UnixMicro()
 	rankBits := math.Float32bits(cursor.Rank)
@@ -107,6 +146,22 @@ func decodeInsightSearchCursor(value string, projectID uuid.UUID, query string, 
 }
 
 func decodeCursor(value, kind, filterHash string) (*decodedCursor, error) {
+	payload, err := decodeCursorPayload(value)
+	if err != nil || payload == nil {
+		return nil, err
+	}
+	if payload.Version != cursorVersion || payload.Kind != kind || payload.FilterHash != filterHash ||
+		payload.UpdatedAtUS == nil || payload.Revision != nil {
+		return nil, errInvalidCursor
+	}
+	id, err := uuid.Parse(payload.ID)
+	if err != nil || id == uuid.Nil {
+		return nil, errInvalidCursor
+	}
+	return &decodedCursor{Payload: *payload, UpdatedAt: time.UnixMicro(*payload.UpdatedAtUS).UTC(), ID: id}, nil
+}
+
+func decodeCursorPayload(value string) (*cursorPayload, error) {
 	if value == "" {
 		return nil, nil
 	}
@@ -120,21 +175,14 @@ func decodeCursor(value, kind, filterHash string) (*decodedCursor, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(decoded))
 	decoder.DisallowUnknownFields()
-	var payload cursorPayload
-	if err := decoder.Decode(&payload); err != nil {
+	payload := &cursorPayload{}
+	if err := decoder.Decode(payload); err != nil {
 		return nil, errInvalidCursor
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, errInvalidCursor
 	}
-	if payload.Version != cursorVersion || payload.Kind != kind || payload.FilterHash != filterHash || payload.UpdatedAtUS == nil {
-		return nil, errInvalidCursor
-	}
-	id, err := uuid.Parse(payload.ID)
-	if err != nil || id == uuid.Nil {
-		return nil, errInvalidCursor
-	}
-	return &decodedCursor{Payload: payload, UpdatedAt: time.UnixMicro(*payload.UpdatedAtUS).UTC(), ID: id}, nil
+	return payload, nil
 }
 
 func canonicalSearchTags(tags []string) []string {

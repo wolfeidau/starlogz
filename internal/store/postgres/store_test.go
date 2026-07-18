@@ -237,6 +237,15 @@ func TestMigrateAddsInsightRevisionBaselines(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT key IS NULL FROM insight_revisions WHERE insight_id = $1 AND revision = 1`, keyless.ID).Scan(&keyIsNull))
 	require.True(t, keyIsNull)
+	history, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: deleted.ID, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, history.CurrentRevision)
+	require.NotNil(t, history.DeletedAt)
+	require.Len(t, history.Revisions, 1)
+	require.Equal(t, "baseline", history.Revisions[0].Operation)
+	require.Nil(t, history.Revisions[0].ChangedBy)
 
 	_, err = pool.Exec(ctx, `UPDATE insights SET revision = 0 WHERE id = $1`, live.ID)
 	require.Error(t, err)
@@ -516,6 +525,129 @@ func TestInsightRevisionMutationSequence(t *testing.T) {
 	for _, revision := range revisions {
 		require.Equal(t, u.ID, revision.ChangedBy)
 	}
+}
+
+func TestListInsightHistoryPaginatesSoftDeletedInsight(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 36)
+
+	current, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "history", Content: "v1", Tags: []string{"one"},
+		Category: "decision", Source: "user", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	expected := current.Revision
+	current, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, Content: "v2", ChangedBy: u.ID,
+		ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	expected = current.Revision
+	current, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, Tags: []string{"two"}, ChangedBy: u.ID,
+		ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	expected = current.Revision
+	deletedRevision, err := st.DeleteInsight(ctx, store.DeleteInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, ChangedBy: u.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, deletedRevision)
+
+	first, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: current.ID, Limit: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, current.ID, first.InsightID)
+	require.Equal(t, "history", first.Key)
+	require.Equal(t, 4, first.CurrentRevision)
+	require.NotNil(t, first.DeletedAt)
+	require.Equal(t, []int{4, 3}, []int{first.Revisions[0].Revision, first.Revisions[1].Revision})
+	require.Equal(t, []string{"delete", "update"}, []string{first.Revisions[0].Operation, first.Revisions[1].Operation})
+	require.NotNil(t, first.Revisions[0].DeletedAt)
+	require.Nil(t, first.Revisions[1].DeletedAt)
+	require.Equal(t, "v2", first.Revisions[1].Content)
+	require.Equal(t, []string{"two"}, first.Revisions[1].Tags)
+	require.Equal(t, &store.InsightHistoryCursor{Revision: 3}, first.NextCursor)
+
+	second, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: current.ID, Limit: 2, After: first.NextCursor,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int{2, 1}, []int{second.Revisions[0].Revision, second.Revisions[1].Revision})
+	require.Equal(t, []string{"update", "create"}, []string{second.Revisions[0].Operation, second.Revisions[1].Operation})
+	require.Equal(t, "v2", second.Revisions[0].Content)
+	require.Equal(t, "v1", second.Revisions[1].Content)
+	require.Nil(t, second.NextCursor)
+	for _, revision := range append(first.Revisions, second.Revisions...) {
+		require.Equal(t, current.ID, revision.InsightID)
+		require.Equal(t, u.ID, *revision.ChangedBy)
+		require.False(t, revision.ChangedAt.IsZero())
+	}
+
+	empty, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: current.ID, Limit: 2,
+		After: &store.InsightHistoryCursor{Revision: 1},
+	})
+	require.NoError(t, err)
+	require.Equal(t, current.ID, empty.InsightID)
+	require.Equal(t, 4, empty.CurrentRevision)
+	require.Empty(t, empty.Revisions)
+	require.Nil(t, empty.NextCursor)
+
+	otherProject, err := st.EnsureProject(ctx, p.OrgID, u.ID, "other-history", "Other History")
+	require.NoError(t, err)
+	_, err = st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: otherProject.ID, InsightID: current.ID, Limit: 20,
+	})
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: uuid.New(), Limit: 20,
+	})
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestListInsightHistoryCursorKeepsOlderContinuationStable(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 37)
+
+	current, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Key: "concurrent-history", Content: "v1", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	for _, content := range []string{"v2", "v3"} {
+		expected := current.Revision
+		current, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+			OrgID: p.OrgID, InsightID: current.ID, Content: content,
+			ChangedBy: u.ID, ExpectedRevision: &expected,
+		})
+		require.NoError(t, err)
+	}
+
+	first, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: current.ID, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int{3}, []int{first.Revisions[0].Revision})
+	require.Equal(t, &store.InsightHistoryCursor{Revision: 3}, first.NextCursor)
+
+	expected := current.Revision
+	current, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: current.ID, Content: "v4",
+		ChangedBy: u.ID, ExpectedRevision: &expected,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, current.Revision)
+
+	continuation, err := st.ListInsightHistory(ctx, store.ListInsightHistoryParams{
+		ProjectID: p.ID, InsightID: current.ID, Limit: 10, After: first.NextCursor,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, continuation.CurrentRevision)
+	require.Equal(t, []int{2, 1}, []int{continuation.Revisions[0].Revision, continuation.Revisions[1].Revision})
 }
 
 func TestInsightRevisionPreconditions(t *testing.T) {

@@ -197,6 +197,13 @@ func TestResultCountBucketValidation(t *testing.T) {
 				AttributeResultCountBucket: ResultCount101To200,
 			},
 		},
+		"successful history with bucket": {
+			outcome: OutcomeSuccess,
+			attributes: map[string]string{
+				AttributeTool:              ToolInsightHistory,
+				AttributeResultCountBucket: ResultCountOneToTen,
+			},
+		},
 		"successful search without bucket": {
 			outcome:    OutcomeSuccess,
 			attributes: map[string]string{AttributeTool: ToolInsightSearch},
