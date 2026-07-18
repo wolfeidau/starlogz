@@ -99,6 +99,11 @@ History content, actors, cursor values, and snapshot fields are excluded from
 logs and wide events. Successful MCP calls emit only the tool name and a bounded
 result-count bucket.
 
+The dashboard exposes this history as a read-only, explicitly paginated panel
+inside insight detail. It renders only the Connect response's server-sanitized
+revision HTML and does not expose restore or another session-authenticated
+insight write operation.
+
 ## Restore
 
 MCP `insight_restore` requires `insights:write` and accepts project, insight ID,

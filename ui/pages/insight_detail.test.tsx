@@ -1,6 +1,8 @@
-import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
+import { TransportProvider } from "@connectrpc/connect-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
   fireEvent,
@@ -8,10 +10,32 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { GetInsightResponseSchema } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+import type { ReactNode } from "react";
+import {
+  GetInsightResponseSchema,
+  UIService,
+} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { InsightDetail } from "./insight_detail";
 
 afterEach(cleanup);
+
+function renderDetail(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  const transport = createRouterTransport((router) => {
+    router.rpc(UIService.method.listInsightHistory, () => ({ revisions: [] }));
+  });
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <TransportProvider transport={transport}>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      </TransportProvider>
+    ),
+  });
+}
 
 function insightDetail() {
   return create(GetInsightResponseSchema, {
@@ -66,7 +90,7 @@ describe("insight detail content", () => {
       detail: undefined,
       error: new ConnectError("missing", Code.NotFound),
     });
-    const view = render(<InsightDetail {...props} />);
+    const view = renderDetail(<InsightDetail {...props} />);
     expect(
       screen.getByRole("heading", { name: "Insight not found" }),
     ).toBeTruthy();
@@ -83,7 +107,7 @@ describe("insight detail content", () => {
 
   test("renders relationships and routes resolved traversal", () => {
     const onNavigate = mock(() => {});
-    render(<InsightDetail {...detailProps({ onNavigate })} />);
+    renderDetail(<InsightDetail {...detailProps({ onNavigate })} />);
     const dialog = screen.getByRole("dialog", { name: "source" });
 
     expect(within(dialog).getByText("Unresolved")).toBeTruthy();
@@ -126,7 +150,7 @@ describe("insight detail modal behavior", () => {
     document.body.append(opener);
     opener.focus();
     const onClose = mock(() => {});
-    const view = render(<InsightDetail {...detailProps({ onClose })} />);
+    const view = renderDetail(<InsightDetail {...detailProps({ onClose })} />);
     const close = screen.getByRole("button", { name: "Close insight detail" });
     const lastLink = screen.getByRole("link", { name: "backlink-id" });
 
@@ -146,7 +170,7 @@ describe("insight detail modal behavior", () => {
 
   test("closes only when the backdrop itself is pressed", () => {
     const onClose = mock(() => {});
-    const { container } = render(
+    const { container } = renderDetail(
       <InsightDetail {...detailProps({ onClose })} />,
     );
     const backdrop = container.querySelector<HTMLElement>(".detail-backdrop");

@@ -1,15 +1,15 @@
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { useEffect, useRef, type KeyboardEvent, type MouseEvent } from "react";
+import { type KeyboardEvent, type MouseEvent, useEffect, useRef } from "react";
 import type {
   GetInsightResponse,
   InsightReference,
 } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { formatTimestamp, RenderedMarkdown } from "./insight_content";
+import { InsightHistory } from "./insight_history";
 import {
   dashboardURL,
-  isUnmodifiedPrimaryClick,
-  openInsightKeyForClick,
   type InsightSelector,
+  isUnmodifiedPrimaryClick,
 } from "./insight_navigation";
 
 const focusableSelector = [
@@ -20,47 +20,6 @@ const focusableSelector = [
   "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
-
-function timestampToDate(ts?: Timestamp): Date | null {
-  if (!ts) return null;
-  return new Date(Number(ts.seconds) * 1000 + Math.floor(ts.nanos / 1_000_000));
-}
-
-export function formatTimestamp(ts?: Timestamp): string {
-  const date = timestampToDate(ts);
-  if (!date) return "-";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-export function RenderedMarkdown({
-  html,
-  onOpenInsight,
-}: {
-  html: string;
-  onOpenInsight: (key: string) => void;
-}) {
-  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
-    const key = openInsightKeyForClick(event, event.target);
-    if (!key) return;
-    event.preventDefault();
-    onOpenInsight(key);
-  };
-
-  return (
-    // biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: interaction is delegated to sanitized anchors, whose keyboard behavior remains native.
-    <div
-      className="markdown-preview"
-      onClick={handleClick}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: the server returns allowlist-sanitized HTML.
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
 
 function DetailRelation({
   label,
@@ -324,6 +283,12 @@ export function InsightDetail({
                 onNavigate={onNavigate}
               />
             </div>
+            <InsightHistory
+              key={insight.id}
+              project={project}
+              insightId={insight.id}
+              onOpenInsight={(key) => onNavigate({ case: "key", value: key })}
+            />
           </>
         ) : (
           <div className="detail-state detail-error">Insight not found.</div>
