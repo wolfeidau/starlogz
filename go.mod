@@ -8,8 +8,8 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.30
 	github.com/aws/aws-sdk-go-v2/service/eventbridge v1.47.1
-	github.com/getsentry/sentry-go v0.48.0
-	github.com/getsentry/sentry-go/slog v0.48.0
+	github.com/getsentry/sentry-go v0.47.0
+	github.com/getsentry/sentry-go/slog v0.47.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
