@@ -9,11 +9,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -35,15 +37,19 @@ import (
 // --- In-memory test implementations ---
 
 type inMemAuthState struct {
-	mu      sync.Mutex
-	pending map[string]store.PendingAuth
-	codes   map[string]store.AuthCode
+	mu                      sync.Mutex
+	pending                 map[string]store.PendingAuth
+	codes                   map[string]store.AuthCode
+	confirmations           map[string]store.AuthorizationConfirmation
+	storeConfirmationErr    error
+	completeConfirmationErr error
 }
 
 func newInMemAuthState() *inMemAuthState {
 	return &inMemAuthState{
-		pending: make(map[string]store.PendingAuth),
-		codes:   make(map[string]store.AuthCode),
+		pending:       make(map[string]store.PendingAuth),
+		codes:         make(map[string]store.AuthCode),
+		confirmations: make(map[string]store.AuthorizationConfirmation),
 	}
 }
 
@@ -70,6 +76,33 @@ func (s *inMemAuthState) StoreAuthCode(_ context.Context, code string, c store.A
 	defer s.mu.Unlock()
 	s.codes[code] = c
 	return nil
+}
+
+func (s *inMemAuthState) StoreAuthorizationConfirmation(_ context.Context, tokenHash []byte, c store.AuthorizationConfirmation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.storeConfirmationErr != nil {
+		return s.storeConfirmationErr
+	}
+	s.confirmations[string(tokenHash)] = c
+	return nil
+}
+
+func (s *inMemAuthState) CompleteAuthorizationConfirmation(_ context.Context, tokenHash []byte, approve bool, code string) (*store.AuthorizationConfirmationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.completeConfirmationErr != nil {
+		return nil, s.completeConfirmationErr
+	}
+	c, ok := s.confirmations[string(tokenHash)]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(s.confirmations, string(tokenHash))
+	if approve {
+		s.codes[code] = c.AuthCode
+	}
+	return &store.AuthorizationConfirmationResult{RedirectURI: c.RedirectURI, ClientState: c.ClientState}, nil
 }
 
 func (s *inMemAuthState) ConsumeAuthCode(_ context.Context, code string) (*store.AuthCode, error) {
@@ -676,7 +709,39 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
+	require.Equal(t, "", pending.ClientName)
+	require.True(t, pending.ConfirmationRequired)
 	require.Equal(t, []string{"registered-client"}, clients.touches)
+}
+
+func TestAuthorizeHandler_OnlyStarlogzUIBypassesConfirmation(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.clients = &testClientStore{records: []store.OAuthClient{
+		{ClientID: "starlogz-ui", ClientName: "Dashboard", RedirectURIs: []string{"http://example.com/ui/auth/callback"}, Scope: "insights:read"},
+		{ClientID: "external", ClientName: "starlogz-ui", RedirectURIs: []string{"https://client.example.com/callback"}, Scope: "insights:read"},
+	}}
+
+	for _, test := range []struct {
+		clientID, redirectURI string
+		wantConfirmation      bool
+	}{
+		{clientID: "starlogz-ui", redirectURI: "http://example.com/ui/auth/callback", wantConfirmation: false},
+		{clientID: "external", redirectURI: "https://client.example.com/callback", wantConfirmation: true},
+	} {
+		q := url.Values{
+			"response_type": {"code"}, "client_id": {test.clientID}, "redirect_uri": {test.redirectURI},
+			"code_challenge": {pkceChallenge("verifier")}, "code_challenge_method": {"S256"},
+		}
+		req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+		w := httptest.NewRecorder()
+		srv.AuthorizeHandler().ServeHTTP(w, req)
+		require.Equal(t, http.StatusFound, w.Code)
+		location, err := url.Parse(w.Header().Get("Location"))
+		require.NoError(t, err)
+		pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
+		require.NoError(t, err)
+		require.Equal(t, test.wantConfirmation, pending.ConfirmationRequired)
+	}
 }
 
 func TestAuthorizeHandler_RejectsScopeOutsideRegisteredClient(t *testing.T) {
@@ -1979,6 +2044,331 @@ func TestGitHubCallbackHandler_UpsertUserCalled(t *testing.T) {
 
 	loc := w.Header().Get("Location")
 	require.Contains(t, loc, "code=")
+}
+
+func TestExternalAuthorizationRequiresConfirmationAndApprovalIssuesUsableCode(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	authState := srv.authState.(*inMemAuthState)
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	redirectURI := "https://client.example.com/callback?keep=value&code=old&error=old&state=old"
+	srv.github = &mockGitHubConnector{
+		token:    &oauth2.Token{AccessToken: "gha_test", RefreshToken: "ghr_test", Expiry: time.Now().Add(time.Hour)},
+		identity: &githubIdentity{ID: 42, Email: "dev@example.com", Login: "devuser"},
+	}
+	require.NoError(t, srv.authState.StorePendingAuth(t.Context(), "external-state", store.PendingAuth{
+		ClientID: "external-client", ClientName: `<script>alert("x")</script>`, RedirectURI: redirectURI,
+		Scope: "insights:read insights:write", CodeChallenge: pkceChallenge(verifier),
+		ClientState: "opaque-client-state", ConfirmationRequired: true,
+	}))
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=external-state&code=github-code", nil)
+	callbackW := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(callbackW, callbackReq)
+
+	require.Equal(t, http.StatusOK, callbackW.Code)
+	require.Equal(t, "no-store", callbackW.Header().Get("Cache-Control"))
+	confirmationCSP := callbackW.Header().Get("Content-Security-Policy")
+	require.Contains(t, confirmationCSP, "default-src 'none'")
+	require.Contains(t, confirmationCSP, "form-action 'self' https://client.example.com")
+	require.Contains(t, callbackW.Body.String(), `&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt;`)
+	require.NotContains(t, callbackW.Body.String(), `<script>alert`)
+	require.Contains(t, callbackW.Body.String(), "insights:read")
+	require.Contains(t, callbackW.Body.String(), "insights:write")
+	require.Contains(t, callbackW.Body.String(), "keep=value&amp;code=old")
+	require.Contains(t, callbackW.Body.String(), `id="authorization-confirmation"`)
+	require.Contains(t, callbackW.Body.String(), `if (submitted)`)
+	require.Contains(t, callbackW.Body.String(), `decision.name = "decision"`)
+	require.Contains(t, callbackW.Body.String(), `button.disabled = true`)
+	require.Empty(t, authState.codes)
+	require.Len(t, authState.confirmations, 1)
+
+	token := confirmationTokenFromBody(t, callbackW.Body.String())
+	form := url.Values{"token": {token}, "decision": {"approve"}}
+	confirmReq := httptest.NewRequest(http.MethodPost, confirmationPath, strings.NewReader(form.Encode()))
+	confirmReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	confirmW := httptest.NewRecorder()
+	srv.AuthorizationConfirmationHandler().ServeHTTP(confirmW, confirmReq)
+
+	require.Equal(t, http.StatusSeeOther, confirmW.Code)
+	location, err := url.Parse(confirmW.Header().Get("Location"))
+	require.NoError(t, err)
+	require.Equal(t, "value", location.Query().Get("keep"))
+	require.Equal(t, "opaque-client-state", location.Query().Get("state"))
+	require.Empty(t, location.Query().Get("error"))
+	code := location.Query().Get("code")
+	require.NotEmpty(t, code)
+
+	tokenForm := url.Values{
+		"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {verifier},
+		"client_id": {"external-client"}, "redirect_uri": {redirectURI},
+	}
+	tokenReq := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(tokenForm.Encode()))
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenW := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(tokenW, tokenReq)
+	require.Equal(t, http.StatusOK, tokenW.Code)
+
+	replayReq := httptest.NewRequest(http.MethodPost, confirmationPath, strings.NewReader(form.Encode()))
+	replayReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	replayW := httptest.NewRecorder()
+	srv.AuthorizationConfirmationHandler().ServeHTTP(replayW, replayReq)
+	require.Equal(t, http.StatusBadRequest, replayW.Code)
+}
+
+func TestAuthorizationConfirmationDenialRedirectsWithoutCode(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	authState := srv.authState.(*inMemAuthState)
+	token, tokenHash, err := newConfirmationToken()
+	require.NoError(t, err)
+	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
+		AuthCode:    store.AuthCode{RedirectURI: "https://client.example.com/callback?keep=1&code=old&error_description=old"},
+		ClientState: "original-state",
+	}))
+	form := url.Values{"token": {token}, "decision": {"deny"}}
+	req := httptest.NewRequest(http.MethodPost, confirmationPath, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.AuthorizationConfirmationHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusSeeOther, w.Code)
+	location, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	require.Equal(t, "access_denied", location.Query().Get("error"))
+	require.Equal(t, "original-state", location.Query().Get("state"))
+	require.Equal(t, "1", location.Query().Get("keep"))
+	require.Empty(t, location.Query().Get("code"))
+	require.Empty(t, location.Query().Get("error_description"))
+	require.Empty(t, authState.codes)
+}
+
+func TestAuthorizationResultRedirectPreservesUnrelatedRawQuery(t *testing.T) {
+	require.NoError(t, validateRedirectURIs([]string{"https://client.example.com/callback?tenant=a;b&keep=1"}))
+	tests := []struct {
+		name         string
+		redirectURI  string
+		clientState  string
+		approve      bool
+		code         string
+		wantRawQuery string
+	}{
+		{
+			name: "raw semicolon", redirectURI: "https://client.example.com/callback?tenant=a;b&keep=1",
+			clientState: "new-state", approve: true, code: "new-code",
+			wantRawQuery: "tenant=a;b&keep=1&code=new-code&state=new-state",
+		},
+		{
+			name:        "duplicates and empty values",
+			redirectURI: "https://client.example.com/callback?flag&empty=&dup=1&dup=2&code=old&error=old&error_description=old&state=old",
+			clientState: "new-state", approve: false,
+			wantRawQuery: "flag&empty=&dup=1&dup=2&error=access_denied&state=new-state",
+		},
+		{
+			name:        "encoded reserved names",
+			redirectURI: "https://client.example.com/callback?%63ode=old&%73tate=old&na%6De=v%2f",
+			approve:     true, code: "new-code",
+			wantRawQuery: "na%6De=v%2f&code=new-code",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := authorizationResultRedirect(&store.AuthorizationConfirmationResult{
+				RedirectURI: test.redirectURI, ClientState: test.clientState,
+			}, test.approve, test.code)
+			require.NoError(t, err)
+			parsed, err := url.Parse(got)
+			require.NoError(t, err)
+			require.Equal(t, test.wantRawQuery, parsed.RawQuery)
+		})
+	}
+}
+
+func TestRenderAuthorizationConfirmationEscapesUnnamedClientAndRedirect(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := renderAuthorizationConfirmation(w, &store.PendingAuth{
+		ClientID:    `<img src=x onerror="alert(1)">`,
+		RedirectURI: `https://client.example.com/callback?next=<script>alert(1)</script>`,
+		Scope:       scopeInsightsRead,
+	}, "confirmation-token")
+	require.NoError(t, err)
+	require.Contains(t, w.Body.String(), "Authorize Unnamed client")
+	require.Contains(t, w.Body.String(), `&lt;img src=x onerror=&#34;alert(1)&#34;&gt;`)
+	require.Contains(t, w.Body.String(), `next=&lt;script&gt;alert(1)&lt;/script&gt;`)
+	require.NotContains(t, w.Body.String(), `<img src=x`)
+	require.NotContains(t, w.Body.String(), `<script>alert`)
+	require.Contains(t, w.Body.String(), `<form id="authorization-confirmation" method="post" action="`+confirmationPath+`">`)
+}
+
+func TestAuthorizationConfirmationFormActionSource(t *testing.T) {
+	tests := []struct {
+		name        string
+		redirectURI string
+		want        string
+	}{
+		{name: "https", redirectURI: "https://client.example.com:8443/callback?tenant=one", want: "https://client.example.com:8443"},
+		{name: "localhost", redirectURI: "http://localhost:55519/callback", want: "http://localhost:55519"},
+		{name: "IPv6 loopback", redirectURI: "http://[::1]:55519/callback", want: "http://[::1]:55519"},
+		{name: "international hostname", redirectURI: "https://bücher.example/callback", want: "https://xn--bcher-kva.example"},
+		{name: "case normalization", redirectURI: "HTTPS://CLIENT.EXAMPLE/callback", want: "https://client.example"},
+		{name: "custom scheme", redirectURI: "claude://auth/callback", want: "claude:"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := authorizationConfirmationFormActionSource(test.redirectURI)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestAuthorizationConfirmationFormActionSourceRejectsUnsafeHost(t *testing.T) {
+	_, err := authorizationConfirmationFormActionSource("https://client.example;form-action%20*/callback")
+	require.Error(t, err)
+}
+
+func TestGitHubCallbackConfirmationStoreFailureReturnsGenericError(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	authState := srv.authState.(*inMemAuthState)
+	authState.storeConfirmationErr = errors.New("database unavailable")
+	srv.github = &mockGitHubConnector{
+		token:    &oauth2.Token{AccessToken: "gha_test"},
+		identity: &githubIdentity{ID: 42, Email: "dev@example.com", Login: "devuser"},
+	}
+	require.NoError(t, authState.StorePendingAuth(t.Context(), "store-failure-state", store.PendingAuth{
+		ClientID: "external-client", RedirectURI: "https://client.example.com/callback",
+		Scope: scopeInsightsRead, CodeChallenge: "challenge", ConfirmationRequired: true,
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state=store-failure-state&code=github-code", nil)
+	w := httptest.NewRecorder()
+	srv.GitHubCallbackHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Body.String(), "internal error")
+	require.NotContains(t, w.Body.String(), "database unavailable")
+	require.Empty(t, authState.confirmations)
+	require.Empty(t, authState.codes)
+}
+
+func TestAuthorizationConfirmationCompletionFailureReturnsGenericError(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	authState := srv.authState.(*inMemAuthState)
+	token, tokenHash, err := newConfirmationToken()
+	require.NoError(t, err)
+	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
+		AuthCode: store.AuthCode{RedirectURI: "https://client.example.com/callback"},
+	}))
+	authState.completeConfirmationErr = errors.New("database unavailable")
+	form := url.Values{"token": {token}, "decision": {confirmationDecisionApprove}}
+	req := httptest.NewRequest(http.MethodPost, confirmationPath, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", confirmationFormContentType)
+	w := httptest.NewRecorder()
+	srv.AuthorizationConfirmationHandler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Body.String(), "internal error")
+	require.NotContains(t, w.Body.String(), "database unavailable")
+	require.Len(t, authState.confirmations, 1)
+	require.Empty(t, authState.codes)
+}
+
+func TestAuthorizationConfirmationRejectsMalformedAndCrossOriginRequests(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	tests := []struct {
+		name, method, target, contentType, body string
+		headers                                 map[string]string
+		wantStatus                              int
+	}{
+		{name: "wrong method", method: http.MethodGet, target: confirmationPath, wantStatus: http.StatusMethodNotAllowed},
+		{name: "query", method: http.MethodPost, target: confirmationPath + "?x=1", contentType: "application/x-www-form-urlencoded", body: "token=x&decision=approve", wantStatus: http.StatusBadRequest},
+		{name: "wrong media type", method: http.MethodPost, target: confirmationPath, contentType: "application/json", body: `{}`, wantStatus: http.StatusUnsupportedMediaType},
+		{name: "unknown field", method: http.MethodPost, target: confirmationPath, contentType: "application/x-www-form-urlencoded", body: "token=x&decision=approve&redirect_uri=x", wantStatus: http.StatusBadRequest},
+		{name: "duplicate", method: http.MethodPost, target: confirmationPath, contentType: "application/x-www-form-urlencoded", body: "token=x&token=y&decision=approve", wantStatus: http.StatusBadRequest},
+		{name: "oversized", method: http.MethodPost, target: confirmationPath, contentType: "application/x-www-form-urlencoded", body: strings.Repeat("x", (4<<10)+1), wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "cross site", method: http.MethodPost, target: confirmationPath, contentType: "application/x-www-form-urlencoded", body: "token=x&decision=approve", headers: map[string]string{"Sec-Fetch-Site": "cross-site"}, wantStatus: http.StatusForbidden},
+		{name: "foreign origin", method: http.MethodPost, target: confirmationPath, contentType: "application/x-www-form-urlencoded", body: "token=x&decision=approve", headers: map[string]string{"Origin": "https://attacker.example"}, wantStatus: http.StatusForbidden},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(test.method, test.target, strings.NewReader(test.body))
+			if test.contentType != "" {
+				req.Header.Set("Content-Type", test.contentType)
+			}
+			for key, value := range test.headers {
+				req.Header.Set(key, value)
+			}
+			w := httptest.NewRecorder()
+			srv.AuthorizationConfirmationHandler().ServeHTTP(w, req)
+			require.Equal(t, test.wantStatus, w.Code)
+			require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		})
+	}
+}
+
+func TestAuthorizationConfirmationConcurrentApprovalHasOneWinner(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	token, tokenHash, err := newConfirmationToken()
+	require.NoError(t, err)
+	require.NoError(t, srv.authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
+		AuthCode: store.AuthCode{RedirectURI: "https://client.example.com/callback"},
+	}))
+	form := url.Values{"token": {token}, "decision": {"approve"}}.Encode()
+	statuses := make(chan int, 2)
+	for range 2 {
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, confirmationPath, strings.NewReader(form))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			srv.AuthorizationConfirmationHandler().ServeHTTP(w, req)
+			statuses <- w.Code
+		}()
+	}
+	got := []int{<-statuses, <-statuses}
+	require.ElementsMatch(t, []int{http.StatusSeeOther, http.StatusBadRequest}, got)
+}
+
+func TestAuthorizationConfirmationConcurrentApproveAndDenyHaveOneWinner(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	authState := srv.authState.(*inMemAuthState)
+	token, tokenHash, err := newConfirmationToken()
+	require.NoError(t, err)
+	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
+		AuthCode: store.AuthCode{RedirectURI: "https://client.example.com/callback"},
+	}))
+	type submissionResult struct {
+		decision string
+		status   int
+	}
+	results := make(chan submissionResult, 2)
+	for _, decision := range []string{confirmationDecisionApprove, confirmationDecisionDeny} {
+		go func(decision string) {
+			form := url.Values{"token": {token}, "decision": {decision}}.Encode()
+			req := httptest.NewRequest(http.MethodPost, confirmationPath, strings.NewReader(form))
+			req.Header.Set("Content-Type", confirmationFormContentType)
+			w := httptest.NewRecorder()
+			srv.AuthorizationConfirmationHandler().ServeHTTP(w, req)
+			results <- submissionResult{decision: decision, status: w.Code}
+		}(decision)
+	}
+	got := []submissionResult{<-results, <-results}
+	var winner string
+	for _, result := range got {
+		if result.status == http.StatusSeeOther {
+			winner = result.decision
+		} else {
+			require.Equal(t, http.StatusBadRequest, result.status)
+		}
+	}
+	require.NotEmpty(t, winner)
+	if winner == confirmationDecisionApprove {
+		require.Len(t, authState.codes, 1)
+	} else {
+		require.Empty(t, authState.codes)
+	}
+}
+
+func confirmationTokenFromBody(t *testing.T, body string) string {
+	t.Helper()
+	matches := regexp.MustCompile(`name="token" value="([^"]+)"`).FindStringSubmatch(body)
+	require.Len(t, matches, 2)
+	return matches[1]
 }
 
 // --- Logout ---

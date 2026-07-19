@@ -33,12 +33,13 @@ func (p *captureEventPublisher) Publish(_ context.Context, event wideevent.Event
 
 // memAuthState is a minimal in-memory AuthStateStore for tests.
 type memAuthState struct {
-	pending map[string]store.PendingAuth
-	codes   map[string]store.AuthCode
+	pending       map[string]store.PendingAuth
+	codes         map[string]store.AuthCode
+	confirmations map[string]store.AuthorizationConfirmation
 }
 
 func newMemAuthState() *memAuthState {
-	return &memAuthState{pending: map[string]store.PendingAuth{}, codes: map[string]store.AuthCode{}}
+	return &memAuthState{pending: map[string]store.PendingAuth{}, codes: map[string]store.AuthCode{}, confirmations: map[string]store.AuthorizationConfirmation{}}
 }
 
 func (m *memAuthState) StorePendingAuth(_ context.Context, state string, p store.PendingAuth) error {
@@ -56,6 +57,21 @@ func (m *memAuthState) ConsumePendingAuth(_ context.Context, state string) (*sto
 func (m *memAuthState) StoreAuthCode(_ context.Context, code string, c store.AuthCode) error {
 	m.codes[code] = c
 	return nil
+}
+func (m *memAuthState) StoreAuthorizationConfirmation(_ context.Context, tokenHash []byte, c store.AuthorizationConfirmation) error {
+	m.confirmations[string(tokenHash)] = c
+	return nil
+}
+func (m *memAuthState) CompleteAuthorizationConfirmation(_ context.Context, tokenHash []byte, approve bool, code string) (*store.AuthorizationConfirmationResult, error) {
+	c, ok := m.confirmations[string(tokenHash)]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(m.confirmations, string(tokenHash))
+	if approve {
+		m.codes[code] = c.AuthCode
+	}
+	return &store.AuthorizationConfirmationResult{RedirectURI: c.RedirectURI, ClientState: c.ClientState}, nil
 }
 func (m *memAuthState) ConsumeAuthCode(_ context.Context, code string) (*store.AuthCode, error) {
 	c, ok := m.codes[code]
@@ -155,6 +171,7 @@ func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 	}{
 		{method: http.MethodGet, path: "/oauth2/authorize?response_type=invalid"},
 		{method: http.MethodGet, path: "/auth/github/callback"},
+		{method: http.MethodPost, path: "/oauth2/authorize/confirm", body: "token=invalid&decision=approve"},
 		{method: http.MethodPost, path: "/oauth2/token", body: "grant_type=authorization_code"},
 		{method: http.MethodPost, path: "/oauth2/token", body: "grant_type=refresh_token"},
 		{method: http.MethodGet, path: "/login"},
@@ -172,10 +189,11 @@ func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 	}
 
-	require.Len(t, publisher.events, 7)
+	require.Len(t, publisher.events, 8)
 	require.Equal(t, []wideevent.Name{
 		wideevent.OAuthAuthorizationCompleted,
 		wideevent.OAuthGitHubCallbackCompleted,
+		wideevent.OAuthAuthorizationConfirmationCompleted,
 		wideevent.OAuthTokenExchangeCompleted,
 		wideevent.OAuthRefreshCompleted,
 		wideevent.UILoginCompleted,
@@ -186,7 +204,8 @@ func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 		require.NoError(t, event.Validate())
 		require.NotEmpty(t, event.RequestID)
 	}
-	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[6].Outcome)
+	require.Equal(t, wideevent.OutcomeFailure, publisher.events[2].Outcome)
+	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[7].Outcome)
 }
 
 func TestUnclassifiedTokenRequestsDoNotEmitWideEvents(t *testing.T) {
@@ -302,6 +321,71 @@ func TestPublicAsset_Route(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Contains(t, resp.Header.Get("Content-Type"), "javascript")
+}
+
+func TestGlobalSecurityHeadersCoverRoutesAndPreflights(t *testing.T) {
+	ts, _ := testFixture(t)
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/dashboard"},
+		{method: http.MethodGet, path: "/health"},
+		{method: http.MethodGet, path: "/public/dashboard.js"},
+		{method: http.MethodGet, path: "/missing"},
+		{method: http.MethodOptions, path: "/oauth2/token"},
+	}
+	for _, test := range tests {
+		req, err := http.NewRequest(test.method, ts.URL+test.path, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
+		require.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
+		require.Equal(t, "no-referrer", resp.Header.Get("Referrer-Policy"))
+		require.NotEmpty(t, resp.Header.Get("Content-Security-Policy"))
+		require.Empty(t, resp.Header.Get("Strict-Transport-Security"))
+	}
+}
+
+func TestHSTSUsesConfiguredServerURL(t *testing.T) {
+	ts, _ := testFixtureWithConfig(t, func(cfg *server.Config) {
+		cfg.BaseURL = "https://starlogz.example"
+	})
+	resp, err := http.Get(ts.URL + "/health")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	require.Equal(t, "max-age=31536000", resp.Header.Get("Strict-Transport-Security"))
+}
+
+func TestInteractiveAuthResponsesAreNotCached(t *testing.T) {
+	ts, _ := testFixture(t)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	tests := []struct {
+		method, path, body string
+	}{
+		{method: http.MethodGet, path: "/login"},
+		{method: http.MethodGet, path: "/ui/auth/callback"},
+		{method: http.MethodPost, path: "/logout"},
+		{method: http.MethodGet, path: "/oauth2/authorize?response_type=invalid"},
+		{method: http.MethodGet, path: "/auth/github/callback"},
+		{method: http.MethodPost, path: "/auth/logout"},
+		{method: http.MethodPost, path: "/oauth2/authorize/confirm", body: "token=invalid&decision=approve"},
+	}
+	for _, test := range tests {
+		req, err := http.NewRequest(test.method, ts.URL+test.path, strings.NewReader(test.body))
+		require.NoError(t, err)
+		if test.body != "" {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, "no-store", resp.Header.Get("Cache-Control"), test.path)
+	}
 }
 
 func TestUIRPC_MissingSession(t *testing.T) {

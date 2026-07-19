@@ -97,6 +97,7 @@ func (s *Server) newRetiredRefreshToken(refreshToken, reason string, grant *stor
 // extracts the jti and exp claims, and revokes the token.
 func (s *Server) LogoutHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -313,10 +314,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		}
 	}
 
-	log.InfoContext(ctx, "token exchange: issued JWT",
-		slog.String("sub", pc.Sub),
-		slog.String("scope", pc.Scope),
-	)
+	log.InfoContext(ctx, "token exchange: issued JWT", slog.String("sub", pc.Sub))
 
 	s.touchRegisteredClient(ctx, log, pc.ClientID)
 	writeTokenResponse(ctx, w, tokenString, pc.Scope, ourRefreshToken, pc.RefreshTokenExpiry, jwtExpiry)
@@ -694,7 +692,6 @@ func (s *Server) DCRHandler() http.Handler {
 		}
 		log.InfoContext(ctx, "DCR client registered",
 			slog.String("client_id", clientID),
-			slog.String("registered_scope", req.Scope),
 		)
 
 		resp := &oauthex.ClientRegistrationResponse{
@@ -713,6 +710,7 @@ func (s *Server) DCRHandler() http.Handler {
 
 func (s *Server) GitHubCallbackHandler() http.Handler {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -764,8 +762,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			sub = user.ID.String()
 		}
 
-		code := uuid.New().String()
-		if err := s.authState.StoreAuthCode(ctx, code, storepkg.AuthCode{
+		authCode := storepkg.AuthCode{
 			Sub:                sub,
 			GitHubID:           identity.ID,
 			Email:              identity.Email,
@@ -777,38 +774,58 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			RefreshToken:       githubToken.RefreshToken,
 			AccessTokenExpiry:  githubToken.Expiry,
 			RefreshTokenExpiry: extractRefreshExpiry(githubToken),
-		}); err != nil {
+		}
+
+		if pending.ConfirmationRequired {
+			confirmationToken, tokenHash, tokenErr := newConfirmationToken()
+			if tokenErr != nil {
+				log.ErrorContext(ctx, "generate authorization confirmation token failed", slog.Any("error", tokenErr))
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			if err := s.authState.StoreAuthorizationConfirmation(ctx, tokenHash, storepkg.AuthorizationConfirmation{
+				AuthCode: authCode, ClientName: pending.ClientName, ClientState: pending.ClientState,
+			}); err != nil {
+				log.ErrorContext(ctx, "store authorization confirmation failed", slog.Any("error", err))
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			if err := renderAuthorizationConfirmation(w, pending, confirmationToken); err != nil {
+				log.ErrorContext(ctx, "render authorization confirmation failed", slog.Any("error", err))
+			}
+			return
+		}
+
+		code := uuid.New().String()
+		if err := s.authState.StoreAuthCode(ctx, code, authCode); err != nil {
 			log.ErrorContext(ctx, "store auth code failed", slog.Any("error", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		redirectTo, err := url.Parse(pending.RedirectURI)
+		redirectTo, err := authorizationResultRedirect(&storepkg.AuthorizationConfirmationResult{
+			RedirectURI: pending.RedirectURI,
+			ClientState: pending.ClientState,
+		}, true, code)
 		if err != nil {
 			log.ErrorContext(ctx, "invalid redirect URI in pending auth")
 			http.Error(w, "invalid redirect_uri", http.StatusInternalServerError)
 			return
 		}
 
-		rq := redirectTo.Query()
-		rq.Set("code", code)
-		if pending.ClientState != "" {
-			rq.Set("state", pending.ClientState)
-		}
-		redirectTo.RawQuery = rq.Encode()
-
 		log.InfoContext(ctx, "GitHub auth complete",
 			slog.String("sub", sub),
 		)
 
 		// redirect_uri was validated against the registered client in AuthorizeHandler before being stored.
-		http.Redirect(w, r, redirectTo.String(), http.StatusFound) //nolint:gosec
+		http.Redirect(w, r, redirectTo, http.StatusFound) //nolint:gosec
 	})
 	return s.events.HTTPHandler(wideevent.OAuthGitHubCallbackCompleted, handler)
 }
 
 func (s *Server) AuthorizeHandler() http.Handler {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -879,12 +896,18 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		}
 
 		githubState := uuid.New().String()
+		clientName := ""
+		if client != nil {
+			clientName = client.ClientName
+		}
 		if err := s.authState.StorePendingAuth(ctx, githubState, storepkg.PendingAuth{
-			ClientID:      clientID,
-			RedirectURI:   redirectURI,
-			Scope:         scope,
-			CodeChallenge: codeChallenge,
-			ClientState:   q.Get("state"),
+			ClientID:             clientID,
+			ClientName:           clientName,
+			RedirectURI:          redirectURI,
+			Scope:                scope,
+			CodeChallenge:        codeChallenge,
+			ClientState:          q.Get("state"),
+			ConfirmationRequired: authorizationConfirmationRequired(clientID),
 		}); err != nil {
 			log.ErrorContext(ctx, "store pending auth failed", slog.Any("error", err))
 			writeOAuthError(w, "server_error", "failed to store authorization state", http.StatusInternalServerError)
@@ -892,7 +915,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		}
 		s.touchRegisteredClient(ctx, log, clientID)
 
-		log.InfoContext(ctx, "authorize: redirecting to GitHub", slog.String("scope", scope))
+		log.InfoContext(ctx, "authorize: redirecting to GitHub")
 
 		authURL := s.github.AuthCodeURL(githubState)
 		http.Redirect(w, r, authURL, http.StatusFound)

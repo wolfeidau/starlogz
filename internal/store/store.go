@@ -66,6 +66,8 @@ type Store interface {
 
 	StorePendingAuth(ctx context.Context, state string, p PendingAuth) error
 	ConsumePendingAuth(ctx context.Context, state string) (*PendingAuth, error)
+	StoreAuthorizationConfirmation(ctx context.Context, tokenHash []byte, c AuthorizationConfirmation) error
+	CompleteAuthorizationConfirmation(ctx context.Context, tokenHash []byte, approve bool, code string) (*AuthorizationConfirmationResult, error)
 	StoreAuthCode(ctx context.Context, code string, c AuthCode) error
 	ConsumeAuthCode(ctx context.Context, code string) (*AuthCode, error)
 
@@ -427,11 +429,26 @@ type OAuthClient struct {
 
 // PendingAuth holds client PKCE and redirect params across the GitHub OAuth2 redirect leg.
 type PendingAuth struct {
-	ClientID      string
-	RedirectURI   string
-	Scope         string
-	CodeChallenge string
-	ClientState   string
+	ClientID             string
+	ClientName           string
+	RedirectURI          string
+	Scope                string
+	CodeChallenge        string
+	ClientState          string
+	ConfirmationRequired bool
+}
+
+// AuthorizationConfirmation binds an authenticated identity to the client request awaiting consent.
+// GitHub tokens are stored encrypted at rest; this struct carries plaintext values.
+type AuthorizationConfirmation struct {
+	AuthCode
+	ClientName  string
+	ClientState string
+}
+
+type AuthorizationConfirmationResult struct {
+	RedirectURI string
+	ClientState string
 }
 
 // AuditLogEntry is a single row from the audit_log table.

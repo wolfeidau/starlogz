@@ -155,7 +155,7 @@ func TestEmitterBoundsPublishTimeout(t *testing.T) {
 
 func TestAllEventNamesValidate(t *testing.T) {
 	names := []Name{
-		OAuthAuthorizationCompleted, OAuthGitHubCallbackCompleted,
+		OAuthAuthorizationCompleted, OAuthAuthorizationConfirmationCompleted, OAuthGitHubCallbackCompleted,
 		OAuthTokenExchangeCompleted, OAuthRefreshCompleted,
 		UILoginCompleted, UISessionCreated, UISessionRevoked,
 		MCPToolCallCompleted,

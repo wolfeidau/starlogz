@@ -29,6 +29,7 @@ var prohibitedKeys = map[string]struct{}{
 	"request_uri":              {},
 	"requested_scope":          {},
 	"source_ip":                {},
+	"scope":                    {},
 	"state":                    {},
 	"stored_uri":               {},
 	"tag":                      {},

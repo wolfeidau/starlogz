@@ -778,9 +778,13 @@ func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.Pend
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO pending_auths (state, client_id, redirect_uri, scope, code_challenge, client_state, expires_at)
-		VALUES ($1, NULLIF($2,''), $3, $4, $5, NULLIF($6,''), now() + interval '10 minutes')`,
-		state, p.ClientID, p.RedirectURI, p.Scope, p.CodeChallenge, p.ClientState)
+		INSERT INTO pending_auths
+		    (state, client_id, client_name, redirect_uri, scope, code_challenge, client_state,
+		     confirmation_required, expires_at)
+		VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, NULLIF($7,''), $8,
+		        now() + interval '10 minutes')`,
+		state, p.ClientID, p.ClientName, p.RedirectURI, p.Scope, p.CodeChallenge, p.ClientState,
+		p.ConfirmationRequired)
 	if err != nil {
 		return fmt.Errorf("insert pending auth: %w", err)
 	}
@@ -802,8 +806,10 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 	err := s.pool.QueryRow(ctx, `
 		DELETE FROM pending_auths
 		WHERE state = $1 AND expires_at > now()
-		RETURNING COALESCE(client_id,''), redirect_uri, scope, code_challenge, COALESCE(client_state,'')`,
-		state).Scan(&p.ClientID, &p.RedirectURI, &p.Scope, &p.CodeChallenge, &p.ClientState)
+		RETURNING COALESCE(client_id,''), client_name, redirect_uri, scope, code_challenge,
+		          COALESCE(client_state,''), confirmation_required`,
+		state).Scan(&p.ClientID, &p.ClientName, &p.RedirectURI, &p.Scope, &p.CodeChallenge,
+		&p.ClientState, &p.ConfirmationRequired)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -811,6 +817,91 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 		return nil, fmt.Errorf("consume pending auth: %w", err)
 	}
 	return p, nil
+}
+
+// StoreAuthorizationConfirmation persists a post-GitHub confirmation with a 10-minute TTL.
+func (s *Store) StoreAuthorizationConfirmation(ctx context.Context, tokenHash []byte, c store.AuthorizationConfirmation) error {
+	if s.enc == nil {
+		return fmt.Errorf("encryption key not configured")
+	}
+
+	encAccess, encRefresh, accessExpiry, refreshExpiry, err := s.encryptAuthCodeTokens(c.AuthCode)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO authorization_confirmations
+		    (token_hash, sub, github_id, email, scope, code_challenge, redirect_uri, client_id,
+		     client_name, client_state, access_token, refresh_token, access_token_expiry,
+		     refresh_token_expiry, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, NULLIF($10,''), $11, $12,
+		        $13, $14, now() + interval '10 minutes')`,
+		tokenHash, c.Sub, c.GitHubID, c.Email, c.Scope, c.CodeChallenge, c.RedirectURI,
+		c.ClientID, c.ClientName, c.ClientState, encAccess, encRefresh, accessExpiry, refreshExpiry)
+	if err != nil {
+		return fmt.Errorf("insert authorization confirmation: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM authorization_confirmations WHERE expires_at < now()`); err != nil {
+		return fmt.Errorf("prune authorization confirmations: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// CompleteAuthorizationConfirmation consumes a confirmation and, on approval, creates an auth code atomically.
+func (s *Store) CompleteAuthorizationConfirmation(ctx context.Context, tokenHash []byte, approve bool, code string) (*store.AuthorizationConfirmationResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var c store.AuthCode
+	var clientState string
+	var clientID *string
+	var encAccess, encRefresh []byte
+	var accessExpiry, refreshExpiry *time.Time
+	err = tx.QueryRow(ctx, `
+		DELETE FROM authorization_confirmations
+		WHERE token_hash = $1 AND expires_at > now()
+		RETURNING sub, github_id, email, scope, code_challenge, redirect_uri,
+		          client_id, COALESCE(client_state,''), access_token, refresh_token,
+		          access_token_expiry, refresh_token_expiry`, tokenHash).
+		Scan(&c.Sub, &c.GitHubID, &c.Email, &c.Scope, &c.CodeChallenge, &c.RedirectURI,
+			&clientID, &clientState, &encAccess, &encRefresh, &accessExpiry, &refreshExpiry)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("consume authorization confirmation: %w", err)
+	}
+	if clientID != nil {
+		c.ClientID = *clientID
+	}
+
+	if approve {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO auth_codes
+			    (code, sub, github_id, email, scope, code_challenge, redirect_uri, client_id,
+			     access_token, refresh_token, access_token_expiry, refresh_token_expiry, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, $11, $12,
+			        now() + interval '5 minutes')`,
+			code, c.Sub, c.GitHubID, c.Email, c.Scope, c.CodeChallenge, c.RedirectURI, c.ClientID,
+			encAccess, encRefresh, accessExpiry, refreshExpiry)
+		if err != nil {
+			return nil, fmt.Errorf("insert auth code: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit authorization confirmation: %w", err)
+	}
+	return &store.AuthorizationConfirmationResult{RedirectURI: c.RedirectURI, ClientState: clientState}, nil
 }
 
 // StoreAuthCode persists an authorization code with a 5-minute TTL.
@@ -822,28 +913,9 @@ func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode
 		return fmt.Errorf("encryption key not configured")
 	}
 
-	encAccess := []byte{}
-	encRefresh := []byte{}
-	var err error
-	if c.AccessToken != "" {
-		encAccess, err = s.enc.Seal(c.AccessToken)
-		if err != nil {
-			return fmt.Errorf("encrypt access token: %w", err)
-		}
-	}
-	if c.RefreshToken != "" {
-		encRefresh, err = s.enc.Seal(c.RefreshToken)
-		if err != nil {
-			return fmt.Errorf("encrypt refresh token: %w", err)
-		}
-	}
-
-	var accessExpiry, refreshExpiry *time.Time
-	if !c.AccessTokenExpiry.IsZero() {
-		accessExpiry = &c.AccessTokenExpiry
-	}
-	if !c.RefreshTokenExpiry.IsZero() {
-		refreshExpiry = &c.RefreshTokenExpiry
+	encAccess, encRefresh, accessExpiry, refreshExpiry, err := s.encryptAuthCodeTokens(c)
+	if err != nil {
+		return err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -870,6 +942,32 @@ func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (s *Store) encryptAuthCodeTokens(c store.AuthCode) ([]byte, []byte, *time.Time, *time.Time, error) {
+	encAccess := []byte{}
+	encRefresh := []byte{}
+	var err error
+	if c.AccessToken != "" {
+		encAccess, err = s.enc.Seal(c.AccessToken)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("encrypt access token: %w", err)
+		}
+	}
+	if c.RefreshToken != "" {
+		encRefresh, err = s.enc.Seal(c.RefreshToken)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("encrypt refresh token: %w", err)
+		}
+	}
+	var accessExpiry, refreshExpiry *time.Time
+	if !c.AccessTokenExpiry.IsZero() {
+		accessExpiry = &c.AccessTokenExpiry
+	}
+	if !c.RefreshTokenExpiry.IsZero() {
+		refreshExpiry = &c.RefreshTokenExpiry
+	}
+	return encAccess, encRefresh, accessExpiry, refreshExpiry, nil
 }
 
 // ConsumeAuthCode atomically deletes and returns the auth code record.

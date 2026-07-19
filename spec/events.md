@@ -1,7 +1,7 @@
 # Wide event contract
 
 > Status: Current contract
-> Last reviewed: 2026-07-18
+> Last reviewed: 2026-07-19
 > Authority: Behavioral contract; current code, tests, and Terraform provide implementation evidence.
 
 Starlogz emits one bounded completion event for each recognized core OAuth, UI session, and MCP tool flow. These events provide operational counts and failure rates without storing user content or authentication material.
@@ -43,6 +43,7 @@ All events use schema version 1:
 | Event name | Completion boundary |
 |---|---|
 | `oauth.authorization.completed` | The `/oauth2/authorize` handler completed. |
+| `oauth.authorization_confirmation.completed` | The post-GitHub approval or denial handler completed. Both decisions are successful completions; malformed, rejected, expired, or replayed submissions are failures classified from HTTP status. |
 | `oauth.github_callback.completed` | The GitHub callback handler completed. |
 | `oauth.token_exchange.completed` | A recognized `authorization_code` token request completed. |
 | `oauth.refresh.completed` | A recognized `refresh_token` request completed. |
@@ -70,7 +71,7 @@ HTTP events derive the reason from the response status. MCP tool errors use `fai
 
 ## Attributes
 
-`mcp.tool_call.completed` always includes `tool`, selected from the registered tool names. No other event currently includes attributes.
+`mcp.tool_call.completed` always includes `tool`, selected from the registered tool names. No other event, including authorization confirmation, currently includes attributes.
 
 Successful `insight_history`, `insight_search`, and `insight_list` calls also
 include `result_count_bucket`. The approved buckets are `0`, `1-10`, `11-50`,

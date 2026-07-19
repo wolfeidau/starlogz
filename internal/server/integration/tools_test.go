@@ -36,12 +36,13 @@ func TestMain(m *testing.M) {
 }
 
 type memAuthState struct {
-	pending map[string]store.PendingAuth
-	codes   map[string]store.AuthCode
+	pending       map[string]store.PendingAuth
+	codes         map[string]store.AuthCode
+	confirmations map[string]store.AuthorizationConfirmation
 }
 
 func newMemAuthState() *memAuthState {
-	return &memAuthState{pending: map[string]store.PendingAuth{}, codes: map[string]store.AuthCode{}}
+	return &memAuthState{pending: map[string]store.PendingAuth{}, codes: map[string]store.AuthCode{}, confirmations: map[string]store.AuthorizationConfirmation{}}
 }
 
 func (m *memAuthState) StorePendingAuth(_ context.Context, state string, p store.PendingAuth) error {
@@ -61,6 +62,21 @@ func (m *memAuthState) ConsumePendingAuth(_ context.Context, state string) (*sto
 func (m *memAuthState) StoreAuthCode(_ context.Context, code string, c store.AuthCode) error {
 	m.codes[code] = c
 	return nil
+}
+func (m *memAuthState) StoreAuthorizationConfirmation(_ context.Context, tokenHash []byte, c store.AuthorizationConfirmation) error {
+	m.confirmations[string(tokenHash)] = c
+	return nil
+}
+func (m *memAuthState) CompleteAuthorizationConfirmation(_ context.Context, tokenHash []byte, approve bool, code string) (*store.AuthorizationConfirmationResult, error) {
+	c, ok := m.confirmations[string(tokenHash)]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	delete(m.confirmations, string(tokenHash))
+	if approve {
+		m.codes[code] = c.AuthCode
+	}
+	return &store.AuthorizationConfirmationResult{RedirectURI: c.RedirectURI, ClientState: c.ClientState}, nil
 }
 
 func (m *memAuthState) ConsumeAuthCode(_ context.Context, code string) (*store.AuthCode, error) {
