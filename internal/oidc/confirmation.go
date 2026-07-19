@@ -70,7 +70,6 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
         form.appendChild(decision);
         submitter.removeAttribute("name");
         form.querySelectorAll("button[type=submit]").forEach(function (button) { button.disabled = true; });
-        submitter.textContent = submitter.value === "` + confirmationDecisionApprove + `" ? "Continuing…" : "Cancelling…";
       });
     });
   </script>
