@@ -2,6 +2,8 @@ package postgres_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sort"
@@ -2483,21 +2485,25 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	ctx := t.Context()
 
 	p := store.PendingAuth{
-		ClientID:      "client-abc",
-		RedirectURI:   "https://client.example.com/callback",
-		Scope:         "insights:read",
-		CodeChallenge: "challenge-xyz",
-		ClientState:   "opaque-state",
+		ClientID:             "client-abc",
+		ClientName:           "Example client",
+		RedirectURI:          "https://client.example.com/callback",
+		Scope:                "insights:read",
+		CodeChallenge:        "challenge-xyz",
+		ClientState:          "opaque-state",
+		ConfirmationRequired: true,
 	}
 	require.NoError(t, st.StorePendingAuth(ctx, "state-001", p))
 
 	got, err := st.ConsumePendingAuth(ctx, "state-001")
 	require.NoError(t, err)
 	require.Equal(t, p.ClientID, got.ClientID)
+	require.Equal(t, p.ClientName, got.ClientName)
 	require.Equal(t, p.RedirectURI, got.RedirectURI)
 	require.Equal(t, p.Scope, got.Scope)
 	require.Equal(t, p.CodeChallenge, got.CodeChallenge)
 	require.Equal(t, p.ClientState, got.ClientState)
+	require.Equal(t, p.ConfirmationRequired, got.ConfirmationRequired)
 }
 
 func TestConsumePendingAuth_NotFound(t *testing.T) {
@@ -2539,6 +2545,22 @@ func TestStorePendingAuth_EmptyOptionalFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got.ClientID)
 	require.Empty(t, got.ClientState)
+}
+
+func TestPendingAuthMigrationDefaultsAllowLegacyRows(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	pool, err := pgxpool.New(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(t.Context(), `
+		INSERT INTO pending_auths (state, redirect_uri, scope, code_challenge, expires_at)
+		VALUES ('legacy-state', 'https://client.example.com/callback', 'insights:read', 'challenge', now() + interval '1 minute')`)
+	require.NoError(t, err)
+
+	got, err := st.ConsumePendingAuth(t.Context(), "legacy-state")
+	require.NoError(t, err)
+	require.Empty(t, got.ClientName)
+	require.False(t, got.ConfirmationRequired)
 }
 
 // --- StoreAuthCode / ConsumeAuthCode ---
@@ -2625,6 +2647,127 @@ func TestConsumeAuthCode_SingleUse(t *testing.T) {
 
 	_, err = st.ConsumeAuthCode(ctx, "single-use-code")
 	require.ErrorIs(t, err, store.ErrNotFound, "second consume must return ErrNotFound")
+}
+
+// --- Authorization confirmations ---
+
+func TestAuthorizationConfirmationApprovalIsAtomicAndEncrypted(t *testing.T) {
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	tokenHash := store.HashSessionToken("confirmation-token")
+	now := time.Now().UTC().Truncate(time.Second)
+	c := store.AuthorizationConfirmation{
+		AuthCode: store.AuthCode{
+			Sub: "user-uuid", GitHubID: 1004, Email: "user@example.com", Scope: "insights:read",
+			CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
+			ClientID: "client", AccessToken: "gha_confirmation_secret", RefreshToken: "ghr_confirmation_secret",
+			AccessTokenExpiry: now.Add(time.Hour), RefreshTokenExpiry: now.Add(24 * time.Hour),
+		},
+		ClientName: "Example", ClientState: "state-value",
+	}
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, c))
+
+	var encAccess, encRefresh []byte
+	require.NoError(t, pool.QueryRow(ctx, `SELECT access_token, refresh_token FROM authorization_confirmations WHERE token_hash = $1`, tokenHash).Scan(&encAccess, &encRefresh))
+	require.NotContains(t, string(encAccess), c.AccessToken)
+	require.NotContains(t, string(encRefresh), c.RefreshToken)
+
+	result, err := st.CompleteAuthorizationConfirmation(ctx, tokenHash, true, "approved-code")
+	require.NoError(t, err)
+	require.Equal(t, c.RedirectURI, result.RedirectURI)
+	require.Equal(t, c.ClientState, result.ClientState)
+
+	got, err := st.ConsumeAuthCode(ctx, "approved-code")
+	require.NoError(t, err)
+	require.Equal(t, c.AccessToken, got.AccessToken)
+	require.Equal(t, c.RefreshToken, got.RefreshToken)
+	require.WithinDuration(t, c.AccessTokenExpiry, got.AccessTokenExpiry, time.Second)
+
+	_, err = st.CompleteAuthorizationConfirmation(ctx, tokenHash, true, "replay-code")
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.ConsumeAuthCode(ctx, "replay-code")
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestAuthorizationConfirmationDenialAndExpiryCreateNoCode(t *testing.T) {
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	base := store.AuthorizationConfirmation{AuthCode: store.AuthCode{
+		Sub: "user-uuid", GitHubID: 1005, Email: "user@example.com", Scope: "insights:read",
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
+	}}
+
+	denyHash := store.HashSessionToken("deny-token")
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, denyHash, base))
+	_, err = st.CompleteAuthorizationConfirmation(ctx, denyHash, false, "")
+	require.NoError(t, err)
+	_, err = st.ConsumeAuthCode(ctx, "")
+	require.ErrorIs(t, err, store.ErrNotFound)
+
+	expiredHash := store.HashSessionToken("expired-token")
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, expiredHash, base))
+	_, err = pool.Exec(ctx, `UPDATE authorization_confirmations SET expires_at = now() - interval '1 second' WHERE token_hash = $1`, expiredHash)
+	require.NoError(t, err)
+	_, err = st.CompleteAuthorizationConfirmation(ctx, expiredHash, true, "expired-code")
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.ConsumeAuthCode(ctx, "expired-code")
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestAuthorizationConfirmationConcurrentApprovalHasOneWinner(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	tokenHash := store.HashSessionToken("concurrent-token")
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{AuthCode: store.AuthCode{
+		Sub: "user-uuid", GitHubID: 1006, Email: "user@example.com", Scope: "insights:read",
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
+	}}))
+
+	errs := make(chan error, 2)
+	for i := range 2 {
+		go func(code string) {
+			_, err := st.CompleteAuthorizationConfirmation(ctx, tokenHash, true, code)
+			errs <- err
+		}(fmt.Sprintf("concurrent-code-%d", i))
+	}
+	got := []error{<-errs, <-errs}
+	var successes, notFound int
+	for _, err := range got {
+		if err == nil {
+			successes++
+		} else if errors.Is(err, store.ErrNotFound) {
+			notFound++
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, 1, notFound)
+}
+
+func TestAuthorizationConfirmationApprovalFailurePreservesConfirmation(t *testing.T) {
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	tokenHash := store.HashSessionToken("rollback-token")
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{AuthCode: store.AuthCode{
+		Sub: "user-uuid", GitHubID: 1007, Email: "user@example.com", Scope: "insights:read",
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
+	}}))
+	_, err = pool.Exec(ctx, `DROP TABLE auth_codes`)
+	require.NoError(t, err)
+
+	_, err = st.CompleteAuthorizationConfirmation(ctx, tokenHash, true, "failed-code")
+	require.Error(t, err)
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM authorization_confirmations WHERE token_hash = $1`, tokenHash).Scan(&count))
+	require.Equal(t, 1, count)
 }
 
 // --- RevokeToken / IsTokenRevoked ---

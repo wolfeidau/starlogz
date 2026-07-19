@@ -36,6 +36,7 @@ const (
 
 func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -85,6 +86,7 @@ func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
 
 func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http.HandlerFunc {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -154,6 +156,7 @@ func (s *Server) uiCallbackHandler(oidcServer *oidc.Server, baseURL string) http
 
 func (s *Server) uiLogoutHandler() http.HandlerFunc {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return

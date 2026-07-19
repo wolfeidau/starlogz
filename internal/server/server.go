@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -138,6 +139,7 @@ func New(cfg Config) (*Server, error) {
 	mux.Handle("/.well-known/oauth-protected-resource", auth.ProtectedResourceMetadataHandler(metadata))
 	mux.Handle("/oauth2/register", oidcServer.DCRHandler())
 	mux.Handle("/oauth2/authorize", oidcServer.AuthorizeHandler())
+	mux.Handle("/oauth2/authorize/confirm", oidcServer.AuthorizationConfirmationHandler())
 	mux.Handle("/oauth2/token", oidcServer.TokenHandler())
 	mux.Handle("/auth/github/callback", oidcServer.GitHubCallbackHandler())
 	mux.Handle("/auth/logout", oidcServer.LogoutHandler())
@@ -151,10 +153,16 @@ func New(cfg Config) (*Server, error) {
 		authenticatedHandler.ServeHTTP(w, r)
 	})
 
-	handler := middleware.CORS(middleware.AccessLog(cfg.Logger)(mux))
+	handler := middleware.CORS(mux)
 	if cfg.SentryHandler != nil {
 		handler = cfg.SentryHandler(handler)
 	}
+	baseURL, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL for security headers: %w", err)
+	}
+	handler = middleware.SecurityHeaders(baseURL.Scheme == "https")(handler)
+	handler = middleware.AccessLog(cfg.Logger)(handler)
 	srv.handler = otelhttp.NewHandler(handler, name)
 
 	return srv, nil

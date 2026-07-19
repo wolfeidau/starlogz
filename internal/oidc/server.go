@@ -43,6 +43,8 @@ type GrantStore interface {
 type AuthStateStore interface {
 	StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error
 	ConsumePendingAuth(ctx context.Context, state string) (*store.PendingAuth, error)
+	StoreAuthorizationConfirmation(ctx context.Context, tokenHash []byte, c store.AuthorizationConfirmation) error
+	CompleteAuthorizationConfirmation(ctx context.Context, tokenHash []byte, approve bool, code string) (*store.AuthorizationConfirmationResult, error)
 	StoreAuthCode(ctx context.Context, code string, c store.AuthCode) error
 	ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCode, error)
 }
@@ -275,7 +277,7 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: missing sub claim", auth.ErrInvalidToken)
 	}
 
-	ctxlog.LoggerFrom(ctx).DebugContext(ctx, "token verified", slog.String("scope", scope))
+	ctxlog.LoggerFrom(ctx).DebugContext(ctx, "token verified")
 	return &auth.TokenInfo{
 		UserID:     sub,
 		Scopes:     strings.Fields(scope),

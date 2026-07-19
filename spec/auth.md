@@ -1,7 +1,7 @@
 # OAuth2 authentication and authorization
 
 > Status: Current contract
-> Last reviewed: 2026-07-16
+> Last reviewed: 2026-07-19
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Architecture
@@ -30,15 +30,43 @@ An MCP client:
 3. Registers as a public client through Dynamic Client Registration (DCR).
 4. Starts an authorization-code flow using PKCE `S256`.
 5. Redirects the user through GitHub authentication.
-6. Receives a single-use authorization code at its registered redirect URI.
-7. Exchanges the code, matching `client_id`, `redirect_uri`, and PKCE verifier,
+6. Confirms the registered client, exact redirect URI, and requested Starlogz
+   scopes on a Starlogz-hosted page.
+7. Receives a single-use authorization code at its registered redirect URI.
+8. Exchanges the code, matching `client_id`, `redirect_uri`, and PKCE verifier,
    for a Starlogz access token and, when eligible, a refresh token.
-8. Sends the access token as `Authorization: Bearer <token>` to `/mcp`.
+9. Sends the access token as `Authorization: Bearer <token>` to `/mcp`.
 
 Pending authorization state and authorization codes are single-use PostgreSQL
 records. Pending state expires after 10 minutes; authorization codes expire
-after 5 minutes. Atomic consume operations prevent replay across server
-instances.
+after 5 minutes. Post-GitHub confirmation state expires after 10 minutes, and
+the authorization-code lifetime starts only after approval. Atomic consume
+operations prevent replay across server instances.
+
+### Post-GitHub client confirmation
+
+After GitHub authentication and user persistence, every registered client
+except the explicitly configured first-party `starlogz-ui` client requires a
+Starlogz confirmation. A client-supplied name never grants first-party status.
+The server-rendered page shows the registered client name, or `Unnamed client`
+and its client ID, the full validated redirect URI, and each requested scope
+with a fixed Starlogz-owned description. Client-controlled values are escaped;
+the response loads no remote resources.
+
+The form contains only a random one-time confirmation token and an
+`approve` or `deny` decision. All identity, client, redirect, scope, PKCE, and
+OAuth state values remain in encrypted or trusted server-side state. The token
+is stored only as a SHA-256 hash. Approval atomically consumes the confirmation
+and creates a five-minute authorization code. Denial consumes the confirmation
+without creating a code. Expired, malformed, concurrent, and replayed
+submissions fail closed with errors that do not disclose token existence.
+
+Approval returns `303 See Other` with `code` and the original client `state`.
+Denial returns `303 See Other` with `error=access_denied` and the original
+state. Both preserve unrelated registered redirect query parameters while
+replacing reserved OAuth response parameters. The page replaces the consumed
+GitHub callback URL in browser history before interaction. The first-party
+dashboard retains its direct post-GitHub authorization-code redirect.
 
 ## Scopes
 
@@ -194,6 +222,7 @@ JWTs are the only credentials accepted by the MCP bearer-token verifier.
 | `/.well-known/jwks` | GET | None | Current JWT verification key. |
 | `/oauth2/register` | POST | None | Dynamic Client Registration. |
 | `/oauth2/authorize` | GET | None | Starts the GitHub-backed authorization flow. |
+| `/oauth2/authorize/confirm` | POST | One-time confirmation token | Approves or denies an authenticated external-client request. |
 | `/oauth2/token` | POST | None | Exchanges authorization codes or refresh tokens. |
 | `/auth/github/callback` | GET | GitHub state | Completes upstream authentication. |
 | `/auth/logout` | POST | Bearer JWT | Revokes the access token. |
@@ -202,6 +231,21 @@ JWTs are the only credentials accepted by the MCP bearer-token verifier.
 
 Dashboard login, callback, session, and logout behavior is covered by
 [web_sessions.md](web_sessions.md).
+
+## Browser response security
+
+All responses set `nosniff`, deny framing, disable legacy XSS filtering, use a
+`no-referrer` policy, disable camera, geolocation, microphone, payment, and USB
+browser capabilities, and apply a restrictive content security policy. HTTPS
+deployments additionally set host-only HSTS for one year. HSTS does not include
+subdomains or preload. COOP and CORP are intentionally omitted to preserve
+OAuth popup coordination and cross-origin MCP Inspector compatibility.
+
+The confirmation response replaces the global policy with `default-src
+'none'`, nonce-only inline script and style sources, same-origin form action,
+and framing and base-URI denial. Interactive browser-auth responses use
+`Cache-Control: no-store`; public static assets, discovery documents, and JWKS
+retain their existing cache behavior.
 
 ## Discovery contract
 

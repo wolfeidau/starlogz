@@ -21,14 +21,15 @@ const (
 type Name string
 
 const (
-	OAuthAuthorizationCompleted  Name = "oauth.authorization.completed"
-	OAuthGitHubCallbackCompleted Name = "oauth.github_callback.completed"
-	OAuthTokenExchangeCompleted  Name = "oauth.token_exchange.completed" //nolint:gosec // Event name, not a credential.
-	OAuthRefreshCompleted        Name = "oauth.refresh.completed"
-	UILoginCompleted             Name = "ui.login.completed"
-	UISessionCreated             Name = "ui.session.created"
-	UISessionRevoked             Name = "ui.session.revoked"
-	MCPToolCallCompleted         Name = "mcp.tool_call.completed"
+	OAuthAuthorizationCompleted             Name = "oauth.authorization.completed"
+	OAuthAuthorizationConfirmationCompleted Name = "oauth.authorization_confirmation.completed"
+	OAuthGitHubCallbackCompleted            Name = "oauth.github_callback.completed"
+	OAuthTokenExchangeCompleted             Name = "oauth.token_exchange.completed" //nolint:gosec // Event name, not a credential.
+	OAuthRefreshCompleted                   Name = "oauth.refresh.completed"
+	UILoginCompleted                        Name = "ui.login.completed"
+	UISessionCreated                        Name = "ui.session.created"
+	UISessionRevoked                        Name = "ui.session.revoked"
+	MCPToolCallCompleted                    Name = "mcp.tool_call.completed"
 )
 
 const (
@@ -233,7 +234,8 @@ var (
 	deploymentValuePattern = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
 	allowedNames           = map[Name]struct{}{
 		OAuthAuthorizationCompleted: {}, OAuthGitHubCallbackCompleted: {},
-		OAuthTokenExchangeCompleted: {}, OAuthRefreshCompleted: {},
+		OAuthAuthorizationConfirmationCompleted: {},
+		OAuthTokenExchangeCompleted:             {}, OAuthRefreshCompleted: {},
 		UILoginCompleted: {}, UISessionCreated: {}, UISessionRevoked: {},
 		MCPToolCallCompleted: {},
 	}
