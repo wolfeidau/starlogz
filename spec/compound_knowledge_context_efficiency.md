@@ -23,11 +23,11 @@ response contract rather than retaining a context-heavy compatibility mode.
 
 At the proposal baseline, MCP `insight_search` returned the complete content of
 every matching insight. A broad recall could therefore load several long
-records even when only one decision was relevant. The current skill also
-requires a broad second search for meaningful work and permits stable keyed
+records even when only one decision was relevant. The baseline skill also
+required a broad second search for meaningful work and permitted stable keyed
 insights to grow into rollout chronologies.
 
-The Codex skill metadata currently permits implicit invocation. That makes the
+The baseline Codex skill metadata permitted implicit invocation. That made the
 full skill body and Starlogz workflow eligible for routine status, Git, and
 small-edit requests that do not need persistent project memory.
 
@@ -44,10 +44,14 @@ Proposal-baseline repository evidence:
 
 ## Implementation progress
 
-Slice 1 is code-complete on `feat_compact_insight_search`: MCP search returns
-bounded snippets, `insight_get` retains full retrieval, and Connect dashboard
-search remains unchanged. Slice 2, covering explicit invocation and concise
-skill behavior, remains pending.
+Slice 1 was merged and deployed: MCP search returns bounded snippets,
+`insight_get` retains full retrieval, and Connect dashboard search remains
+unchanged. Slice 2 is code-complete on
+`fix_compound_knowledge_context_churn`: Codex invocation is explicit, both
+packaged skills use focused recall and concise writes, and plugin `0.1.2` carries
+the new policy. Both skill validators and the plugin validator pass. Local
+reinstall and fresh-thread invocation checks remain pending until the branch is
+merged because the configured marketplace tracks remote `main`.
 
 ## Goals
 

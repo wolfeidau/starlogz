@@ -1,13 +1,14 @@
 # Codex compound-knowledge plugin
 
 > Status: Implemented decision
-> Last reviewed: 2026-07-16
+> Last reviewed: 2026-07-19
 > Authority: Historical rationale and lasting constraints; the packaged skill, plugin manifests, and README define current implementation details.
 
 ## Context
 
 Starlogz provides durable project memory through MCP, but agents need a
-repeatable policy for deciding when to recall, verify, and persist knowledge.
+repeatable, context-efficient policy for deciding when to recall, verify, and
+persist knowledge.
 A personal Codex skill validated the workflow during development, but users
 needed a supported and repository-owned distribution path.
 
@@ -18,21 +19,25 @@ it discoverable through the repository marketplace. The plugin declares the
 Starlogz MCP dependency and guides users to connect their own deployment; it
 does not bundle or operate a server.
 
-The skill follows this lifecycle:
+The Codex skill is explicitly invoked through `$compound-knowledge` or the
+skill picker. Routine Git, status, and small-edit prompts do not load it. Once
+invoked, it follows this lifecycle:
 
 1. Derive the project slug from the current repository unless the user supplies
    one.
-2. Recall task-specific decisions, conventions, architecture, and known
-   pitfalls before meaningful work.
-3. Verify recalled insights against explicit user instructions and current
-   repository evidence.
-4. Persist only reusable, specific, verified, minimal knowledge after work.
+2. Run one focused search with five compact results, broadening once only when
+   missing context creates material risk.
+3. Retrieve full content only for selected results and verify it against user
+   instructions and current repository evidence.
+4. Persist at most one reusable, specific, verified, concise result when the
+   repository does not already preserve it.
 5. Continue safely with repository-local context when Starlogz is unavailable.
 
 Repository files remain authoritative. The skill never stores credentials,
 access tokens, private keys, secrets, raw logs, speculative findings, or
-step-by-step activity. Stable authoritative values use keyed upserts; decisions,
-discoveries, and incidents remain append-only history.
+step-by-step activity. Standard records target one paragraph and at most 600
+characters. Stable authoritative values use keyed upserts that replace prior
+summaries; decisions, discoveries, and incidents remain append-only history.
 
 ## Distribution
 
@@ -58,9 +63,11 @@ release cadence without changing the recall, verify, and consolidate model.
 ## Tradeoffs and outcome
 
 The plugin is optional development tooling, not a Starlogz runtime dependency.
-The initial package targets Codex; other agent integrations remain separate
-packages even when they share the same knowledge policy.
+Explicit invocation prevents memory workflow context and tool calls from
+affecting unrelated prompts, at the cost of requiring the user to opt in when
+prior project knowledge would help. Other agent integrations remain separate
+packages even when they share the same concise knowledge policy.
 
-The repository now ships the marketplace entry, plugin manifest, MCP dependency
-metadata, and compound-knowledge skill. The README documents installation and
-Starlogz's use as persistent memory during its own development.
+The repository ships the marketplace entry, plugin manifest, MCP dependency
+metadata, and explicit compound-knowledge skill. The README documents
+installation and on-demand use during Starlogz development.
