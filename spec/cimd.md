@@ -415,5 +415,4 @@ CIMD must not be advertised in production until all of these are true:
 - persistent or distributed metadata caching;
 - grant invalidation when a document changes;
 - non-default HTTPS ports or query-bearing client identifiers;
-- development-only localhost metadata; and
-- extending the Starlogz confirmation screen to all DCR clients.
+- development-only localhost metadata.

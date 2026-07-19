@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	uiClientID              = "starlogz-ui"
+	uiClientID              = oidc.FirstPartyDashboardClientID
 	uiSessionCookie         = "starlogz_session"
 	uiStateCookie           = "starlogz_ui_state"
 	uiVerifierCookie        = "starlogz_ui_verifier"

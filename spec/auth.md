@@ -68,6 +68,11 @@ replacing reserved OAuth response parameters. The page replaces the consumed
 GitHub callback URL in browser history before interaction. The first-party
 dashboard retains its direct post-GitHub authorization-code redirect.
 
+Migration defaults allow pending requests created before deployment to finish
+without confirmation. This creates an intentional compatibility window bounded
+by the pending authorization's ten-minute lifetime; newly initiated requests
+handled entirely by the updated server follow the confirmation requirement.
+
 ## Scopes
 
 | Scope | Current use |

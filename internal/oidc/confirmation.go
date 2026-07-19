@@ -20,14 +20,16 @@ import (
 
 const (
 	confirmationPath            = "/oauth2/authorize/confirm"
-	confirmationBypassClientID  = "starlogz-ui"
 	confirmationFormContentType = "application/x-www-form-urlencoded"
 	confirmationDecisionApprove = "approve"
 	confirmationDecisionDeny    = "deny"
 )
 
+// FirstPartyDashboardClientID is the sole client allowed to bypass authorization confirmation.
+const FirstPartyDashboardClientID = "starlogz-ui"
+
 var authorizationConfirmationBypassClientIDs = map[string]struct{}{
-	confirmationBypassClientID: {},
+	FirstPartyDashboardClientID: {},
 }
 
 var authorizationConfirmationTemplate = template.Must(template.New("authorization-confirmation").Parse(`<!doctype html>
@@ -210,20 +212,54 @@ func authorizationResultRedirect(result *store.AuthorizationConfirmationResult, 
 	if err != nil {
 		return "", err
 	}
-	q := redirectTo.Query()
-	for _, key := range []string{oauthCode, "error", "error_description", "state"} {
-		q.Del(key)
+	preserved, err := preservedAuthorizationRedirectQuery(redirectTo.RawQuery)
+	if err != nil {
+		return "", err
 	}
+	response := url.Values{}
 	if approve {
-		q.Set("code", code)
+		response.Set(oauthCode, code)
 	} else {
-		q.Set("error", "access_denied")
+		response.Set("error", "access_denied")
 	}
 	if result.ClientState != "" {
-		q.Set("state", result.ClientState)
+		response.Set("state", result.ClientState)
 	}
-	redirectTo.RawQuery = q.Encode()
+	preserved = append(preserved, response.Encode())
+	redirectTo.RawQuery = strings.Join(preserved, "&")
 	return redirectTo.String(), nil
+}
+
+func preservedAuthorizationRedirectQuery(rawQuery string) ([]string, error) {
+	if rawQuery == "" {
+		return nil, nil
+	}
+	parts := strings.Split(rawQuery, "&")
+	preserved := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		rawName, _, _ := strings.Cut(part, "=")
+		name, err := url.QueryUnescape(rawName)
+		if err != nil {
+			return nil, fmt.Errorf("decode redirect query parameter name: %w", err)
+		}
+		if isReservedAuthorizationResponseParameter(name) {
+			continue
+		}
+		preserved = append(preserved, part)
+	}
+	return preserved, nil
+}
+
+func isReservedAuthorizationResponseParameter(name string) bool {
+	switch name {
+	case oauthCode, "error", "error_description", "state":
+		return true
+	default:
+		return false
+	}
 }
 
 func writeConfirmationError(w http.ResponseWriter, status int) {

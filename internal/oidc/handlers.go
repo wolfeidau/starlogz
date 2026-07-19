@@ -803,26 +803,22 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			return
 		}
 
-		redirectTo, err := url.Parse(pending.RedirectURI)
+		redirectTo, err := authorizationResultRedirect(&storepkg.AuthorizationConfirmationResult{
+			RedirectURI: pending.RedirectURI,
+			ClientState: pending.ClientState,
+		}, true, code)
 		if err != nil {
 			log.ErrorContext(ctx, "invalid redirect URI in pending auth")
 			http.Error(w, "invalid redirect_uri", http.StatusInternalServerError)
 			return
 		}
 
-		rq := redirectTo.Query()
-		rq.Set("code", code)
-		if pending.ClientState != "" {
-			rq.Set("state", pending.ClientState)
-		}
-		redirectTo.RawQuery = rq.Encode()
-
 		log.InfoContext(ctx, "GitHub auth complete",
 			slog.String("sub", sub),
 		)
 
 		// redirect_uri was validated against the registered client in AuthorizeHandler before being stored.
-		http.Redirect(w, r, redirectTo.String(), http.StatusFound) //nolint:gosec
+		http.Redirect(w, r, redirectTo, http.StatusFound) //nolint:gosec
 	})
 	return s.events.HTTPHandler(wideevent.OAuthGitHubCallbackCompleted, handler)
 }
