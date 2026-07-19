@@ -1,6 +1,6 @@
 {
   "name": "starlogz-codex",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Build durable project memory with Starlogz and Codex.",
   "author": {
     "name": "Mark Wolfe",
@@ -14,14 +14,14 @@
   "interface": {
     "displayName": "Starlogz Codex",
     "shortDescription": "Build durable project memory with Starlogz.",
-    "longDescription": "Recall relevant project context before work, verify it against the repository, and preserve durable findings for future Codex sessions.",
+    "longDescription": "Explicitly recall focused project context, verify it against the repository, and preserve one concise durable result for future Codex sessions.",
     "developerName": "Mark Wolfe",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://github.com/wolfeidau/starlogz",
     "defaultPrompt": [
-      "Recall relevant Starlogz insights before starting this task.",
-      "Save the durable lessons from this work to Starlogz."
+      "Use $compound-knowledge to recall focused Starlogz context for this task.",
+      "Use $compound-knowledge to save one concise durable result from this work."
     ]
   }
 }

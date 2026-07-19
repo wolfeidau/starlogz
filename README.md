@@ -92,7 +92,7 @@ Point it at `http://localhost:8088/mcp`. The inspector walks through the full OA
 
 ### Use Starlogz with Codex
 
-Starlogz is used during its own development as persistent project memory for OpenAI Codex. The optional `compound-knowledge` skill recalls relevant insights before meaningful work, verifies them against the current repository, and preserves only durable decisions, preferences, procedures, and validated findings afterward.
+Starlogz is used during its own development as persistent project memory for OpenAI Codex. Invoke the optional `$compound-knowledge` skill when a task needs prior decisions, conventions, architecture, known pitfalls, or preferences. It performs one focused compact search, retrieves full records selectively, verifies them against the current repository, and writes at most one concise reusable result.
 
 Install the repository marketplace and plugin:
 
@@ -107,11 +107,11 @@ Configure the plugin to use your Starlogz deployment:
 codex mcp add starlogz --url https://your-starlogz.example/mcp
 ```
 
-The plugin is an optional Codex workflow, not a runtime dependency of the Starlogz server. Repository instructions, specifications, and source remain authoritative when stored memory is stale.
+The plugin is an explicit opt-in Codex workflow, not a runtime dependency of the Starlogz server. Routine Git, status, and small-edit requests do not invoke it. Repository instructions, specifications, and source remain authoritative when stored memory is stale.
 
 ### Use Starlogz with Claude Code
 
-Starlogz is also used during its own development as persistent project memory for Claude Code, via the same `compound-knowledge` skill packaged as a Claude Code plugin. It recalls relevant insights before meaningful work, verifies them against the current repository, and preserves only durable decisions, preferences, procedures, and validated findings afterward.
+Starlogz is also used during its own development as persistent project memory for Claude Code, via the same `compound-knowledge` skill packaged as a Claude Code plugin. It performs focused compact recall, verifies selected results against the current repository, and preserves at most one concise reusable result.
 
 Install the repository marketplace and plugin:
 

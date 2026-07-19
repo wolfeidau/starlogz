@@ -1,84 +1,41 @@
 ---
 name: compound-knowledge
-description: Build compounding project knowledge with a Starlogz MCP server. Use when starting meaningful repository work, investigating unfamiliar code, making architectural or workflow decisions, preserving user preferences, updating AGENTS.md-style guidance, completing work with reusable lessons, or when the user asks to remember, retrieve, consolidate, or reuse project knowledge.
+description: Recall and preserve durable project knowledge with Starlogz. Invoke explicitly with $compound-knowledge when prior decisions, conventions, architecture, known pitfalls, preferences, or a reusable result are needed.
 ---
 
 # Compound Knowledge
 
-Use Starlogz as durable project memory while keeping the repository authoritative.
+Keep the repository authoritative. Treat Starlogz as context that must be verified.
 
-## Establish the project
+## Recall
 
-1. Use an explicit project slug when the user provides one.
-2. Otherwise derive the slug from the current repository's root directory name.
-3. If the slug is uncertain, call `project_list` and prefer an existing exact or clear match.
-4. Create a project only when no suitable match exists and the task requires a write.
+1. Use a supplied project slug; otherwise derive it from the repository root. Call `project_list` only when uncertain.
+2. Run one focused `insight_search` with `limit=5`.
+3. Inspect snippets and metadata. Call `insight_get` only for selected hits that require full content.
+4. Broaden once only when focused recall is insufficient and missing context creates material risk.
+5. Verify relevant claims against user instructions, specifications, source, and tests.
 
-Do not assume a fixed deployment URL or project slug.
+Use `whoami` only when access is uncertain. Use `insight_list` only when the user asks for recent or enumerated records.
 
-## Recall before acting
+## Write
 
-For meaningful work:
+Write only reusable, specific, verified knowledge that will save future work:
 
-1. Call `whoami` once when Starlogz access is uncertain.
-2. Search for task-specific decisions, conventions, preferences, architecture, testing, deployment, and known pitfalls.
-3. Run one broader search when the focused searches may miss useful context.
-4. Call `insight_list_tags` before inventing tags for a write.
-5. Verify recalled claims against current repository instructions, specs, source, and tests.
+- Use a stable `key` for a current preference, procedure, architecture choice, or fact. Replace the prior summary; revisions retain history.
+- Omit `key` for decisions, discoveries, and incidents that should remain append-only.
+- Keep a standard insight to one paragraph and target at most 600 characters.
+- Keep architecture or research insights within 1,200 characters plus essential references.
 
-Treat stored insights as context, not authority. Explicit user instructions and current repository evidence win when they conflict with memory.
+Store the outcome, rationale, consequence, and one evidence pointer. State each fact once. Preserve exact technical terms. Remove filler, hedging, tool narration, activity sequences, raw logs, test inventories, intermediate commits, and deployment narration. Never store secrets, credentials, or speculation. Skip the write when the repository already preserves the result.
 
-## Persist only durable knowledge
+Call `insight_list_tags` only before a write that selects or introduces tags. Reuse existing lower-case tags. Set `category` and `source` accurately: `user` for explicit user input, `repo` for repository evidence, `agent` for validated findings, and `command` for durable command output. Link only durable keyed insights when the relationship materially improves recall.
 
-Write information only when it is reusable, specific, verified, and minimal. Good candidates include:
+## Finish
 
-- stable user or team preferences;
-- architecture and integration decisions;
-- recurring commands and operational procedures;
-- validated debugging findings and compatibility constraints;
-- concise summaries of meaningful completed work.
+Write at most one concise result. Report the insight written or updated. If Starlogz is unavailable or authentication fails, continue safely with repository context and report that no memory was read or written.
 
-Never store secrets, credentials, access tokens, private keys, raw logs, speculative findings, or step-by-step activity.
-
-Use a stable `key` for a single authoritative current value. Omit `key` for decisions, discoveries, incidents, and other history that should remain append-only. Correct stale insights with `insight_update`, or supersede them with a keyed write when the current authoritative value has changed.
-
-## Link related insights
-
-When writing insight content:
-
-- Add `[[insight:<key>]]` or `[[insight:<key>|<label>]]` only when the relationship materially improves future recall.
-- Link only to durable, keyed insights in the same project, preferring decisions, preferences, facts, and procedures.
-- Avoid linking insights merely because they share a tag or topic.
-- Use Markdown for readability, not as a substitute for categories, sources, tags, or other structured fields.
-- Treat unresolved-link warnings as review feedback, not write failures; keep useful content and fix the target key when appropriate.
-- Keep pull requests, commits, builds, deployment URLs, and other external evidence as ordinary content.
-
-Use the required `category` and `source` fields accurately:
-
-- `source: user` for explicit user preferences and decisions;
-- `source: repo` for facts verified in repository files;
-- `source: agent` for validated findings or work summaries;
-- `source: command` for durable facts established by command output.
-
-Reuse existing lower-case tags.
-
-## Consolidate meaningful work
-
-At the end of meaningful work, persist a concise result only when it will save future effort. State in the final response which Starlogz insight was written or updated. Do not create memory for trivial edits.
-
-## Degrade gracefully
-
-If the Starlogz tools are missing, ask the user to configure their deployment, for example:
+If the tools are missing, ask the user to configure their deployment:
 
 ```bash
 codex mcp add starlogz --url https://starlogz.example.com/mcp
 ```
-
-If Starlogz is unavailable or authentication fails, continue with repository-local context when safe and report that recall or persistence could not be completed. Do not let a memory failure block otherwise valid repository work.
-
-## Examples
-
-- Before changing authentication, search the project for prior auth decisions and verify them against `spec/` and current handlers.
-- Store a stable testing preference with a key such as `testing-workflow`; update that keyed insight when the preference changes.
-- Record an architectural decision without a key so its dated rationale remains in history.
-- If Starlogz is offline, complete the local review and explicitly report that no memory was read or written.
