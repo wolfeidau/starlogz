@@ -155,7 +155,11 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("search insights: %w", err))
 	}
-	protoInsights, err := toProtoInsights(page.Insights, project.Slug)
+	insights := make([]*store.Insight, len(page.Hits))
+	for i, hit := range page.Hits {
+		insights[i] = hit.Insight
+	}
+	protoInsights, err := toProtoInsights(insights, project.Slug)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

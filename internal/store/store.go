@@ -224,6 +224,7 @@ type SearchInsightsParams struct {
 	TagMode   SearchTagMode
 	Limit     int
 	After     *InsightSearchCursor
+	Compact   bool
 }
 
 type InsightSearchCursor struct {
@@ -233,8 +234,13 @@ type InsightSearchCursor struct {
 }
 
 type InsightSearchPage struct {
-	Insights   []*Insight
+	Hits       []*InsightSearchHit
 	NextCursor *InsightSearchCursor
+}
+
+type InsightSearchHit struct {
+	Insight *Insight
+	Snippet string
 }
 
 type InsightLinkWarning struct {

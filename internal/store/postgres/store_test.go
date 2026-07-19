@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -1504,35 +1505,81 @@ func TestSearchInsights(t *testing.T) {
 
 	results, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "relational database", QueryMode: store.SearchQueryModeAll, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, results.Insights, 1)
-	require.Contains(t, results.Insights[0].Content, "PostgreSQL")
+	require.Len(t, results.Hits, 1)
+	require.Contains(t, results.Hits[0].Insight.Content, "PostgreSQL")
 
 	// Tag filter should narrow results.
 	tagged, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "database", QueryMode: store.SearchQueryModeAll, Tags: []string{"cache"}, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Empty(t, tagged.Insights, "cache tag should exclude PostgreSQL result")
+	require.Empty(t, tagged.Hits, "cache tag should exclude PostgreSQL result")
 
 	// Tag names should be searchable even when absent from content.
 	byTagName, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "cache", QueryMode: store.SearchQueryModeAll, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, byTagName.Insights, 1, "searching by tag name should find insights tagged with that word")
-	require.Contains(t, byTagName.Insights[0].Content, "Redis")
+	require.Len(t, byTagName.Hits, 1, "searching by tag name should find insights tagged with that word")
+	require.Contains(t, byTagName.Hits[0].Insight.Content, "Redis")
 
 	web, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "relational OR redis", QueryMode: store.SearchQueryModeWeb, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, web.Insights, 2)
+	require.Len(t, web.Hits, 2)
 
 	_, err = st.WriteInsight(ctx, store.WriteInsightParams{ProjectID: p.ID, Content: "PostgreSQL replication", Tags: []string{"db", "operations"}, CreatedBy: u.ID})
 	require.NoError(t, err)
 
 	allTags, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "postgresql", QueryMode: store.SearchQueryModeAll, Tags: []string{"db", "operations"}, TagMode: store.SearchTagModeAll, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, allTags.Insights, 1)
-	require.Contains(t, allTags.Insights[0].Content, "replication")
+	require.Len(t, allTags.Hits, 1)
+	require.Contains(t, allTags.Hits[0].Insight.Content, "replication")
 
 	anyTags, err := st.SearchInsights(ctx, store.SearchInsightsParams{ProjectID: p.ID, Query: "postgresql", QueryMode: store.SearchQueryModeAll, Tags: []string{"db", "operations"}, TagMode: store.SearchTagModeAny, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, anyTags.Insights, 2)
+	require.Len(t, anyTags.Hits, 2)
+}
+
+func TestSearchInsightsCompactProjection(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 33)
+	content := strings.Repeat("prefix ", 50) + "compactneedle " + strings.Repeat("suffix ", 50)
+
+	_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: content, Tags: []string{"search"}, CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: strings.Repeat("tag content ", 50), Tags: []string{"tagneedle"}, CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+
+	full, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "compactneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5,
+	})
+	require.NoError(t, err)
+	require.Len(t, full.Hits, 1)
+	require.Equal(t, content, full.Hits[0].Insight.Content)
+	require.Empty(t, full.Hits[0].Snippet)
+
+	compact, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "compactneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5, Compact: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, compact.Hits, 1)
+	require.Empty(t, compact.Hits[0].Insight.Content)
+	require.Contains(t, compact.Hits[0].Snippet, "compactneedle")
+	require.LessOrEqual(t, len(strings.Fields(compact.Hits[0].Snippet)), 40)
+	require.NotContains(t, compact.Hits[0].Snippet, "<b>")
+
+	tagOnly, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "tagneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5, Compact: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, tagOnly.Hits, 1)
+	require.Empty(t, tagOnly.Hits[0].Insight.Content)
+	require.NotEmpty(t, tagOnly.Hits[0].Snippet)
+	require.LessOrEqual(t, len(strings.Fields(tagOnly.Hits[0].Snippet)), 40)
 }
 
 func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
@@ -1569,35 +1616,35 @@ func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
 	all.Limit = 10
 	allPage, err := st.SearchInsights(ctx, all)
 	require.NoError(t, err)
-	require.Len(t, allPage.Insights, 4)
-	require.Equal(t, contents[0], allPage.Insights[0].Content)
-	require.Equal(t, contents[1], allPage.Insights[1].Content)
-	equalRankIDs := []string{allPage.Insights[2].ID.String(), allPage.Insights[3].ID.String()}
+	require.Len(t, allPage.Hits, 4)
+	require.Equal(t, contents[0], allPage.Hits[0].Insight.Content)
+	require.Equal(t, contents[1], allPage.Hits[1].Insight.Content)
+	equalRankIDs := []string{allPage.Hits[2].Insight.ID.String(), allPage.Hits[3].Insight.ID.String()}
 	require.True(t, sort.IsSorted(sort.Reverse(sort.StringSlice(equalRankIDs))))
-	expected := make([]string, len(allPage.Insights))
-	for i, insight := range allPage.Insights {
-		expected[i] = insight.ID.String()
+	expected := make([]string, len(allPage.Hits))
+	for i, hit := range allPage.Hits {
+		expected[i] = hit.Insight.ID.String()
 	}
 
 	zero := base
 	zero.Limit = 0
 	page, err := st.SearchInsights(ctx, zero)
 	require.NoError(t, err)
-	require.Empty(t, page.Insights)
+	require.Empty(t, page.Hits)
 	require.Nil(t, page.NextCursor)
 
 	exact := base
 	exact.Limit = 4
 	page, err = st.SearchInsights(ctx, exact)
 	require.NoError(t, err)
-	require.Len(t, page.Insights, 4)
+	require.Len(t, page.Hits, 4)
 	require.Nil(t, page.NextCursor)
 
 	limitPlusOne := base
 	limitPlusOne.Limit = 3
 	page, err = st.SearchInsights(ctx, limitPlusOne)
 	require.NoError(t, err)
-	require.Len(t, page.Insights, 3)
+	require.Len(t, page.Hits, 3)
 	require.NotNil(t, page.NextCursor)
 
 	var seen []string
@@ -1609,8 +1656,8 @@ func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {
 		request.After = after
 		page, err = st.SearchInsights(ctx, request)
 		require.NoError(t, err)
-		for _, insight := range page.Insights {
-			seen = append(seen, insight.ID.String())
+		for _, hit := range page.Hits {
+			seen = append(seen, hit.Insight.ID.String())
 		}
 		if page.NextCursor == nil {
 			break
@@ -1652,16 +1699,16 @@ func TestSearchInsightsCursorDocumentsConcurrentMutationLimitation(t *testing.T)
 	baseline.Limit = 10
 	baselinePage, err := st.SearchInsights(ctx, baseline)
 	require.NoError(t, err)
-	require.Len(t, baselinePage.Insights, 3)
+	require.Len(t, baselinePage.Hits, 3)
 
 	first := base
 	first.Limit = 1
 	firstPage, err := st.SearchInsights(ctx, first)
 	require.NoError(t, err)
 	require.NotNil(t, firstPage.NextCursor)
-	require.Equal(t, baselinePage.Insights[0].ID, firstPage.Insights[0].ID)
+	require.Equal(t, baselinePage.Hits[0].Insight.ID, firstPage.Hits[0].Insight.ID)
 
-	moved := baselinePage.Insights[1]
+	moved := baselinePage.Hits[1].Insight
 	_, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
 		OrgID: p.OrgID, InsightID: moved.ID, Tags: []string{searchTag, "moved"},
 	})
@@ -1672,9 +1719,9 @@ func TestSearchInsightsCursorDocumentsConcurrentMutationLimitation(t *testing.T)
 	continuation.After = firstPage.NextCursor
 	remaining, err := st.SearchInsights(ctx, continuation)
 	require.NoError(t, err)
-	require.Len(t, remaining.Insights, 1)
-	require.Equal(t, baselinePage.Insights[2].ID, remaining.Insights[0].ID)
-	require.NotEqual(t, moved.ID, remaining.Insights[0].ID)
+	require.Len(t, remaining.Hits, 1)
+	require.Equal(t, baselinePage.Hits[2].Insight.ID, remaining.Hits[0].Insight.ID)
+	require.NotEqual(t, moved.ID, remaining.Hits[0].Insight.ID)
 }
 
 func TestListInsights(t *testing.T) {

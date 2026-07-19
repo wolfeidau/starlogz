@@ -68,7 +68,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolInsightRestore, ms.insightRestore))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
-		Description: "Full-text search over live insights in a project. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Returns results ordered by relevance and supports opaque cursor continuation.",
+		Description: "Full-text search over live insights in a project. Returns bounded snippets and metadata; use insight_get for full content. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Results are ordered by relevance and support opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
 	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -370,6 +370,17 @@ type insightResponse struct {
 	UpdatedAt    string                        `json:"updated_at"`
 	Revision     int                           `json:"revision"`
 	LinkWarnings *[]insightLinkWarningResponse `json:"warnings,omitempty"`
+}
+
+type insightSearchHitResponse struct {
+	ID        string   `json:"id"`
+	Key       string   `json:"key,omitempty"`
+	Snippet   string   `json:"snippet"`
+	Tags      []string `json:"tags"`
+	Category  string   `json:"category"`
+	Source    string   `json:"source"`
+	UpdatedAt string   `json:"updated_at"`
+	Revision  int      `json:"revision"`
 }
 
 type insightLinkWarningResponse struct {
@@ -744,12 +755,12 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	}
 	page, err := ms.store.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: project.ID, Query: query, QueryMode: queryMode,
-		Tags: tags, TagMode: tagMode, Limit: limit, After: after,
+		Tags: tags, TagMode: tagMode, Limit: limit, After: after, Compact: true,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("search insights: %w", err)
 	}
-	output := map[string]any{"insights": toInsightResponses(page.Insights)}
+	output := map[string]any{"insights": toInsightSearchHitResponses(page.Hits)}
 	if page.NextCursor != nil {
 		nextCursor, err := encodeInsightSearchCursor(project.ID, query, queryMode, tags, tagMode, page.NextCursor)
 		if err != nil {
@@ -758,7 +769,7 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 		output["next_cursor"] = nextCursor
 	}
 	result, _, err := jsonResult(output)
-	return result, toolEventMetadata{resultCount: len(page.Insights)}, err
+	return result, toolEventMetadata{resultCount: len(page.Hits)}, err
 }
 
 func (ms *mcpServer) insightList(ctx context.Context, req *mcp.CallToolRequest, in insightListInput) (*mcp.CallToolResult, any, error) {
@@ -984,6 +995,24 @@ func toInsightResponses(insights []*store.Insight) []insightResponse {
 			Source:    f.Source,
 			UpdatedAt: f.UpdatedAt.Format(time.RFC3339),
 			Revision:  f.Revision,
+		}
+	}
+	return out
+}
+
+func toInsightSearchHitResponses(hits []*store.InsightSearchHit) []insightSearchHitResponse {
+	out := make([]insightSearchHitResponse, len(hits))
+	for i, hit := range hits {
+		insight := hit.Insight
+		out[i] = insightSearchHitResponse{
+			ID:        insight.ID.String(),
+			Key:       insight.Key,
+			Snippet:   hit.Snippet,
+			Tags:      insight.Tags,
+			Category:  insight.Category,
+			Source:    insight.Source,
+			UpdatedAt: insight.UpdatedAt.Format(time.RFC3339),
+			Revision:  insight.Revision,
 		}
 	}
 	return out

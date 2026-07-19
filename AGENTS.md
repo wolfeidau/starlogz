@@ -69,7 +69,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `insight_get`      | `insights:read`  | Gets one insight by ID or key with bounded outgoing links and backlinks. |
 | `insight_history`  | `insights:read`  | Lists immutable revisions for an insight by ID, including soft-deleted insights, with opaque cursor continuation. |
 | `insight_restore`  | `insights:write` | Restores an earlier snapshot as a new live revision. Requires `expected_revision`; returns revision and link warnings. |
-| `insight_search`   | `insights:read`  | Full-text search over live insights by `rank DESC, updated_at DESC, id DESC`. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`; opaque cursor continuation is optional. |
+| `insight_search`   | `insights:read`  | Full-text search over live insights by `rank DESC, updated_at DESC, id DESC`. Returns bounded snippets and metadata; use `insight_get` for full content. `query_mode=all` requires all terms; `query_mode=web` supports `OR`, quoted phrases, and exclusions. `tag_mode=all\|any` controls tag matching. Modes default to `all`; opaque cursor continuation is optional. |
 | `insight_list`     | `insights:read`  | Lists live insights by `updated_at DESC, id DESC`. Optional tag filter and opaque cursor continuation. |
 | `insight_update`   | `insights:write` | Updates content and/or tags of an existing insight. Accepts optional `expected_revision`; content changes return link warnings and tag-only updates omit them. |
 | `insight_delete`   | `insights:write` | Soft-deletes an insight. Accepts optional `expected_revision` and returns the deletion revision. |

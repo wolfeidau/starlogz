@@ -1416,7 +1416,7 @@ func (s *Store) ListInsightHistory(ctx context.Context, p store.ListInsightHisto
 
 // SearchInsights runs a full-text search over live insights in a project.
 func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams) (*store.InsightSearchPage, error) {
-	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", p.ProjectID.String()), slog.Int("query_length", len(p.Query)), slog.String("query_mode", string(p.QueryMode)), slog.Int("tag_count", len(p.Tags)), slog.String("tag_mode", string(p.TagMode)), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil))
+	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", p.ProjectID.String()), slog.Int("query_length", len(p.Query)), slog.String("query_mode", string(p.QueryMode)), slog.Int("tag_count", len(p.Tags)), slog.String("tag_mode", string(p.TagMode)), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil), slog.Bool("compact", p.Compact))
 
 	if p.Limit <= 0 {
 		return &store.InsightSearchPage{}, nil
@@ -1428,8 +1428,8 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 				WHEN $3 = 'web' THEN websearch_to_tsquery('english', $2)
 				ELSE plainto_tsquery('english', $2)
 			END AS query
-		)
-		SELECT id, project_id, COALESCE(key, ''), content, tags, category, source, created_by, created_at, updated_at, revision, ranking.rank
+		), ranked AS MATERIALIZED (
+		SELECT id, project_id, COALESCE(key, '') AS key, content, tags, category, source, created_by, created_at, updated_at, revision, ranking.rank
 		FROM insights
 		CROSS JOIN search_query
 		CROSS JOIN LATERAL (SELECT ts_rank(search_vector, search_query.query) AS rank) ranking
@@ -1446,7 +1446,20 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 		query += fmt.Sprintf(" AND (ranking.rank, updated_at, id) < ($%d::real, $%d, $%d)", len(args)-2, len(args)-1, len(args))
 	}
 	args = append(args, p.Limit+1)
-	query += fmt.Sprintf(" ORDER BY ranking.rank DESC, updated_at DESC, id DESC LIMIT $%d", len(args))
+	query += fmt.Sprintf(" ORDER BY ranking.rank DESC, updated_at DESC, id DESC LIMIT $%d\n)", len(args))
+	args = append(args, p.Compact)
+	compactParam := len(args)
+	args = append(args, `MaxFragments=1, MaxWords=40, MinWords=15, StartSel="", StopSel=""`)
+	headlineOptionsParam := len(args)
+	query += fmt.Sprintf(`
+		SELECT id, project_id, key,
+			CASE WHEN $%d THEN '' ELSE content END,
+			tags, category, source, created_by, created_at, updated_at, revision,
+			CASE WHEN $%d THEN ts_headline('english', content, search_query.query, $%d) ELSE '' END,
+			rank
+		FROM ranked
+		CROSS JOIN search_query
+		ORDER BY rank DESC, updated_at DESC, id DESC`, compactParam, compactParam, headlineOptionsParam)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1455,15 +1468,15 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 	defer rows.Close()
 
 	type rankedInsight struct {
-		insight *store.Insight
-		rank    float32
+		hit  *store.InsightSearchHit
+		rank float32
 	}
 	var ranked []rankedInsight
 	for rows.Next() {
 		var idStr, projectIDStr, createdByStr string
-		item := rankedInsight{insight: &store.Insight{}}
-		f := item.insight
-		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision, &item.rank); err != nil {
+		item := rankedInsight{hit: &store.InsightSearchHit{Insight: &store.Insight{}}}
+		f := item.hit.Insight
+		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision, &item.hit.Snippet, &item.rank); err != nil {
 			return nil, fmt.Errorf("scan insight search result: %w", err)
 		}
 		if f.ID, err = uuid.Parse(idStr); err != nil {
@@ -1485,11 +1498,11 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 	if len(ranked) > p.Limit {
 		ranked = ranked[:p.Limit]
 		last := ranked[len(ranked)-1]
-		page.NextCursor = &store.InsightSearchCursor{Rank: last.rank, UpdatedAt: last.insight.UpdatedAt, ID: last.insight.ID}
+		page.NextCursor = &store.InsightSearchCursor{Rank: last.rank, UpdatedAt: last.hit.Insight.UpdatedAt, ID: last.hit.Insight.ID}
 	}
-	page.Insights = make([]*store.Insight, len(ranked))
+	page.Hits = make([]*store.InsightSearchHit, len(ranked))
 	for i := range ranked {
-		page.Insights[i] = ranked[i].insight
+		page.Hits[i] = ranked[i].hit
 	}
 	return page, nil
 }

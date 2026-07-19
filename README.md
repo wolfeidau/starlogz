@@ -27,7 +27,7 @@ All tools require `insights:read`. Write tools require `insights:write`.
 | `insight_get` | `insights:read` | Retrieves one insight by ID or key with bounded outgoing links and backlinks. |
 | `insight_history` | `insights:read` | Lists immutable revisions for an insight by ID, including soft-deleted insights, with opaque cursor continuation. |
 | `insight_restore` | `insights:write` | Restores an earlier snapshot as a new live revision. Requires `expected_revision`. |
-| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns deterministic relevance ordering with optional opaque cursor continuation. |
+| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns bounded snippets and metadata in deterministic relevance order with optional opaque cursor continuation; use `insight_get` for full content. |
 | `insight_list` | `insights:read` | Lists live insights by most recent update. Optional tag filter and opaque cursor continuation. |
 | `insight_update` | `insights:write` | Updates content and/or tags of an existing insight. Accepts optional `expected_revision`. |
 | `insight_delete` | `insights:write` | Soft-deletes an insight by ID and returns its resulting revision. Accepts optional `expected_revision`. |
