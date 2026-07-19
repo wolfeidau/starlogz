@@ -22,7 +22,7 @@ steps:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.4: ~
           - ./.buildkite/plugins/sarif-annotate:
               file: golangci-lint.sarif
 
@@ -33,7 +33,7 @@ steps:
         env:
           TFLINT_LOG: debug
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.4: ~
           - ./.buildkite/plugins/sarif-annotate:
               file: tflint.sarif
 
@@ -50,7 +50,7 @@ steps:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.4: ~
           - ./.buildkite/plugins/go-coverage:
               coverprofile: coverage.out
               treemap: true
@@ -66,4 +66,4 @@ steps:
           - bun run test
           - bun run lint
         plugins:
-          - mise#v1.1.1: ~
+          - mise#v1.1.4: ~
