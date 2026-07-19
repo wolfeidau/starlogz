@@ -58,7 +58,7 @@ func newLogger(ctx context.Context, development, sentryEnabled bool) *slog.Logge
 
 	var handler slog.Handler
 	if development {
-		handler = tint.NewHandler(os.Stderr, &tint.Options{
+		handler = tint.NewTextHandler(os.Stderr, &tint.Options{
 			Level:      level,
 			TimeFormat: time.Kitchen,
 		})
