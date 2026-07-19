@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1550,6 +1551,11 @@ func TestSearchInsightsCompactProjection(t *testing.T) {
 		ProjectID: p.ID, Content: strings.Repeat("tag content ", 50), Tags: []string{"tagneedle"}, CreatedBy: u.ID,
 	})
 	require.NoError(t, err)
+	longWord := strings.Repeat("é", 1000)
+	_, err = st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: "oversizedneedle " + strings.Repeat(longWord+" ", 39), Tags: []string{"search"}, CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
 
 	full, err := st.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: p.ID, Query: "compactneedle", QueryMode: store.SearchQueryModeAll,
@@ -1580,6 +1586,16 @@ func TestSearchInsightsCompactProjection(t *testing.T) {
 	require.Empty(t, tagOnly.Hits[0].Insight.Content)
 	require.NotEmpty(t, tagOnly.Hits[0].Snippet)
 	require.LessOrEqual(t, len(strings.Fields(tagOnly.Hits[0].Snippet)), 40)
+
+	oversized, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "oversizedneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5, Compact: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, oversized.Hits, 1)
+	require.LessOrEqual(t, len(oversized.Hits[0].Snippet), store.MaxInsightSearchSnippetBytes)
+	require.True(t, utf8.ValidString(oversized.Hits[0].Snippet))
+	require.True(t, strings.HasSuffix(oversized.Hits[0].Snippet, "…"))
 }
 
 func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {

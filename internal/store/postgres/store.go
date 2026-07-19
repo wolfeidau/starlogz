@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -1479,6 +1480,7 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision, &item.hit.Snippet, &item.rank); err != nil {
 			return nil, fmt.Errorf("scan insight search result: %w", err)
 		}
+		item.hit.Snippet = truncateUTF8(item.hit.Snippet, store.MaxInsightSearchSnippetBytes)
 		if f.ID, err = uuid.Parse(idStr); err != nil {
 			return nil, fmt.Errorf("parse insight id: %w", err)
 		}
@@ -1505,6 +1507,18 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 		page.Hits[i] = ranked[i].hit
 	}
 	return page, nil
+}
+
+func truncateUTF8(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	const marker = "…"
+	end := maxBytes - len(marker)
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end] + marker
 }
 
 func (s *Store) ListInsights(ctx context.Context, p store.ListInsightsParams) (*store.InsightPage, error) {

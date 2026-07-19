@@ -93,7 +93,8 @@ Use PostgreSQL `ts_headline` with the same text-search configuration and
 `tsquery` used for matching. Apply fixed server-side bounds initially:
 
 - one fragment;
-- approximately 40 words; and
+- approximately 40 words;
+- 512 UTF-8 bytes, including a truncation ellipsis; and
 - no HTML highlighting markers.
 
 Generate snippets after ranking and limiting so excerpt work is bounded by the
@@ -224,7 +225,7 @@ fix: make compound knowledge explicit and concise
 
 ### Server
 
-- MCP search never returns a `content` field or more than the snippet bound.
+- MCP search never returns a `content` field or a snippet exceeding 512 bytes.
 - Connect search continues returning complete rendered insights.
 - Search IDs, ordering, and cursors remain unchanged.
 - Snippet generation does not introduce trusted HTML.
@@ -241,10 +242,11 @@ fix: make compound knowledge explicit and concise
 
 ### Context budget
 
-Use fixtures containing multiple long insights and compare serialized MCP
-responses. The compact five-result response should be at least 75% smaller than
-the equivalent full response and remain below 5 KB unless result metadata alone
-exceeds that bound.
+Use fixtures containing multiple long insights and adversarial multibyte tokens,
+then compare serialized MCP responses. Every snippet must remain valid UTF-8 and
+at most 512 bytes. The compact five-result response should be at least 75%
+smaller than the equivalent full response and remain below 5 KB unless result
+metadata alone exceeds that bound.
 
 ## Rollout
 

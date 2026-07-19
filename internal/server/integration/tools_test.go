@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -1825,9 +1826,11 @@ func TestInsightSearch_ReturnsBoundedSnippetAndRequiresGetForFullContent(t *test
 		require.Nil(t, insight.Content)
 		require.Contains(t, insight.Snippet, "compactneedle")
 		require.LessOrEqual(t, len(strings.Fields(insight.Snippet)), 40)
+		require.LessOrEqual(t, len(insight.Snippet), store.MaxInsightSearchSnippetBytes)
 		require.NotContains(t, insight.Snippet, "full-content-tail")
 	}
 	require.Less(t, len(searchText), fullContentBytes/4)
+	require.Less(t, len(searchText), 5000)
 
 	get := callTool(t, ctx, sess, "insight_get", map[string]any{
 		"project": "compact-search",
@@ -1835,6 +1838,24 @@ func TestInsightSearch_ReturnsBoundedSnippetAndRequiresGetForFullContent(t *test
 	})
 	require.False(t, get.IsError, "insight_get failed: %s", resultText(t, get))
 	require.Contains(t, resultText(t, get), "full-content-tail-")
+
+	longWord := strings.Repeat("é", 1000)
+	wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+		"compact-search", "oversizedneedle "+strings.Repeat(longWord+" ", 39), nil,
+	))
+	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	oversized := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "compact-search",
+		"query":   "oversizedneedle",
+		"limit":   5,
+	})
+	require.False(t, oversized.IsError, "insight_search failed: %s", resultText(t, oversized))
+	var oversizedResponse searchResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, oversized)), &oversizedResponse))
+	require.Len(t, oversizedResponse.Insights, 1)
+	require.LessOrEqual(t, len(oversizedResponse.Insights[0].Snippet), store.MaxInsightSearchSnippetBytes)
+	require.True(t, utf8.ValidString(oversizedResponse.Insights[0].Snippet))
+	require.True(t, strings.HasSuffix(oversizedResponse.Insights[0].Snippet, "…"))
 }
 
 func TestInsightSearch_WebQueryAndTagModes(t *testing.T) {

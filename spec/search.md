@@ -17,9 +17,10 @@ full. A short insight may fit entirely inside the bounded snippet.
 
 Snippets use PostgreSQL `ts_headline` with the same text-search configuration
 and query used for matching. Generation occurs after the ranked page is
-selected and is limited to one fragment of approximately 40 words. Highlight
-markers are disabled. A result matching through tags alone receives a bounded
-leading content fragment.
+selected and is limited to one fragment of approximately 40 words and 512 UTF-8
+bytes. A byte-truncated snippet ends with an ellipsis within that bound.
+Highlight markers are disabled. A result matching through tags alone receives
+a bounded leading content fragment.
 
 Snippet text is returned only as JSON text and is not trusted HTML. Any future
 rendered use must pass through the existing server sanitization boundary. The

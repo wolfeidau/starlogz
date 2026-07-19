@@ -22,7 +22,10 @@ var (
 	ErrInsightKeyConflict      = errors.New("insight key conflict")
 )
 
-const MaxInsightRevision = 1<<31 - 1
+const (
+	MaxInsightRevision           = 1<<31 - 1
+	MaxInsightSearchSnippetBytes = 512
+)
 
 type RevisionConflictError struct {
 	Expected int
