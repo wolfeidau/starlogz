@@ -48,7 +48,30 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
     button { border: 0; border-radius: .4rem; padding: .7rem 1rem; font: inherit; cursor: pointer; }
     .approve { background: #2563eb; color: white; } .deny { background: #4b5563; color: white; }
   </style>
-  <script nonce="{{.Nonce}}">history.replaceState(null, document.title, "` + confirmationPath + `");</script>
+  <script nonce="{{.Nonce}}">
+    history.replaceState(null, document.title, "` + confirmationPath + `");
+    document.addEventListener("DOMContentLoaded", function () {
+      const form = document.getElementById("authorization-confirmation");
+      let submitted = false;
+      form.addEventListener("submit", function (event) {
+        if (submitted) {
+          event.preventDefault();
+          return;
+        }
+        const submitter = event.submitter;
+        if (!submitter) return;
+        submitted = true;
+        const decision = document.createElement("input");
+        decision.type = "hidden";
+        decision.name = "decision";
+        decision.value = submitter.value;
+        form.appendChild(decision);
+        submitter.removeAttribute("name");
+        form.querySelectorAll("button[type=submit]").forEach(function (button) { button.disabled = true; });
+        submitter.textContent = submitter.value === "` + confirmationDecisionApprove + `" ? "Continuing…" : "Cancelling…";
+      });
+    });
+  </script>
 </head>
 <body>
 <main>
@@ -59,7 +82,7 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
   <code>{{.RedirectURI}}</code>
   <h2>Requested permissions</h2>
   <ul>{{range .Scopes}}<li><code>{{.Name}}</code><br><span class="muted">{{.Description}}</span></li>{{end}}</ul>
-  <form method="post" action="` + confirmationPath + `">
+  <form id="authorization-confirmation" method="post" action="` + confirmationPath + `">
     <input type="hidden" name="token" value="{{.Token}}">
     <div class="actions">
       <button class="approve" type="submit" name="decision" value="` + confirmationDecisionApprove + `">Continue</button>

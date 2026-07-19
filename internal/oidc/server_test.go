@@ -2073,6 +2073,10 @@ func TestExternalAuthorizationRequiresConfirmationAndApprovalIssuesUsableCode(t 
 	require.Contains(t, callbackW.Body.String(), "insights:read")
 	require.Contains(t, callbackW.Body.String(), "insights:write")
 	require.Contains(t, callbackW.Body.String(), "keep=value&amp;code=old")
+	require.Contains(t, callbackW.Body.String(), `id="authorization-confirmation"`)
+	require.Contains(t, callbackW.Body.String(), `if (submitted)`)
+	require.Contains(t, callbackW.Body.String(), `decision.name = "decision"`)
+	require.Contains(t, callbackW.Body.String(), `button.disabled = true`)
 	require.Empty(t, authState.codes)
 	require.Len(t, authState.confirmations, 1)
 
@@ -2189,7 +2193,7 @@ func TestRenderAuthorizationConfirmationEscapesUnnamedClientAndRedirect(t *testi
 	require.Contains(t, w.Body.String(), `next=&lt;script&gt;alert(1)&lt;/script&gt;`)
 	require.NotContains(t, w.Body.String(), `<img src=x`)
 	require.NotContains(t, w.Body.String(), `<script>alert`)
-	require.Contains(t, w.Body.String(), `<form method="post" action="`+confirmationPath+`">`)
+	require.Contains(t, w.Body.String(), `<form id="authorization-confirmation" method="post" action="`+confirmationPath+`">`)
 }
 
 func TestGitHubCallbackConfirmationStoreFailureReturnsGenericError(t *testing.T) {
