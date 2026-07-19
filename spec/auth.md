@@ -247,10 +247,15 @@ subdomains or preload. COOP and CORP are intentionally omitted to preserve
 OAuth popup coordination and cross-origin MCP Inspector compatibility.
 
 The confirmation response replaces the global policy with `default-src
-'none'`, nonce-only inline script and style sources, same-origin form action,
-and framing and base-URI denial. Interactive browser-auth responses use
-`Cache-Control: no-store`; public static assets, discovery documents, and JWKS
-retain their existing cache behavior.
+'none'`, nonce-only inline script and style sources, and framing and base-URI
+denial. Its form action permits the Starlogz origin and only the validated
+registered callback source because browsers apply `form-action` while following
+the form submission's authorization-result redirect. HTTP and HTTPS callbacks
+are limited to their exact origin; custom callbacks are limited to their
+registered scheme. This follows the [CSP Level 3 form-action and redirect
+matching model](https://www.w3.org/TR/CSP/#directive-form-action). Interactive
+browser-auth responses use `Cache-Control: no-store`; public static assets,
+discovery documents, and JWKS retain their existing cache behavior.
 
 ## Discovery contract
 

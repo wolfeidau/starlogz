@@ -15,11 +15,13 @@ import (
 )
 
 const (
-	maxDCRBodyBytes   = 64 << 10
-	maxRedirectURIs   = 10
-	maxRedirectURILen = 2048
-	maxClientNameLen  = 256
-	maxClientScopeLen = 1024
+	maxDCRBodyBytes     = 64 << 10
+	maxRedirectURIs     = 10
+	maxRedirectURILen   = 2048
+	maxClientNameLen    = 256
+	maxClientScopeLen   = 1024
+	redirectSchemeHTTP  = "http"
+	redirectSchemeHTTPS = "https"
 )
 
 // ClientStore persists client registrations from Dynamic Client Registration.
@@ -57,11 +59,11 @@ func validateRedirectURIs(uris []string) error {
 			return fmt.Errorf("redirect_uri must not contain userinfo: %q", raw)
 		}
 		switch u.Scheme {
-		case "https":
+		case redirectSchemeHTTPS:
 			if u.Hostname() == "" {
 				return fmt.Errorf("https redirect_uri must contain a host: %q", raw)
 			}
-		case "http":
+		case redirectSchemeHTTP:
 			host := u.Hostname()
 			if host != "localhost" && host != "127.0.0.1" && host != "::1" {
 				return fmt.Errorf("http redirect_uri is only allowed for localhost: %q", raw)

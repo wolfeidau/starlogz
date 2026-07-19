@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/wideevent"
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -135,6 +137,10 @@ func renderAuthorizationConfirmation(w http.ResponseWriter, pending *store.Pendi
 		return fmt.Errorf("generate CSP nonce: %w", err)
 	}
 	nonce := base64.RawURLEncoding.EncodeToString(nonceRaw[:])
+	formActionSource, err := authorizationConfirmationFormActionSource(pending.RedirectURI)
+	if err != nil {
+		return fmt.Errorf("build confirmation form-action source: %w", err)
+	}
 	displayName := pending.ClientName
 	unnamed := displayName == ""
 	if unnamed {
@@ -146,11 +152,40 @@ func renderAuthorizationConfirmation(w http.ResponseWriter, pending *store.Pendi
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' "+formActionSource+"; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'")
 	return authorizationConfirmationTemplate.Execute(w, confirmationPageData{
 		Nonce: nonce, Token: token, DisplayName: displayName, Unnamed: unnamed,
 		ClientID: pending.ClientID, RedirectURI: pending.RedirectURI, Scopes: scopes,
 	})
+}
+
+func authorizationConfirmationFormActionSource(redirectURI string) (string, error) {
+	redirectTo, err := url.Parse(redirectURI)
+	if err != nil || !redirectTo.IsAbs() || redirectTo.User != nil {
+		return "", fmt.Errorf("invalid redirect URI")
+	}
+	scheme := strings.ToLower(redirectTo.Scheme)
+	if scheme != redirectSchemeHTTP && scheme != redirectSchemeHTTPS {
+		return scheme + ":", nil
+	}
+	host := redirectTo.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("redirect URI has no host")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	} else {
+		host, err = idna.Lookup.ToASCII(host)
+		if err != nil {
+			return "", fmt.Errorf("normalize redirect URI host: %w", err)
+		}
+	}
+	if port := redirectTo.Port(); port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host, nil
 }
 
 // AuthorizationConfirmationHandler completes the post-GitHub client confirmation.

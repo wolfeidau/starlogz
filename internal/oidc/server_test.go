@@ -2067,7 +2067,9 @@ func TestExternalAuthorizationRequiresConfirmationAndApprovalIssuesUsableCode(t 
 
 	require.Equal(t, http.StatusOK, callbackW.Code)
 	require.Equal(t, "no-store", callbackW.Header().Get("Cache-Control"))
-	require.Contains(t, callbackW.Header().Get("Content-Security-Policy"), "default-src 'none'")
+	confirmationCSP := callbackW.Header().Get("Content-Security-Policy")
+	require.Contains(t, confirmationCSP, "default-src 'none'")
+	require.Contains(t, confirmationCSP, "form-action 'self' https://client.example.com")
 	require.Contains(t, callbackW.Body.String(), `&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt;`)
 	require.NotContains(t, callbackW.Body.String(), `<script>alert`)
 	require.Contains(t, callbackW.Body.String(), "insights:read")
@@ -2194,6 +2196,33 @@ func TestRenderAuthorizationConfirmationEscapesUnnamedClientAndRedirect(t *testi
 	require.NotContains(t, w.Body.String(), `<img src=x`)
 	require.NotContains(t, w.Body.String(), `<script>alert`)
 	require.Contains(t, w.Body.String(), `<form id="authorization-confirmation" method="post" action="`+confirmationPath+`">`)
+}
+
+func TestAuthorizationConfirmationFormActionSource(t *testing.T) {
+	tests := []struct {
+		name        string
+		redirectURI string
+		want        string
+	}{
+		{name: "https", redirectURI: "https://client.example.com:8443/callback?tenant=one", want: "https://client.example.com:8443"},
+		{name: "localhost", redirectURI: "http://localhost:55519/callback", want: "http://localhost:55519"},
+		{name: "IPv6 loopback", redirectURI: "http://[::1]:55519/callback", want: "http://[::1]:55519"},
+		{name: "international hostname", redirectURI: "https://bücher.example/callback", want: "https://xn--bcher-kva.example"},
+		{name: "case normalization", redirectURI: "HTTPS://CLIENT.EXAMPLE/callback", want: "https://client.example"},
+		{name: "custom scheme", redirectURI: "claude://auth/callback", want: "claude:"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := authorizationConfirmationFormActionSource(test.redirectURI)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestAuthorizationConfirmationFormActionSourceRejectsUnsafeHost(t *testing.T) {
+	_, err := authorizationConfirmationFormActionSource("https://client.example;form-action%20*/callback")
+	require.Error(t, err)
 }
 
 func TestGitHubCallbackConfirmationStoreFailureReturnsGenericError(t *testing.T) {
