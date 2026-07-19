@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -1786,6 +1787,75 @@ func TestInsightSearch_ReturnsMatchingInsights(t *testing.T) {
 	text := resultText(t, res)
 	require.Contains(t, text, "golang concurrency patterns")
 	require.NotContains(t, text, "python asyncio basics")
+}
+
+func TestInsightSearch_ReturnsBoundedSnippetAndRequiresGetForFullContent(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "compact-search-user")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+	contentPrefix := strings.Repeat("prefix ", 500) + "compactneedle " + strings.Repeat("suffix ", 500)
+	fullContentBytes := 0
+	for i := range 5 {
+		content := contentPrefix + fmt.Sprintf("full-content-tail-%d", i)
+		fullContentBytes += len(content)
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs("compact-search", content, nil))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	}
+
+	res := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "compact-search",
+		"query":   "compactneedle",
+		"limit":   5,
+	})
+	require.False(t, res.IsError, "insight_search failed: %s", resultText(t, res))
+
+	type searchResponse struct {
+		Insights []struct {
+			ID      string  `json:"id"`
+			Content *string `json:"content"`
+			Snippet string  `json:"snippet"`
+		} `json:"insights"`
+	}
+	searchText := resultText(t, res)
+	var response searchResponse
+	require.NoError(t, json.Unmarshal([]byte(searchText), &response))
+	require.Len(t, response.Insights, 5)
+	for _, insight := range response.Insights {
+		require.Nil(t, insight.Content)
+		require.Contains(t, insight.Snippet, "compactneedle")
+		require.LessOrEqual(t, len(strings.Fields(insight.Snippet)), 40)
+		require.LessOrEqual(t, len(insight.Snippet), store.MaxInsightSearchSnippetBytes)
+		require.NotContains(t, insight.Snippet, "full-content-tail")
+	}
+	require.Less(t, len(searchText), fullContentBytes/4)
+	require.Less(t, len(searchText), 5000)
+
+	get := callTool(t, ctx, sess, "insight_get", map[string]any{
+		"project": "compact-search",
+		"id":      response.Insights[0].ID,
+	})
+	require.False(t, get.IsError, "insight_get failed: %s", resultText(t, get))
+	require.Contains(t, resultText(t, get), "full-content-tail-")
+
+	longWord := strings.Repeat("é", 1000)
+	wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+		"compact-search", "oversizedneedle "+strings.Repeat(longWord+" ", 39), nil,
+	))
+	require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	oversized := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "compact-search",
+		"query":   "oversizedneedle",
+		"limit":   5,
+	})
+	require.False(t, oversized.IsError, "insight_search failed: %s", resultText(t, oversized))
+	var oversizedResponse searchResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, oversized)), &oversizedResponse))
+	require.Len(t, oversizedResponse.Insights, 1)
+	require.LessOrEqual(t, len(oversizedResponse.Insights[0].Snippet), store.MaxInsightSearchSnippetBytes)
+	require.True(t, utf8.ValidString(oversizedResponse.Insights[0].Snippet))
+	require.True(t, strings.HasSuffix(oversizedResponse.Insights[0].Snippet, "…"))
 }
 
 func TestInsightSearch_WebQueryAndTagModes(t *testing.T) {

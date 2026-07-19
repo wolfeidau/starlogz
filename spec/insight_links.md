@@ -1,7 +1,7 @@
 # Linked insights
 
 > Status: Current contract
-> Last reviewed: 2026-07-18
+> Last reviewed: 2026-07-19
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz supports explicit, project-local relationships between insights. Links
@@ -153,9 +153,9 @@ reference with another `insight_get` call rather than receiving an unbounded
 graph expansion. Missing, deleted, and inaccessible insights return the same
 not-found behavior.
 
-`insight_search` and `insight_list` retain their ranking, limits, and raw
-content. Cursor pagination is additive and does not expand or attach
-relationship data. The intended traversal is:
+`insight_search` retains its ranking and limits while returning bounded
+snippets; `insight_list` retains raw content. Cursor pagination does not expand
+or attach relationship data. The intended traversal is:
 
 ```text
 insight_search -> select result -> insight_get -> traverse deliberately
@@ -164,8 +164,9 @@ insight_search -> select result -> insight_get -> traverse deliberately
 ## Server rendering and dashboard behavior
 
 Connect responses render insight Markdown to a sanitized HTML fragment at read
-time. Rendered HTML is derived from raw content and is not stored. MCP and write
-flows continue to use raw content.
+time. Rendered HTML is derived from raw content and is not stored. MCP
+full-content reads and write flows continue to use raw content; MCP search uses
+bounded snippets.
 
 Insight links render as same-origin anchors with a stable action contract:
 

@@ -22,7 +22,10 @@ var (
 	ErrInsightKeyConflict      = errors.New("insight key conflict")
 )
 
-const MaxInsightRevision = 1<<31 - 1
+const (
+	MaxInsightRevision           = 1<<31 - 1
+	MaxInsightSearchSnippetBytes = 512
+)
 
 type RevisionConflictError struct {
 	Expected int
@@ -224,6 +227,7 @@ type SearchInsightsParams struct {
 	TagMode   SearchTagMode
 	Limit     int
 	After     *InsightSearchCursor
+	Compact   bool
 }
 
 type InsightSearchCursor struct {
@@ -233,8 +237,13 @@ type InsightSearchCursor struct {
 }
 
 type InsightSearchPage struct {
-	Insights   []*Insight
+	Hits       []*InsightSearchHit
 	NextCursor *InsightSearchCursor
+}
+
+type InsightSearchHit struct {
+	Insight *Insight
+	Snippet string
 }
 
 type InsightLinkWarning struct {
