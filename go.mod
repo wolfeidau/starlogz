@@ -14,6 +14,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/lestrrat-go/jwx/v3 v3.1.1
+	github.com/lestrrat-go/jwx/v4 v4.1.0
 	github.com/lmittmann/tint v1.2.0
 	github.com/medama-io/go-useragent v1.2.3
 	github.com/microcosm-cc/bluemonday v1.0.27
