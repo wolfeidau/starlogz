@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	starlogzv1connect "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1/starlogzv1connect"

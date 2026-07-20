@@ -13,7 +13,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 type KeyGenCmd struct {
@@ -35,7 +35,7 @@ func (c *KeyGenCmd) Run(_ context.Context, globals *Globals) error {
 
 	globals.Logger.Info("generated key", slog.String("fingerprint", hex.EncodeToString(fingerprint[:])))
 
-	jwkKey, err := jwk.Import(privateKey)
+	jwkKey, err := jwk.Import[jwk.Key](privateKey)
 	if err != nil {
 		return fmt.Errorf("failed to import key: %w", err)
 	}

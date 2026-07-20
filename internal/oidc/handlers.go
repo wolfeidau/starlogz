@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	storepkg "github.com/wolfeidau/starlogz/internal/store"
@@ -121,8 +121,8 @@ func (s *Server) LogoutHandler() http.Handler {
 			return
 		}
 
-		var jti string
-		if err := tok.Get("jti", &jti); err != nil || jti == "" {
+		jti, ok := tok.JwtID()
+		if !ok {
 			log.WarnContext(r.Context(), "logout: missing jti claim")
 			writeOAuthError(w, "invalid_token", "missing jti claim", http.StatusUnauthorized)
 			return

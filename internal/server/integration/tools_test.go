@@ -19,7 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"github.com/wolfeidau/starlogz/internal/oidc"
@@ -124,7 +124,7 @@ func newToolFixture(t *testing.T) *toolFixture {
 
 	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(priv)
+	raw, err := jwk.Import[jwk.Key](priv)
 	require.NoError(t, err)
 
 	// BaseURL controls the iss/aud claims; it must match between IssueJWT and

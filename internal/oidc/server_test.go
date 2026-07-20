@@ -22,9 +22,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/require"
@@ -158,7 +158,7 @@ func newTestJWK(t *testing.T) jwk.Key {
 	t.Helper()
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
+	raw, err := jwk.Import[jwk.Key](privkey)
 	require.NoError(t, err)
 	return raw
 }
@@ -1195,7 +1195,7 @@ func TestTokenHandler_WrongMethod(t *testing.T) {
 func TestTokenHandler_GrantStoreSeam(t *testing.T) {
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
+	raw, err := jwk.Import[jwk.Key](privkey)
 	require.NoError(t, err)
 
 	gs := &testGrantStore{}
@@ -1258,7 +1258,7 @@ func newRefreshTestServer(t *testing.T, gs *testGrantStore, gh *mockGitHubConnec
 	t.Helper()
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
+	raw, err := jwk.Import[jwk.Key](privkey)
 	require.NoError(t, err)
 	rev := newInMemRevocation()
 	gs.revocation = rev
@@ -1476,8 +1476,8 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 
 	parsed, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
 	require.NoError(t, err)
-	var jtiClaim string
-	require.NoError(t, parsed.Get("jti", &jtiClaim))
+	jtiClaim, ok := parsed.JwtID()
+	require.True(t, ok)
 	require.Equal(t, rotatedJTI, jtiClaim, "JWT jti must match the rotated grant's JTI")
 	require.NotEqual(t, oldJTI, jtiClaim)
 }
@@ -1919,7 +1919,7 @@ func TestTokenHandler_RefreshGrant_NoGrantStore(t *testing.T) {
 	t.Helper()
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
+	raw, err := jwk.Import[jwk.Key](privkey)
 	require.NoError(t, err)
 	srv, err := NewServer(Config{
 		BaseURL:    "http://example.com",

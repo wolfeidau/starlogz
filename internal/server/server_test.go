@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/stretchr/testify/require"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
@@ -108,7 +108,7 @@ func testFixtureWithConfig(t *testing.T, configure func(*server.Config)) (*httpt
 
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
+	raw, err := jwk.Import[jwk.Key](privkey)
 	require.NoError(t, err)
 
 	revocation := newMemRevocation()
@@ -142,7 +142,7 @@ func testFixtureWithConfig(t *testing.T, configure func(*server.Config)) (*httpt
 func TestNewRejectsUISessionIdleTTLAboveAbsoluteTTL(t *testing.T) {
 	privkey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	raw, err := jwk.Import(privkey)
+	raw, err := jwk.Import[jwk.Key](privkey)
 	require.NoError(t, err)
 
 	_, err = server.New(server.Config{
