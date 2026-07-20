@@ -122,7 +122,7 @@ func (s *Server) LogoutHandler() http.Handler {
 		}
 
 		jti, ok := tok.JwtID()
-		if !ok {
+		if !ok || jti == "" {
 			log.WarnContext(r.Context(), "logout: missing jti claim")
 			writeOAuthError(w, "invalid_token", "missing jti claim", http.StatusUnauthorized)
 			return

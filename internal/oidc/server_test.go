@@ -2409,6 +2409,19 @@ func TestLogoutHandler_InvalidToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+func TestLogoutHandler_EmptyJTI(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", "", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	w := httptest.NewRecorder()
+	srv.LogoutHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
 func TestLogoutHandler_WrongMethod(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/auth/logout", nil)
@@ -2431,6 +2444,15 @@ func TestVerifyJWT_ValidToken(t *testing.T) {
 	require.Contains(t, info.Scopes, "insights:read")
 	require.Contains(t, info.Scopes, "insights:write")
 	require.False(t, info.Expiration.IsZero())
+}
+
+func TestVerifyJWT_EmptyJTI(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	tokenString, err := srv.IssueJWT("12345678", "insights:read", "", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
+	require.ErrorIs(t, err, auth.ErrInvalidToken)
 }
 
 func TestVerifyJWT_Garbage(t *testing.T) {

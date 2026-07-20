@@ -238,7 +238,7 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 	}
 
 	jti, ok := verifiedToken.JwtID()
-	if !ok {
+	if !ok || jti == "" {
 		return nil, fmt.Errorf("%w: missing jti claim", auth.ErrInvalidToken)
 	}
 
