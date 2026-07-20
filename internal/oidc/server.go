@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
@@ -237,8 +237,8 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: token audience does not include resource", auth.ErrInvalidToken)
 	}
 
-	var jti string
-	if err := verifiedToken.Get("jti", &jti); err != nil || jti == "" {
+	jti, ok := verifiedToken.JwtID()
+	if !ok || jti == "" {
 		return nil, fmt.Errorf("%w: missing jti claim", auth.ErrInvalidToken)
 	}
 
@@ -254,9 +254,9 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: token has been revoked", auth.ErrInvalidToken)
 	}
 
-	var scope string
-	if err := verifiedToken.Get("scope", &scope); err != nil {
-		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: missing scope claim")
+	scope, err := jwt.Get[string](verifiedToken, "scope")
+	if err != nil {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: missing scope claim", slog.Any("error", err))
 		return nil, fmt.Errorf("%w: invalid token claims", auth.ErrInvalidToken)
 	}
 

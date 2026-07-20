@@ -83,7 +83,7 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 |---------|---------|
 | `github.com/alecthomas/kong` | CLI parsing |
 | `github.com/modelcontextprotocol/go-sdk` | MCP server + OAuth2 middleware |
-| `github.com/lestrrat-go/jwx/v3` | JWT sign/verify, JWKS, JWK key management |
+| `github.com/lestrrat-go/jwx/v4` | JWT sign/verify, JWKS, JWK key management |
 | `github.com/google/uuid` | `jti` and `client_id` generation |
 | `github.com/jackc/pgx/v5` | PostgreSQL driver (pgxpool) |
 | `github.com/lmittmann/tint` | Coloured slog handler for interactive terminals |

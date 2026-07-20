@@ -12,6 +12,7 @@ locals {
     "GET /.well-known/oauth-protected-resource",
     "POST /oauth2/register",
     "GET /oauth2/authorize",
+    "POST /oauth2/authorize/confirm",
     "POST /oauth2/token",
     "GET /auth/github/callback",
     "GET /ui/auth/callback",
