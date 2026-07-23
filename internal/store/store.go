@@ -435,6 +435,7 @@ type PendingAuth struct {
 	Scope                string
 	CodeChallenge        string
 	ClientState          string
+	RefreshAllowed       bool
 	ConfirmationRequired bool
 }
 
@@ -480,6 +481,7 @@ type AuthCode struct {
 	CodeChallenge      string
 	RedirectURI        string
 	ClientID           string
+	RefreshAllowed     bool
 	AccessToken        string
 	RefreshToken       string
 	AccessTokenExpiry  time.Time

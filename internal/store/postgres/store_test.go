@@ -2491,6 +2491,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 		Scope:                "insights:read",
 		CodeChallenge:        "challenge-xyz",
 		ClientState:          "opaque-state",
+		RefreshAllowed:       true,
 		ConfirmationRequired: true,
 	}
 	require.NoError(t, st.StorePendingAuth(ctx, "state-001", p))
@@ -2503,6 +2504,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	require.Equal(t, p.Scope, got.Scope)
 	require.Equal(t, p.CodeChallenge, got.CodeChallenge)
 	require.Equal(t, p.ClientState, got.ClientState)
+	require.Equal(t, p.RefreshAllowed, got.RefreshAllowed)
 	require.Equal(t, p.ConfirmationRequired, got.ConfirmationRequired)
 }
 
@@ -2578,6 +2580,7 @@ func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
 		CodeChallenge:      "challenge-abc",
 		RedirectURI:        "https://client.example.com/callback",
 		ClientID:           "client-xyz",
+		RefreshAllowed:     true,
 		AccessToken:        "gha_access_test",
 		RefreshToken:       "ghr_refresh_test",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),
@@ -2594,6 +2597,7 @@ func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
 	require.Equal(t, c.CodeChallenge, got.CodeChallenge)
 	require.Equal(t, c.RedirectURI, got.RedirectURI)
 	require.Equal(t, c.ClientID, got.ClientID)
+	require.Equal(t, c.RefreshAllowed, got.RefreshAllowed)
 	require.Equal(t, c.AccessToken, got.AccessToken)
 	require.Equal(t, c.RefreshToken, got.RefreshToken)
 	require.WithinDuration(t, c.AccessTokenExpiry, got.AccessTokenExpiry, time.Second)
@@ -2663,7 +2667,7 @@ func TestAuthorizationConfirmationApprovalIsAtomicAndEncrypted(t *testing.T) {
 		AuthCode: store.AuthCode{
 			Sub: "user-uuid", GitHubID: 1004, Email: "user@example.com", Scope: "insights:read",
 			CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
-			ClientID: "client", AccessToken: "gha_confirmation_secret", RefreshToken: "ghr_confirmation_secret",
+			ClientID: "client", RefreshAllowed: true, AccessToken: "gha_confirmation_secret", RefreshToken: "ghr_confirmation_secret",
 			AccessTokenExpiry: now.Add(time.Hour), RefreshTokenExpiry: now.Add(24 * time.Hour),
 		},
 		ClientName: "Example", ClientState: "state-value",
@@ -2682,6 +2686,7 @@ func TestAuthorizationConfirmationApprovalIsAtomicAndEncrypted(t *testing.T) {
 
 	got, err := st.ConsumeAuthCode(ctx, "approved-code")
 	require.NoError(t, err)
+	require.True(t, got.RefreshAllowed)
 	require.Equal(t, c.AccessToken, got.AccessToken)
 	require.Equal(t, c.RefreshToken, got.RefreshToken)
 	require.WithinDuration(t, c.AccessTokenExpiry, got.AccessTokenExpiry, time.Second)

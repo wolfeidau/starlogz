@@ -250,6 +250,27 @@ func TestDiscoveryHandler_ReturnsAuthServerMeta(t *testing.T) {
 	require.Contains(t, methods, "S256")
 }
 
+func TestDiscoveryHandler_AdvertisesCIMDSupportWhenEnabled(t *testing.T) {
+	raw := newTestJWK(t)
+	srv, err := NewServer(Config{
+		BaseURL:                  "http://example.com",
+		CIMDEnabled:              true,
+		ClientIDMetadataResolver: &mockClientIDMetadataResolver{},
+		AuthState:                newInMemAuthState(),
+		Revocation:               newInMemRevocation(),
+	}, raw)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	w := httptest.NewRecorder()
+	srv.DiscoveryHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
+	require.Equal(t, true, meta["client_id_metadata_document_supported"])
+}
+
 func TestDiscoveryHandler_Options_NoContent(t *testing.T) {
 	srv := newTestOIDCServer(t)
 	req := httptest.NewRequest(http.MethodOptions, "/.well-known/oauth-authorization-server", nil)
@@ -687,6 +708,7 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	clients := &testClientStore{records: []store.OAuthClient{{
 		ClientID:     "registered-client",
 		RedirectURIs: []string{"https://client.example.com/callback"},
+		GrantTypes:   []string{"authorization_code", "refresh_token"},
 		Scope:        "insights:read insights:write",
 	}}}
 	srv.clients = clients
@@ -710,8 +732,190 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
 	require.Equal(t, "", pending.ClientName)
+	require.True(t, pending.RefreshAllowed)
 	require.True(t, pending.ConfirmationRequired)
 	require.Equal(t, []string{"registered-client"}, clients.touches)
+}
+
+func TestAuthorizeHandler_ResolvesCIMDClient(t *testing.T) {
+	raw := newTestJWK(t)
+	srv, err := NewServer(Config{
+		BaseURL:                  "http://example.com",
+		CIMDEnabled:              true,
+		ClientIDMetadataResolver: &mockClientIDMetadataResolver{},
+		AuthState:                newInMemAuthState(),
+		Revocation:               newInMemRevocation(),
+	}, raw)
+	require.NoError(t, err)
+	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
+		ClientID:       "https://client.example.com/oauth/client-metadata.json",
+		ClientName:     "Example CIMD Client",
+		RedirectURIs:   []string{"https://client.example.com/callback"},
+		Scope:          "insights:read insights:write",
+		RefreshAllowed: true,
+	}}
+	srv.clientIDMetadataResolver = resolver
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"https://client.example.com/oauth/client-metadata.json"},
+		"redirect_uri":          {"https://client.example.com/callback"},
+		"code_challenge":        {pkceChallenge("verifier")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+	location, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
+	require.NoError(t, err)
+	require.Equal(t, "Example CIMD Client", pending.ClientName)
+	require.Equal(t, "insights:read insights:write", pending.Scope)
+	require.True(t, pending.RefreshAllowed)
+	require.Equal(t, []string{"https://client.example.com/oauth/client-metadata.json"}, resolver.calls)
+}
+
+func TestAuthorizeHandler_CIMDAllowsLoopbackPortMismatch(t *testing.T) {
+	raw := newTestJWK(t)
+	srv, err := NewServer(Config{
+		BaseURL:                  "http://example.com",
+		CIMDEnabled:              true,
+		ClientIDMetadataResolver: &mockClientIDMetadataResolver{},
+		AuthState:                newInMemAuthState(),
+		Revocation:               newInMemRevocation(),
+	}, raw)
+	require.NoError(t, err)
+	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
+		ClientID:       "https://claude.ai/oauth/claude-code-client-metadata",
+		ClientName:     "Claude Code",
+		RedirectURIs:   []string{"http://localhost/callback", "http://127.0.0.1/callback"},
+		Scope:          "insights:read insights:write",
+		RefreshAllowed: true,
+	}}
+	srv.clientIDMetadataResolver = resolver
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"https://claude.ai/oauth/claude-code-client-metadata"},
+		"redirect_uri":          {"http://localhost:64921/callback"},
+		"code_challenge":        {pkceChallenge("verifier")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+}
+
+func TestAuthorizeHandler_CIMDStillRejectsLoopbackPathMismatch(t *testing.T) {
+	raw := newTestJWK(t)
+	srv, err := NewServer(Config{
+		BaseURL:                  "http://example.com",
+		CIMDEnabled:              true,
+		ClientIDMetadataResolver: &mockClientIDMetadataResolver{},
+		AuthState:                newInMemAuthState(),
+		Revocation:               newInMemRevocation(),
+	}, raw)
+	require.NoError(t, err)
+	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
+		ClientID:       "https://claude.ai/oauth/claude-code-client-metadata",
+		ClientName:     "Claude Code",
+		RedirectURIs:   []string{"http://localhost/callback"},
+		Scope:          "insights:read insights:write",
+		RefreshAllowed: true,
+	}}
+	srv.clientIDMetadataResolver = resolver
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"https://claude.ai/oauth/claude-code-client-metadata"},
+		"redirect_uri":          {"http://localhost:64921/other-callback"},
+		"code_challenge":        {pkceChallenge("verifier")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, oauthErrorInvalidRequest, errResp["error"])
+}
+
+func TestAuthorizeHandler_CIMDDisabledRejectsResolverFallback(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.clientIDMetadataResolver = &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
+		ClientID:       "https://client.example.com/oauth/client-metadata.json",
+		ClientName:     "Example CIMD Client",
+		RedirectURIs:   []string{"https://client.example.com/callback"},
+		Scope:          "insights:read insights:write",
+		RefreshAllowed: true,
+	}}
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"https://client.example.com/oauth/client-metadata.json"},
+		"redirect_uri":          {"https://client.example.com/callback"},
+		"code_challenge":        {pkceChallenge("verifier")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, oauthErrorInvalidClient, errResp["error"])
+}
+
+func TestAuthorizeHandler_RegisteredClientTakesPriorityOverCIMD(t *testing.T) {
+	srv := newTestOIDCServer(t)
+	srv.clients = &testClientStore{records: []store.OAuthClient{{
+		ClientID:     "https://client.example.com/oauth/client-metadata.json",
+		ClientName:   "Registered client",
+		RedirectURIs: []string{"https://client.example.com/callback"},
+		GrantTypes:   []string{"authorization_code"},
+		Scope:        "insights:read",
+	}}}
+	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
+		ClientID:       "https://client.example.com/oauth/client-metadata.json",
+		ClientName:     "Resolved over network",
+		RedirectURIs:   []string{"https://client.example.com/callback"},
+		Scope:          "insights:read insights:write",
+		RefreshAllowed: true,
+	}}
+	srv.clientIDMetadataResolver = resolver
+
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"https://client.example.com/oauth/client-metadata.json"},
+		"redirect_uri":          {"https://client.example.com/callback"},
+		"code_challenge":        {pkceChallenge("verifier")},
+		"code_challenge_method": {"S256"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.AuthorizeHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+	location, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
+	require.NoError(t, err)
+	require.Equal(t, "Registered client", pending.ClientName)
+	require.False(t, pending.RefreshAllowed)
+	require.Empty(t, resolver.calls)
 }
 
 func TestAuthorizeHandler_OnlyStarlogzUIBypassesConfirmation(t *testing.T) {
@@ -815,6 +1019,7 @@ func TestAuthorizeHandler_UnknownScope(t *testing.T) {
 
 	q := url.Values{
 		"response_type":         {"code"},
+		"client_id":             {"test-client"},
 		"redirect_uri":          {"https://client.example.com/callback"},
 		"code_challenge":        {"abc123"},
 		"code_challenge_method": {"S256"},
@@ -922,6 +1127,54 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
 	require.Equal(t, []string{"test-client"}, clients.touches)
+}
+
+func TestTokenHandler_CIMDExchangeIssuesRefreshWithoutRegisteredClientLookup(t *testing.T) {
+	raw := newTestJWK(t)
+	gs := &testGrantStore{}
+	srv, err := NewServer(Config{
+		BaseURL:    "http://example.com",
+		AuthState:  newInMemAuthState(),
+		Revocation: newInMemRevocation(),
+		Grants:     gs,
+	}, raw)
+	require.NoError(t, err)
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	code := "cimd-auth-code"
+	require.NoError(t, srv.authState.StoreAuthCode(t.Context(), code, store.AuthCode{
+		ClientID:           "https://client.example.com/oauth/client-metadata.json",
+		Sub:                uuid.New().String(),
+		GitHubID:           12345678,
+		Email:              "user@example.com",
+		Scope:              "insights:read insights:write",
+		CodeChallenge:      pkceChallenge(verifier),
+		RedirectURI:        "https://client.example.com/callback",
+		RefreshAllowed:     true,
+		AccessToken:        "gha_access",
+		RefreshToken:       "ghr_refresh",
+		AccessTokenExpiry:  time.Now().Add(time.Hour),
+		RefreshTokenExpiry: time.Now().Add(24 * time.Hour),
+	}))
+
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"client_id":     {"https://client.example.com/oauth/client-metadata.json"},
+		"redirect_uri":  {"https://client.example.com/callback"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp["refresh_token"])
+	require.Len(t, gs.calls, 1)
 }
 
 func TestTokenHandler_CodeConsumedAfterUse(t *testing.T) {
@@ -2780,6 +3033,20 @@ func (m *mockGitHubConnector) RefreshToken(_ context.Context, refreshToken strin
 		tok = m.token
 	}
 	return tok, m.identity, nil
+}
+
+type mockClientIDMetadataResolver struct {
+	client *resolvedOAuthClient
+	err    error
+	calls  []string
+}
+
+func (m *mockClientIDMetadataResolver) Resolve(_ context.Context, clientID string) (*resolvedOAuthClient, error) {
+	m.calls = append(m.calls, clientID)
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.client, nil
 }
 
 type testClientStore struct {

@@ -1,7 +1,7 @@
 # OAuth Client ID Metadata Documents
 
 > Status: Proposed
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-23
 > Authority: Design proposal informed by the MCP authorization specification, the OAuth Client ID Metadata Document Internet-Draft, and current repository evidence. This is not a current contract.
 
 ## Summary
@@ -17,11 +17,9 @@ redirect URI matching, uses the shared post-GitHub client confirmation, and trea
 metadata retrieval as an SSRF-sensitive operation. DCR and the first-party
 dashboard client remain supported without behavior changes.
 
-Implementation should wait until the client-identity classification work
-represented by closed, unmerged PR
-[#69](https://github.com/wolfeidau/starlogz/pull/69) has an explicit
-disposition. That work overlaps the OAuth handlers and privacy-safe event
-fields affected by CIMD.
+As of 2026-07-23, Starlogz still implements DCR-only client onboarding. This
+document describes an additive design for CIMD that reuses the current
+post-GitHub confirmation flow and existing single-use authorization state.
 
 ## Motivation
 
@@ -58,18 +56,21 @@ implements CIMD.
 
 ## Current repository evidence
 
-As reviewed on 2026-07-19:
+As reviewed on 2026-07-23:
 
-- authorization-server discovery advertises a DCR `registration_endpoint` but
-  does not advertise `client_id_metadata_document_supported`;
-- authorization requires `client_id` to resolve to a persisted `oauth_clients`
-  record before redirecting to GitHub;
-- refresh-token eligibility is checked by looking up the persisted client again
-  during authorization-code exchange;
-- the first-party dashboard uses the fixed `starlogz-ui` client ID and registers
-  only the authorization-code grant; and
-- OAuth request state and authorization codes already bind the client ID,
-  redirect URI, scope, and PKCE challenge in PostgreSQL.
+- authorization-server discovery advertises the DCR
+  `registration_endpoint`, and repository tests assert the current metadata
+  shape without a `client_id_metadata_document_supported` flag;
+- `/oauth2/authorize` resolves clients only from persisted `oauth_clients` and
+  rejects any unknown `client_id` before GitHub redirect;
+- the post-GitHub confirmation flow is now implemented for non-first-party
+  registered clients, with `pending_auths`, `authorization_confirmations`, and
+  `auth_codes` carrying trusted client, redirect, scope, PKCE, and upstream
+  token state through single-use PostgreSQL records;
+- authorization-code exchange still decides refresh-token eligibility by
+  reloading the registered client from `oauth_clients`; and
+- the first-party dashboard still uses the fixed `starlogz-ui` client ID and
+  bypasses confirmation only by exact client ID, not by client-supplied name.
 
 The current behavior remains governed by [auth.md](auth.md) until this proposal
 is implemented and that contract is updated.
@@ -228,12 +229,14 @@ state:
 5. A created refresh grant remains bound to the exact client ID under the
    existing refresh-token contract.
 
-This likely requires the next available migration to add a non-null
-`refresh_allowed` field to pending authorizations and authorization codes,
-defaulting to false for existing rows. A bounded `client_kind` field should be
-added only if it is needed after confirmation or for privacy-safe events. The
-implementation must prefer the smallest schema change that preserves the
-binding.
+Current schema already persists the client ID, client name, redirect URI,
+scope, PKCE challenge, and encrypted upstream tokens through
+`pending_auths`, `authorization_confirmations`, and `auth_codes`. A CIMD
+implementation still needs one trusted representation of refresh eligibility
+and any bounded `client_kind` carried through those records so the token and
+refresh endpoints do not re-fetch metadata or rediscover client type from
+untrusted text. The implementation should prefer the smallest schema or state
+change that preserves that binding.
 
 In-flight requests created before deployment may lose refresh eligibility but
 must remain safe and able to complete an access-token exchange where otherwise
@@ -241,8 +244,7 @@ valid.
 
 ### Discovery and rollout
 
-The Go MCP SDK already models the authorization-server metadata member
-`client_id_metadata_document_supported`. Starlogz advertises it as `true` only
+Starlogz advertises `client_id_metadata_document_supported` as `true` only
 when CIMD is enabled and all secure resolver and confirmation behavior is
 active.
 
@@ -296,59 +298,20 @@ authorization query string.
 These controls do not classify the metadata document itself as secret. They
 limit unnecessary propagation and prevent unbounded observability dimensions.
 
-## Delivery plan
+## Implementation outline
 
-### 0. Resolve overlapping work
-
-- Decide whether to restore, replace, or abandon the client-identity
-  classification design from closed PR #69.
-- If retained, land its bounded classification and privacy rules first, then
-  rebase the CIMD work on that contract.
-- Reconcile the reviewed IETF draft version immediately before implementation.
-
-### 1. Specify and implement secure resolution
-
-- Add CIMD configuration and an `internal/oidc` resolver.
-- Share validation rules with DCR only where semantics are actually identical.
-- Implement dedicated network controls, document validation, caching, and
-  privacy-safe failure classification.
-- Add unit tests before integrating the resolver with authorization.
-
-Suggested commit: `feat: add secure CIMD metadata resolution`
-
-### 2. Bind CIMD clients into authorization
-
-- Add registered-first client resolution at `/oauth2/authorize`.
-- Persist authorization-time refresh eligibility and any required bounded
-  client kind through pending state and authorization codes.
-- Remove the token endpoint's assumption that every valid client must be
-  reloaded from `oauth_clients`.
-- Preserve DCR and first-party dashboard behavior.
-
-Suggested commit: `feat: resolve CIMD clients during authorization`
-
-### 3. Extend shared client confirmation
-
-- Carry resolved CIMD display values and bounded client classification into
-  the existing post-GitHub confirmation state.
-- Reuse the existing escaped response, server-owned scope descriptions,
-  one-time capability, CSRF controls, expiry, and atomic completion.
-- Add CIMD-specific coverage without introducing a pre-GitHub confirmation.
-
-Suggested commit: `feat: confirm CIMD authorization requests`
-
-### 4. Advertise and verify support
-
-- Set `client_id_metadata_document_supported` only behind the enabled feature.
-- Add discovery, compatibility, privacy, and end-to-end coverage.
-- Validate the flow with a controlled public HTTPS fixture and the MCP
-  Inspector, then with current clients that expose CIMD configuration.
-- Update [auth.md](auth.md) when enabling the behavior as a supported contract.
-
-Suggested commit: `feat: advertise CIMD client metadata support`
-
-This proposal itself can be committed separately as
-`docs: propose CIMD client metadata support`.
+1. Add a dedicated `internal/oidc` CIMD resolver with strict URL, DNS,
+   transport, size, timeout, and metadata validation rules.
+2. Change `/oauth2/authorize` to resolve registered clients first, then
+   eligible CIMD URL client IDs, and reject all other unknown clients.
+3. Persist authorization-time client decisions needed after GitHub, including
+   refresh eligibility and any bounded client classification, through the
+   existing single-use server-side state.
+4. Reuse the current post-GitHub confirmation page and one-time completion flow
+   for CIMD clients.
+5. Advertise `client_id_metadata_document_supported` only when the full secure
+   path is enabled and [auth.md](auth.md) is updated to describe supported
+   behavior.
 
 ## Verification plan
 

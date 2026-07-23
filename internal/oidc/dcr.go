@@ -15,13 +15,17 @@ import (
 )
 
 const (
-	maxDCRBodyBytes     = 64 << 10
-	maxRedirectURIs     = 10
-	maxRedirectURILen   = 2048
-	maxClientNameLen    = 256
-	maxClientScopeLen   = 1024
-	redirectSchemeHTTP  = "http"
-	redirectSchemeHTTPS = "https"
+	maxDCRBodyBytes            = 64 << 10
+	maxRedirectURIs            = 10
+	maxRedirectURILen          = 2048
+	maxClientNameLen           = 256
+	maxClientScopeLen          = 1024
+	contentTypeApplicationJSON = "application/json"
+	redirectHostLocalhost      = "localhost"
+	redirectHostLoopbackIPv4   = "127.0.0.1"
+	redirectHostLoopbackIPv6   = "::1"
+	redirectSchemeHTTP         = "http"
+	redirectSchemeHTTPS        = "https"
 )
 
 // ClientStore persists client registrations from Dynamic Client Registration.
@@ -65,7 +69,7 @@ func validateRedirectURIs(uris []string) error {
 			}
 		case redirectSchemeHTTP:
 			host := u.Hostname()
-			if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			if host != redirectHostLocalhost && host != redirectHostLoopbackIPv4 && host != redirectHostLoopbackIPv6 {
 				return fmt.Errorf("http redirect_uri is only allowed for localhost: %q", raw)
 			}
 		default:
@@ -108,7 +112,7 @@ func validateClientRegistrationMetadata(req *oauthex.ClientRegistrationMetadata)
 
 func decodeClientRegistration(w http.ResponseWriter, r *http.Request, dst *oauthex.ClientRegistrationMetadata) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != contentTypeApplicationJSON {
 		return fmt.Errorf("Content-Type must be application/json")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxDCRBodyBytes)

@@ -20,13 +20,14 @@ const (
 	tokenResponseFieldTokenType  = "token_type"
 )
 
-func buildAuthServerMeta(base *url.URL) *oauthex.AuthServerMeta {
+func buildAuthServerMeta(base *url.URL, cimdSupported bool) *oauthex.AuthServerMeta {
 	return &oauthex.AuthServerMeta{
 		Issuer:                            base.String(),
 		AuthorizationEndpoint:             base.JoinPath("/oauth2/authorize").String(),
 		TokenEndpoint:                     base.JoinPath("/oauth2/token").String(),
 		JWKSURI:                           base.JoinPath("/.well-known/jwks").String(),
 		RegistrationEndpoint:              base.JoinPath("/oauth2/register").String(),
+		ClientIDMetadataDocumentSupported: cimdSupported,
 		ResponseTypesSupported:            []string{oauthCode},
 		GrantTypesSupported:               []string{oauthGrantAuthorizationCode, oauthGrantRefreshToken},
 		ScopesSupported:                   []string{scopeInsightsRead, scopeInsightsWrite, scopeOrgAdmin},

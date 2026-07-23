@@ -23,6 +23,7 @@ type HTTPCmd struct {
 	JWKPath                      string        `help:"Path to the JSON web key used to sign auth tokens." required:""`
 	GitHubClientID               string        `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
 	GitHubClientSecret           string        `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
+	CIMDEnabled                  bool          `help:"Enable OAuth Client ID Metadata Document support." env:"CIMD_ENABLED"`
 	DatabaseURL                  string        `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
 	TokenEncryptionKey           string        `help:"Base64-encoded 32-byte key for encrypting stored GitHub tokens." env:"TOKEN_ENCRYPTION_KEY" required:""`
 	ShutdownTimeout              time.Duration `help:"Maximum time to wait for in-flight requests before exiting." default:"30s" env:"SHUTDOWN_TIMEOUT"`
@@ -84,6 +85,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		BaseURL:                      c.BaseServerURL,
 		GitHubClientID:               c.GitHubClientID,
 		GitHubClientSecret:           c.GitHubClientSecret,
+		CIMDEnabled:                  c.CIMDEnabled,
 		PrivKey:                      privkey,
 		Logger:                       globals.Logger,
 		Store:                        st,
