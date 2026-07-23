@@ -44,10 +44,14 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
     :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111827; color: #e5e7eb; }
     main { width: min(38rem, calc(100% - 2rem)); box-sizing: border-box; padding: 2rem; border: 1px solid #374151; border-radius: .75rem; background: #1f2937; }
-    h1 { margin-top: 0; font-size: 1.5rem; } h2 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
-    code { overflow-wrap: anywhere; } ul { padding-left: 1.25rem; } li + li { margin-top: .75rem; }
-    .muted { color: #9ca3af; } .actions { display: flex; gap: .75rem; margin-top: 2rem; }
-    button { border: 0; border-radius: .4rem; padding: .7rem 1rem; font: inherit; cursor: pointer; }
+	    h1 { margin-top: 0; font-size: 1.5rem; } h2 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
+	    code { overflow-wrap: anywhere; } ul { padding-left: 1.25rem; } li + li { margin-top: .75rem; }
+	    .muted { color: #9ca3af; } .actions { display: flex; gap: .75rem; margin-top: 2rem; }
+	    .identity { margin: 1.25rem 0; padding: 1rem; border: 1px solid #4b5563; border-left: .25rem solid #60a5fa; border-radius: .5rem; background: #111827; }
+	    .identity-label { margin: 0 0 .35rem; color: #93c5fd; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+	    .identity-host { margin: 0; font-size: 1.125rem; font-weight: 700; }
+	    .identity-help { margin: .65rem 0 0; color: #cbd5e1; font-size: .9rem; line-height: 1.4; }
+	    button { border: 0; border-radius: .4rem; padding: .7rem 1rem; font: inherit; cursor: pointer; }
     .approve { background: #2563eb; color: white; } .deny { background: #4b5563; color: white; }
   </style>
   <script nonce="{{.Nonce}}">
@@ -77,7 +81,11 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
 <body>
 <main>
   <h1>Authorize {{.DisplayName}}</h1>
-  {{if .Unnamed}}<p class="muted">Client ID: <code>{{.ClientID}}</code></p>{{end}}
+  {{if .ClientIDHost}}<section class="identity" aria-labelledby="client-identity-label">
+    <p id="client-identity-label" class="identity-label">Verify client identity</p>
+    <p class="identity-host"><code>{{.ClientIDHost}}</code></p>
+    <p class="identity-help">The client name above comes from metadata hosted on this domain. Continue only if you recognize and trust it.</p>
+  </section>{{else if .Unnamed}}<p class="muted">Client ID: <code>{{.ClientID}}</code></p>{{end}}
   <p>This client is requesting access to Starlogz.</p>
   <h2>Redirect destination</h2>
   <code>{{.RedirectURI}}</code>
@@ -100,13 +108,14 @@ type confirmationScope struct {
 }
 
 type confirmationPageData struct {
-	Nonce       string
-	Token       string
-	DisplayName string
-	Unnamed     bool
-	ClientID    string
-	RedirectURI string
-	Scopes      []confirmationScope
+	Nonce        string
+	Token        string
+	DisplayName  string
+	Unnamed      bool
+	ClientID     string
+	ClientIDHost string
+	RedirectURI  string
+	Scopes       []confirmationScope
 }
 
 var scopeDescriptions = map[string]string{
@@ -145,6 +154,14 @@ func renderAuthorizationConfirmation(w http.ResponseWriter, pending *store.Pendi
 	if unnamed {
 		displayName = "Unnamed client"
 	}
+	clientIDHost := ""
+	if pending.ClientKind == store.OAuthClientKindCIMD {
+		clientIDURL, err := url.Parse(pending.ClientID)
+		if err != nil || clientIDURL.Scheme != redirectSchemeHTTPS || clientIDURL.Hostname() == "" {
+			return fmt.Errorf("invalid CIMD client ID")
+		}
+		clientIDHost = clientIDURL.Hostname()
+	}
 	scopes := make([]confirmationScope, 0, len(strings.Fields(pending.Scope)))
 	for _, name := range strings.Fields(pending.Scope) {
 		scopes = append(scopes, confirmationScope{Name: name, Description: scopeDescriptions[name]})
@@ -154,7 +171,8 @@ func renderAuthorizationConfirmation(w http.ResponseWriter, pending *store.Pendi
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' "+formActionSource+"; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'")
 	return authorizationConfirmationTemplate.Execute(w, confirmationPageData{
 		Nonce: nonce, Token: token, DisplayName: displayName, Unnamed: unnamed,
-		ClientID: pending.ClientID, RedirectURI: pending.RedirectURI, Scopes: scopes,
+		ClientID: pending.ClientID, ClientIDHost: clientIDHost,
+		RedirectURI: pending.RedirectURI, Scopes: scopes,
 	})
 }
 

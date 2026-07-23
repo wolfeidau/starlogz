@@ -771,6 +771,11 @@ func (s *Store) DeleteGrant(ctx context.Context, jti string, retired *store.Reti
 func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error {
 	s.logger(ctx).DebugContext(ctx, "storing pending auth")
 
+	clientKind := p.ClientKind
+	if clientKind == "" {
+		clientKind = store.OAuthClientKindRegistered
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -779,12 +784,12 @@ func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.Pend
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO pending_auths
-		    (state, client_id, client_name, redirect_uri, scope, code_challenge, client_state,
-		     refresh_allowed, confirmation_required, expires_at)
-		VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, NULLIF($7,''), $8, $9,
+		    (state, client_id, client_name, client_kind, redirect_uri, scope, code_challenge,
+		     client_state, refresh_allowed, confirmation_required, expires_at)
+		VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10,
 		        now() + interval '10 minutes')`,
-		state, p.ClientID, p.ClientName, p.RedirectURI, p.Scope, p.CodeChallenge, p.ClientState,
-		p.RefreshAllowed, p.ConfirmationRequired)
+		state, p.ClientID, p.ClientName, clientKind, p.RedirectURI, p.Scope, p.CodeChallenge,
+		p.ClientState, p.RefreshAllowed, p.ConfirmationRequired)
 	if err != nil {
 		return fmt.Errorf("insert pending auth: %w", err)
 	}
@@ -806,10 +811,11 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 	err := s.pool.QueryRow(ctx, `
 		DELETE FROM pending_auths
 		WHERE state = $1 AND expires_at > now()
-		RETURNING COALESCE(client_id,''), client_name, redirect_uri, scope, code_challenge,
-		          COALESCE(client_state,''), refresh_allowed, confirmation_required`,
-		state).Scan(&p.ClientID, &p.ClientName, &p.RedirectURI, &p.Scope, &p.CodeChallenge,
-		&p.ClientState, &p.RefreshAllowed, &p.ConfirmationRequired)
+		RETURNING COALESCE(client_id,''), client_name, client_kind, redirect_uri, scope,
+		          code_challenge, COALESCE(client_state,''), refresh_allowed,
+		          confirmation_required`,
+		state).Scan(&p.ClientID, &p.ClientName, &p.ClientKind, &p.RedirectURI, &p.Scope,
+		&p.CodeChallenge, &p.ClientState, &p.RefreshAllowed, &p.ConfirmationRequired)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

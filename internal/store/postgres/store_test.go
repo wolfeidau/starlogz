@@ -2487,6 +2487,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	p := store.PendingAuth{
 		ClientID:             "client-abc",
 		ClientName:           "Example client",
+		ClientKind:           store.OAuthClientKindCIMD,
 		RedirectURI:          "https://client.example.com/callback",
 		Scope:                "insights:read",
 		CodeChallenge:        "challenge-xyz",
@@ -2500,6 +2501,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, p.ClientID, got.ClientID)
 	require.Equal(t, p.ClientName, got.ClientName)
+	require.Equal(t, p.ClientKind, got.ClientKind)
 	require.Equal(t, p.RedirectURI, got.RedirectURI)
 	require.Equal(t, p.Scope, got.Scope)
 	require.Equal(t, p.CodeChallenge, got.CodeChallenge)
@@ -2547,6 +2549,7 @@ func TestStorePendingAuth_EmptyOptionalFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got.ClientID)
 	require.Empty(t, got.ClientState)
+	require.Equal(t, store.OAuthClientKindRegistered, got.ClientKind)
 }
 
 func TestPendingAuthMigrationDefaultsAllowLegacyRows(t *testing.T) {
@@ -2562,6 +2565,7 @@ func TestPendingAuthMigrationDefaultsAllowLegacyRows(t *testing.T) {
 	got, err := st.ConsumePendingAuth(t.Context(), "legacy-state")
 	require.NoError(t, err)
 	require.Empty(t, got.ClientName)
+	require.Equal(t, store.OAuthClientKindRegistered, got.ClientKind)
 	require.False(t, got.ConfirmationRequired)
 }
 

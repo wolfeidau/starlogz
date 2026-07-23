@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	storepkg "github.com/wolfeidau/starlogz/internal/store"
 )
 
 const (
@@ -132,12 +133,12 @@ func (r *httpClientIDMetadataResolver) Resolve(ctx context.Context, clientID str
 	}
 
 	return &resolvedOAuthClient{
-		ClientID:        clientID,
-		ClientName:      doc.ClientName,
-		RedirectURIs:    doc.RedirectURIs,
-		Scope:           doc.Scope,
-		RefreshAllowed:  slices.Contains(doc.GrantTypes, oauthGrantRefreshToken),
-		IsRegisteredDCR: false,
+		ClientID:       clientID,
+		ClientName:     doc.ClientName,
+		ClientKind:     storepkg.OAuthClientKindCIMD,
+		RedirectURIs:   doc.RedirectURIs,
+		Scope:          doc.Scope,
+		RefreshAllowed: slices.Contains(doc.GrantTypes, oauthGrantRefreshToken),
 	}, nil
 }
 

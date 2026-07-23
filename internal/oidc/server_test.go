@@ -732,6 +732,7 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
 	require.Equal(t, "", pending.ClientName)
+	require.Equal(t, store.OAuthClientKindRegistered, pending.ClientKind)
 	require.True(t, pending.RefreshAllowed)
 	require.True(t, pending.ConfirmationRequired)
 	require.Equal(t, []string{"registered-client"}, clients.touches)
@@ -750,6 +751,7 @@ func TestAuthorizeHandler_ResolvesCIMDClient(t *testing.T) {
 	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
 		ClientID:       "https://client.example.com/oauth/client-metadata.json",
 		ClientName:     "Example CIMD Client",
+		ClientKind:     store.OAuthClientKindCIMD,
 		RedirectURIs:   []string{"https://client.example.com/callback"},
 		Scope:          "insights:read insights:write",
 		RefreshAllowed: true,
@@ -774,6 +776,7 @@ func TestAuthorizeHandler_ResolvesCIMDClient(t *testing.T) {
 	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
 	require.NoError(t, err)
 	require.Equal(t, "Example CIMD Client", pending.ClientName)
+	require.Equal(t, store.OAuthClientKindCIMD, pending.ClientKind)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
 	require.True(t, pending.RefreshAllowed)
 	require.Equal(t, []string{"https://client.example.com/oauth/client-metadata.json"}, resolver.calls)
@@ -792,6 +795,7 @@ func TestAuthorizeHandler_CIMDAllowsLoopbackPortMismatch(t *testing.T) {
 	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
 		ClientID:       "https://claude.ai/oauth/claude-code-client-metadata",
 		ClientName:     "Claude Code",
+		ClientKind:     store.OAuthClientKindCIMD,
 		RedirectURIs:   []string{"http://localhost/callback", "http://127.0.0.1/callback"},
 		Scope:          "insights:read insights:write",
 		RefreshAllowed: true,
@@ -826,6 +830,7 @@ func TestAuthorizeHandler_CIMDStillRejectsLoopbackPathMismatch(t *testing.T) {
 	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
 		ClientID:       "https://claude.ai/oauth/claude-code-client-metadata",
 		ClientName:     "Claude Code",
+		ClientKind:     store.OAuthClientKindCIMD,
 		RedirectURIs:   []string{"http://localhost/callback"},
 		Scope:          "insights:read insights:write",
 		RefreshAllowed: true,
@@ -855,6 +860,7 @@ func TestAuthorizeHandler_CIMDDisabledRejectsResolverFallback(t *testing.T) {
 	srv.clientIDMetadataResolver = &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
 		ClientID:       "https://client.example.com/oauth/client-metadata.json",
 		ClientName:     "Example CIMD Client",
+		ClientKind:     store.OAuthClientKindCIMD,
 		RedirectURIs:   []string{"https://client.example.com/callback"},
 		Scope:          "insights:read insights:write",
 		RefreshAllowed: true,
@@ -890,6 +896,7 @@ func TestAuthorizeHandler_RegisteredClientTakesPriorityOverCIMD(t *testing.T) {
 	resolver := &mockClientIDMetadataResolver{client: &resolvedOAuthClient{
 		ClientID:       "https://client.example.com/oauth/client-metadata.json",
 		ClientName:     "Resolved over network",
+		ClientKind:     store.OAuthClientKindCIMD,
 		RedirectURIs:   []string{"https://client.example.com/callback"},
 		Scope:          "insights:read insights:write",
 		RefreshAllowed: true,
@@ -914,6 +921,7 @@ func TestAuthorizeHandler_RegisteredClientTakesPriorityOverCIMD(t *testing.T) {
 	pending, err := srv.authState.ConsumePendingAuth(t.Context(), location.Query().Get("state"))
 	require.NoError(t, err)
 	require.Equal(t, "Registered client", pending.ClientName)
+	require.Equal(t, store.OAuthClientKindRegistered, pending.ClientKind)
 	require.False(t, pending.RefreshAllowed)
 	require.Empty(t, resolver.calls)
 }
@@ -2449,6 +2457,24 @@ func TestRenderAuthorizationConfirmationEscapesUnnamedClientAndRedirect(t *testi
 	require.NotContains(t, w.Body.String(), `<img src=x`)
 	require.NotContains(t, w.Body.String(), `<script>alert`)
 	require.Contains(t, w.Body.String(), `<form id="authorization-confirmation" method="post" action="`+confirmationPath+`">`)
+}
+
+func TestRenderAuthorizationConfirmationDisplaysCIMDClientHost(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := renderAuthorizationConfirmation(w, &store.PendingAuth{
+		ClientID:    "https://client.example.com/oauth/client-metadata.json",
+		ClientName:  "Example Client",
+		ClientKind:  store.OAuthClientKindCIMD,
+		RedirectURI: "https://client.example.com/callback",
+		Scope:       scopeInsightsRead,
+	}, "confirmation-token")
+	require.NoError(t, err)
+	require.Contains(t, w.Body.String(), "Authorize Example Client")
+	require.Contains(t, w.Body.String(), "Verify client identity")
+	require.Contains(t, w.Body.String(), `<p class="identity-host"><code>client.example.com</code></p>`)
+	require.Contains(t, w.Body.String(), "The client name above comes from metadata hosted on this domain.")
+	require.Contains(t, w.Body.String(), "Continue only if you recognize and trust it.")
+	require.NotContains(t, w.Body.String(), "/oauth/client-metadata.json")
 }
 
 func TestAuthorizationConfirmationFormActionSource(t *testing.T) {

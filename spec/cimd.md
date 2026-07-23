@@ -233,10 +233,10 @@ state:
    existing refresh-token contract.
 
 Migration 22 adds `refresh_allowed` to `pending_auths`,
-`authorization_confirmations`, and `auth_codes`. This carries the
-authorization-time decision through code exchange without another metadata
-fetch. A bounded `client_kind` should be added only if later confirmation or
-observability work needs it.
+`authorization_confirmations`, and `auth_codes`. Migration 23 adds the bounded
+`client_kind` to `pending_auths` so confirmation can distinguish CIMD clients
+and display their metadata hostname. These values carry authorization-time
+decisions forward without another metadata fetch.
 
 In-flight requests created before deployment may lose refresh eligibility but
 must remain safe and able to complete an access-token exchange where otherwise
@@ -306,8 +306,8 @@ limit unnecessary propagation and prevent unbounded observability dimensions.
    eligible CIMD URL client IDs, and rejects all other unknown clients.
 3. Migration 22 persists authorization-time refresh eligibility through the
    existing single-use server-side state.
-4. CIMD reuses the current post-GitHub confirmation page and one-time
-   completion flow.
+4. Migration 23 persists the bounded client kind, and the shared confirmation
+   page displays the metadata hostname for CIMD clients.
 5. Discovery advertises `client_id_metadata_document_supported` only when the
    feature flag is enabled.
 

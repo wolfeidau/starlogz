@@ -427,10 +427,18 @@ type OAuthClient struct {
 	ExpiresAt               *time.Time
 }
 
+type OAuthClientKind string
+
+const (
+	OAuthClientKindRegistered OAuthClientKind = "registered"
+	OAuthClientKindCIMD       OAuthClientKind = "cimd"
+)
+
 // PendingAuth holds client PKCE and redirect params across the GitHub OAuth2 redirect leg.
 type PendingAuth struct {
 	ClientID             string
 	ClientName           string
+	ClientKind           OAuthClientKind
 	RedirectURI          string
 	Scope                string
 	CodeChallenge        string

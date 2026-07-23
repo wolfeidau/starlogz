@@ -23,12 +23,12 @@ type oauthRequestError struct {
 }
 
 type resolvedOAuthClient struct {
-	ClientID        string
-	ClientName      string
-	RedirectURIs    []string
-	Scope           string
-	RefreshAllowed  bool
-	IsRegisteredDCR bool
+	ClientID       string
+	ClientName     string
+	ClientKind     storepkg.OAuthClientKind
+	RedirectURIs   []string
+	Scope          string
+	RefreshAllowed bool
 }
 
 func (s *Server) saveRegisteredClient(ctx context.Context, c storepkg.OAuthClient) error {
@@ -68,12 +68,12 @@ func (s *Server) resolveClientForAuthorize(ctx context.Context, log *slog.Logger
 				return nil, &oauthRequestError{code: "invalid_request", description: "redirect_uri not registered for this client", status: http.StatusBadRequest}
 			}
 			return &resolvedOAuthClient{
-				ClientID:        client.ClientID,
-				ClientName:      client.ClientName,
-				RedirectURIs:    client.RedirectURIs,
-				Scope:           client.Scope,
-				RefreshAllowed:  slices.Contains(client.GrantTypes, oauthGrantRefreshToken),
-				IsRegisteredDCR: true,
+				ClientID:       client.ClientID,
+				ClientName:     client.ClientName,
+				ClientKind:     storepkg.OAuthClientKindRegistered,
+				RedirectURIs:   client.RedirectURIs,
+				Scope:          client.Scope,
+				RefreshAllowed: slices.Contains(client.GrantTypes, oauthGrantRefreshToken),
 			}, nil
 		}
 		if !errors.Is(err, storepkg.ErrNotFound) {
