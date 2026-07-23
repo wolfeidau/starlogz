@@ -60,6 +60,8 @@ type Config struct {
 	BaseURL                      string
 	GitHubClientID               string
 	GitHubClientSecret           string
+	CIMDEnabled                  bool
+	ClientIDMetadataResolver     ClientIDMetadataResolver
 	Users                        UserUpserter    // optional; nil skips user persistence
 	Clients                      ClientStore     // optional; nil skips DCR persistence
 	Grants                       GrantStore      // optional; nil skips grant persistence
@@ -76,12 +78,14 @@ type Server struct {
 	privkey                      jwk.Key
 	pubkey                       jwk.Key
 	jwksJSON                     []byte
+	cimdEnabled                  bool
 	authMeta                     *oauthex.AuthServerMeta
 	resMeta                      *oauthex.ProtectedResourceMetadata
 	github                       gitHubConnector
 	users                        UserUpserter
 	clients                      ClientStore
 	grants                       GrantStore
+	clientIDMetadataResolver     ClientIDMetadataResolver
 	authState                    AuthStateStore
 	revocation                   RevocationStore
 	refreshTokenGracePeriod      time.Duration
@@ -148,17 +152,27 @@ func NewServer(cfg Config, privkey jwk.Key) (*Server, error) {
 		eventEmitter = wideevent.NewNoopEmitter()
 	}
 
+	clientIDMetadataResolver := cfg.ClientIDMetadataResolver
+	if cfg.CIMDEnabled && clientIDMetadataResolver == nil {
+		clientIDMetadataResolver = newHTTPClientIDMetadataResolver()
+	}
+	if !cfg.CIMDEnabled {
+		clientIDMetadataResolver = nil
+	}
+
 	return &Server{
 		baseURL:                      base,
 		privkey:                      privkey,
 		pubkey:                       pubkey,
 		jwksJSON:                     jwksJSON,
-		authMeta:                     buildAuthServerMeta(base),
+		cimdEnabled:                  cfg.CIMDEnabled,
+		authMeta:                     buildAuthServerMeta(base, cfg.CIMDEnabled),
 		resMeta:                      buildProtectedResourceMeta(base),
 		github:                       newGitHubConnector(cfg.GitHubClientID, cfg.GitHubClientSecret, base.JoinPath("/auth/github/callback").String()),
 		users:                        cfg.Users,
 		clients:                      cfg.Clients,
 		grants:                       cfg.Grants,
+		clientIDMetadataResolver:     clientIDMetadataResolver,
 		authState:                    cfg.AuthState,
 		revocation:                   cfg.Revocation,
 		refreshTokenGracePeriod:      refreshTokenGracePeriod,

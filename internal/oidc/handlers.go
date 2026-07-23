@@ -280,9 +280,15 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 		return
 	}
 
+	// Preserve the legacy no-client-store seam used by tests and minimal in-memory setups.
+	refreshAllowed := pc.RefreshAllowed
+	if !refreshAllowed && s.clients == nil && s.clientIDMetadataResolver == nil {
+		refreshAllowed = true
+	}
+
 	// Issue an opaque refresh token only when we have a GitHub refresh token to back it.
 	var ourRefreshToken string
-	if s.grants != nil && pc.AccessToken != "" && s.clientSupportsGrant(ctx, pc.ClientID, oauthGrantRefreshToken) {
+	if s.grants != nil && pc.AccessToken != "" && refreshAllowed {
 		if pc.RefreshToken != "" {
 			ourRefreshToken, err = generateOpaqueToken()
 			if err != nil {
@@ -770,6 +776,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 			CodeChallenge:      pending.CodeChallenge,
 			RedirectURI:        pending.RedirectURI,
 			ClientID:           pending.ClientID,
+			RefreshAllowed:     pending.RefreshAllowed,
 			AccessToken:        githubToken.AccessToken,
 			RefreshToken:       githubToken.RefreshToken,
 			AccessTokenExpiry:  githubToken.Expiry,
@@ -853,7 +860,7 @@ func (s *Server) AuthorizeHandler() http.Handler {
 			return
 		}
 
-		client, reqErr := s.registeredClientForAuthorize(ctx, log, clientID, redirectURI)
+		client, reqErr := s.resolveClientForAuthorize(ctx, log, clientID, redirectURI)
 		if reqErr != nil {
 			writeOAuthError(w, reqErr.code, reqErr.description, reqErr.status)
 			return
@@ -897,16 +904,20 @@ func (s *Server) AuthorizeHandler() http.Handler {
 
 		githubState := uuid.New().String()
 		clientName := ""
+		clientKind := storepkg.OAuthClientKindRegistered
 		if client != nil {
 			clientName = client.ClientName
+			clientKind = client.ClientKind
 		}
 		if err := s.authState.StorePendingAuth(ctx, githubState, storepkg.PendingAuth{
 			ClientID:             clientID,
 			ClientName:           clientName,
+			ClientKind:           clientKind,
 			RedirectURI:          redirectURI,
 			Scope:                scope,
 			CodeChallenge:        codeChallenge,
 			ClientState:          q.Get("state"),
+			RefreshAllowed:       client != nil && client.RefreshAllowed,
 			ConfirmationRequired: authorizationConfirmationRequired(clientID),
 		}); err != nil {
 			log.ErrorContext(ctx, "store pending auth failed", slog.Any("error", err))

@@ -59,6 +59,12 @@ variable "lambda_arch" {
   default     = "x86_64"
 }
 
+variable "cimd_enabled" {
+  description = "Enable OAuth Client ID Metadata Document support. Set false to disable quickly if interoperability or security issues appear."
+  type        = bool
+  default     = true
+}
+
 variable "github_client_id" {
   description = "GitHub App OAuth2 client ID."
   type        = string

@@ -29,6 +29,7 @@ type Config struct {
 	BaseURL                      string
 	GitHubClientID               string
 	GitHubClientSecret           string
+	CIMDEnabled                  bool
 	PrivKey                      jwk.Key
 	Logger                       *slog.Logger
 	Store                        store.Store          // nil is allowed; fact tools will return an error
@@ -88,6 +89,7 @@ func New(cfg Config) (*Server, error) {
 		BaseURL:                      cfg.BaseURL,
 		GitHubClientID:               cfg.GitHubClientID,
 		GitHubClientSecret:           cfg.GitHubClientSecret,
+		CIMDEnabled:                  cfg.CIMDEnabled,
 		Users:                        cfg.Store,
 		Clients:                      cfg.Store,
 		Grants:                       cfg.Store,

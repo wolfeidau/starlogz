@@ -149,6 +149,7 @@ All configuration is via environment variables.
 | `OTEL_EXPORTER_OTLP_HEADERS` | (none) | No | e.g. `x-honeycomb-team=<key>` |
 | `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
 | `SENTRY_ENVIRONMENT` | (none) | No | Sentry environment tag, e.g. `production`, `staging`. |
+| `CIMD_ENABLED` | `false` locally; `true` in Terraform deploys | No | Enables OAuth Client ID Metadata Document support. Set to `false` to disable CIMD quickly without code rollback. |
 
 ## Observability events
 
@@ -205,6 +206,8 @@ terraform -chdir=infra/terraform output ui_oauth_callback_url
 ```
 
 The script builds with goreleaser, reads the version from `dist/metadata.json`, packages the zip, and prompts for confirmation before each of the three destructive steps: S3 upload, terraform plan, and terraform apply. `function_s3_key` and `function_version` are passed as `-var` flags so `terraform.tfvars` does not need to be edited between deploys.
+
+Terraform now deploys with `cimd_enabled = true` by default. To disable it for a rollback or incident response, apply with `-var 'cimd_enabled=false'` or set that value in `terraform.tfvars`.
 
 ### Importing existing resources
 

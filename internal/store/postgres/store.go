@@ -771,6 +771,11 @@ func (s *Store) DeleteGrant(ctx context.Context, jti string, retired *store.Reti
 func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.PendingAuth) error {
 	s.logger(ctx).DebugContext(ctx, "storing pending auth")
 
+	clientKind := p.ClientKind
+	if clientKind == "" {
+		clientKind = store.OAuthClientKindRegistered
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -779,12 +784,12 @@ func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.Pend
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO pending_auths
-		    (state, client_id, client_name, redirect_uri, scope, code_challenge, client_state,
-		     confirmation_required, expires_at)
-		VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, NULLIF($7,''), $8,
+		    (state, client_id, client_name, client_kind, redirect_uri, scope, code_challenge,
+		     client_state, refresh_allowed, confirmation_required, expires_at)
+		VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10,
 		        now() + interval '10 minutes')`,
-		state, p.ClientID, p.ClientName, p.RedirectURI, p.Scope, p.CodeChallenge, p.ClientState,
-		p.ConfirmationRequired)
+		state, p.ClientID, p.ClientName, clientKind, p.RedirectURI, p.Scope, p.CodeChallenge,
+		p.ClientState, p.RefreshAllowed, p.ConfirmationRequired)
 	if err != nil {
 		return fmt.Errorf("insert pending auth: %w", err)
 	}
@@ -806,10 +811,11 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 	err := s.pool.QueryRow(ctx, `
 		DELETE FROM pending_auths
 		WHERE state = $1 AND expires_at > now()
-		RETURNING COALESCE(client_id,''), client_name, redirect_uri, scope, code_challenge,
-		          COALESCE(client_state,''), confirmation_required`,
-		state).Scan(&p.ClientID, &p.ClientName, &p.RedirectURI, &p.Scope, &p.CodeChallenge,
-		&p.ClientState, &p.ConfirmationRequired)
+		RETURNING COALESCE(client_id,''), client_name, client_kind, redirect_uri, scope,
+		          code_challenge, COALESCE(client_state,''), refresh_allowed,
+		          confirmation_required`,
+		state).Scan(&p.ClientID, &p.ClientName, &p.ClientKind, &p.RedirectURI, &p.Scope,
+		&p.CodeChallenge, &p.ClientState, &p.RefreshAllowed, &p.ConfirmationRequired)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -839,12 +845,12 @@ func (s *Store) StoreAuthorizationConfirmation(ctx context.Context, tokenHash []
 	_, err = tx.Exec(ctx, `
 		INSERT INTO authorization_confirmations
 		    (token_hash, sub, github_id, email, scope, code_challenge, redirect_uri, client_id,
-		     client_name, client_state, access_token, refresh_token, access_token_expiry,
-		     refresh_token_expiry, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, NULLIF($10,''), $11, $12,
-		        $13, $14, now() + interval '10 minutes')`,
+		     refresh_allowed, client_name, client_state, access_token, refresh_token,
+		     access_token_expiry, refresh_token_expiry, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, NULLIF($11,''), $12, $13,
+		        $14, $15, now() + interval '10 minutes')`,
 		tokenHash, c.Sub, c.GitHubID, c.Email, c.Scope, c.CodeChallenge, c.RedirectURI,
-		c.ClientID, c.ClientName, c.ClientState, encAccess, encRefresh, accessExpiry, refreshExpiry)
+		c.ClientID, c.RefreshAllowed, c.ClientName, c.ClientState, encAccess, encRefresh, accessExpiry, refreshExpiry)
 	if err != nil {
 		return fmt.Errorf("insert authorization confirmation: %w", err)
 	}
@@ -871,10 +877,10 @@ func (s *Store) CompleteAuthorizationConfirmation(ctx context.Context, tokenHash
 		DELETE FROM authorization_confirmations
 		WHERE token_hash = $1 AND expires_at > now()
 		RETURNING sub, github_id, email, scope, code_challenge, redirect_uri,
-		          client_id, COALESCE(client_state,''), access_token, refresh_token,
+		          client_id, refresh_allowed, COALESCE(client_state,''), access_token, refresh_token,
 		          access_token_expiry, refresh_token_expiry`, tokenHash).
 		Scan(&c.Sub, &c.GitHubID, &c.Email, &c.Scope, &c.CodeChallenge, &c.RedirectURI,
-			&clientID, &clientState, &encAccess, &encRefresh, &accessExpiry, &refreshExpiry)
+			&clientID, &c.RefreshAllowed, &clientState, &encAccess, &encRefresh, &accessExpiry, &refreshExpiry)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -889,11 +895,12 @@ func (s *Store) CompleteAuthorizationConfirmation(ctx context.Context, tokenHash
 		_, err = tx.Exec(ctx, `
 			INSERT INTO auth_codes
 			    (code, sub, github_id, email, scope, code_challenge, redirect_uri, client_id,
-			     access_token, refresh_token, access_token_expiry, refresh_token_expiry, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, $11, $12,
+			     refresh_allowed, access_token, refresh_token, access_token_expiry,
+			     refresh_token_expiry, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, $11, $12, $13,
 			        now() + interval '5 minutes')`,
 			code, c.Sub, c.GitHubID, c.Email, c.Scope, c.CodeChallenge, c.RedirectURI, c.ClientID,
-			encAccess, encRefresh, accessExpiry, refreshExpiry)
+			c.RefreshAllowed, encAccess, encRefresh, accessExpiry, refreshExpiry)
 		if err != nil {
 			return nil, fmt.Errorf("insert auth code: %w", err)
 		}
@@ -927,11 +934,12 @@ func (s *Store) StoreAuthCode(ctx context.Context, code string, c store.AuthCode
 	_, err = tx.Exec(ctx, `
 		INSERT INTO auth_codes
 		    (code, sub, github_id, email, scope, code_challenge, redirect_uri, client_id,
-		     access_token, refresh_token, access_token_expiry, refresh_token_expiry, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, $11, $12,
+		     refresh_allowed, access_token, refresh_token, access_token_expiry,
+		     refresh_token_expiry, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10, $11, $12, $13,
 		        now() + interval '5 minutes')`,
 		code, c.Sub, c.GitHubID, c.Email, c.Scope, c.CodeChallenge, c.RedirectURI, c.ClientID,
-		encAccess, encRefresh, accessExpiry, refreshExpiry)
+		c.RefreshAllowed, encAccess, encRefresh, accessExpiry, refreshExpiry)
 	if err != nil {
 		return fmt.Errorf("insert auth code: %w", err)
 	}
@@ -988,10 +996,10 @@ func (s *Store) ConsumeAuthCode(ctx context.Context, code string) (*store.AuthCo
 		DELETE FROM auth_codes
 		WHERE code = $1 AND expires_at > now()
 		RETURNING sub, github_id, email, scope, code_challenge, redirect_uri,
-		          COALESCE(client_id,''), access_token, refresh_token,
+		          COALESCE(client_id,''), refresh_allowed, access_token, refresh_token,
 		          access_token_expiry, refresh_token_expiry`,
 		code).Scan(&c.Sub, &c.GitHubID, &c.Email, &c.Scope, &c.CodeChallenge, &c.RedirectURI,
-		&clientID, &encAccess, &encRefresh, &accessExpiry, &refreshExpiry)
+		&clientID, &c.RefreshAllowed, &encAccess, &encRefresh, &accessExpiry, &refreshExpiry)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

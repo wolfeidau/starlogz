@@ -148,6 +148,7 @@ Key env vars:
 | `ENVIRONMENT` | `local` | Deployment environment included in wide events |
 | `SENTRY_DSN` | _(unset = disabled)_ | Sentry DSN; enables error reporting and structured log capture |
 | `SENTRY_ENVIRONMENT` | — | Sentry environment tag (e.g. `production`) |
+| `CIMD_ENABLED` | `false` by default in app code; `true` in Terraform deploys | Enables OAuth Client ID Metadata Document support; set `false` to disable CIMD quickly without code rollback |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = disabled)_ | OTLP collector endpoint |
 | `OTEL_EXPORTER_OTLP_HEADERS` | — | e.g. Honeycomb API key |
 

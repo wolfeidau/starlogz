@@ -19,6 +19,7 @@ resource "aws_lambda_function" "starlogz" {
       EVENT_BUS_NAME       = aws_cloudwatch_event_bus.wide_events.name
       ENVIRONMENT          = var.env
       SERVER_URL           = local.server_url
+      CIMD_ENABLED         = tostring(var.cimd_enabled)
       GITHUB_CLIENT_ID     = var.github_client_id
       GITHUB_CLIENT_SECRET = var.github_client_secret
       DATABASE_URL         = var.database_url

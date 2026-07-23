@@ -153,6 +153,21 @@ func TestNewRejectsUISessionIdleTTLAboveAbsoluteTTL(t *testing.T) {
 	require.EqualError(t, err, "UI session idle TTL must not exceed absolute TTL")
 }
 
+func TestNewPassesCIMDFlagToOIDCDiscovery(t *testing.T) {
+	ts, _ := testFixtureWithConfig(t, func(cfg *server.Config) {
+		cfg.CIMDEnabled = true
+	})
+
+	resp, err := ts.Client().Get(ts.URL + "/.well-known/oauth-authorization-server")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var meta map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&meta))
+	require.Equal(t, true, meta["client_id_metadata_document_supported"])
+}
+
 func TestCoreHTTPFlowsEmitBoundedCompletionEvents(t *testing.T) {
 	publisher := &captureEventPublisher{}
 	emitter, err := wideevent.NewEmitter(publisher, "test", "devel", slog.New(slog.DiscardHandler))
