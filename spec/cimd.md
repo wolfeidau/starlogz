@@ -2,32 +2,33 @@
 
 > Status: Proposed
 > Last reviewed: 2026-07-23
-> Authority: Design proposal informed by the MCP authorization specification, the OAuth Client ID Metadata Document Internet-Draft, and current repository evidence. This is not a current contract.
+> Authority: Experimental design and development-rollout record informed by the MCP authorization specification, the OAuth Client ID Metadata Document Internet-Draft, and current repository evidence. This is not a stable contract.
 
 ## Summary
 
-Add OAuth Client ID Metadata Document (CIMD) support as an optional client
-identification path alongside the existing Dynamic Client Registration (DCR)
-flow. A compatible MCP client can use an HTTPS metadata-document URL as its
-`client_id`; Starlogz resolves and validates that document when authorization
-starts.
+When enabled, Starlogz supports OAuth Client ID Metadata Documents (CIMD) as an
+optional client identification path alongside the existing Dynamic Client
+Registration (DCR) flow. A compatible MCP client can use an HTTPS
+metadata-document URL as its `client_id`; Starlogz resolves and validates that
+document when authorization starts.
 
 The initial implementation supports public clients only, requires exact
 redirect URI matching, uses the shared post-GitHub client confirmation, and treats
 metadata retrieval as an SSRF-sensitive operation. DCR and the first-party
 dashboard client remain supported without behavior changes.
 
-As of 2026-07-23, Starlogz still implements DCR-only client onboarding. This
-document describes an additive design for CIMD that reuses the current
-post-GitHub confirmation flow and existing single-use authorization state.
+The `feat_cimd_support` implementation adds this path for the current
+development deployment. Starlogz is still a 0.x project, so CIMD remains
+experimental and may evolve without a production compatibility window.
+`CIMD_ENABLED` provides a quick rollback to the baseline DCR flow.
 
 ## Motivation
 
-Starlogz currently requires MCP clients to register through DCR before starting
-authorization. CIMD lets a client publish stable OAuth metadata at a URL it
-controls and use that URL directly as its client identifier. This avoids a
-separate registration record for every Starlogz deployment while retaining DCR
-for clients that do not support CIMD.
+Without CIMD, Starlogz requires MCP clients to register through DCR before
+starting authorization. CIMD lets a client publish stable OAuth metadata at a
+URL it controls and use that URL directly as its client identifier. This avoids
+a separate registration record for every Starlogz deployment while retaining
+DCR for clients that do not support CIMD.
 
 The feature is additive. It must not weaken the existing authorization-code,
 PKCE, redirect URI, token, or refresh-token contracts in [auth.md](auth.md).
@@ -51,31 +52,33 @@ The proposal is based on these sources as reviewed on 2026-07-19:
 - [Special-Purpose IP Address Registries, RFC 6890](https://www.rfc-editor.org/rfc/rfc6890)
   provides the basis for blocking non-public network destinations.
 
-These are external protocol requirements, not evidence that Starlogz currently
-implements CIMD.
+These are external protocol requirements. Current implementation evidence is
+recorded below.
 
 ## Current repository evidence
 
 As reviewed on 2026-07-23:
 
-- authorization-server discovery advertises the DCR
-  `registration_endpoint`, and repository tests assert the current metadata
-  shape without a `client_id_metadata_document_supported` flag;
-- `/oauth2/authorize` resolves clients only from persisted `oauth_clients` and
-  rejects any unknown `client_id` before GitHub redirect;
+- authorization-server discovery always advertises the DCR
+  `registration_endpoint` and advertises
+  `client_id_metadata_document_supported` only when CIMD is enabled;
+- `/oauth2/authorize` resolves persisted clients first, then eligible HTTPS
+  client ID metadata documents when CIMD is enabled;
 - the post-GitHub confirmation flow is now implemented for non-first-party
-  registered clients, with `pending_auths`, `authorization_confirmations`, and
-  `auth_codes` carrying trusted client, redirect, scope, PKCE, and upstream
-  token state through single-use PostgreSQL records;
-- authorization-code exchange still decides refresh-token eligibility by
-  reloading the registered client from `oauth_clients`; and
+  registered and CIMD clients, with `pending_auths`,
+  `authorization_confirmations`, and `auth_codes` carrying trusted client,
+  redirect, scope, PKCE, refresh eligibility, and upstream token state through
+  single-use PostgreSQL records;
+- authorization-code exchange uses refresh eligibility bound during
+  authorization rather than reloading the metadata document; and
 - the first-party dashboard still uses the fixed `starlogz-ui` client ID and
   bypasses confirmation only by exact client ID, not by client-supplied name.
 
-The current behavior remains governed by [auth.md](auth.md) until this proposal
-is implemented and that contract is updated.
+The current [auth.md](auth.md) contract documents the baseline DCR flow. This
+proposal records the experimental CIMD behavior used by the development
+deployment.
 
-## Proposed behavior
+## Experimental behavior
 
 ### Client resolution
 
@@ -229,14 +232,11 @@ state:
 5. A created refresh grant remains bound to the exact client ID under the
    existing refresh-token contract.
 
-Current schema already persists the client ID, client name, redirect URI,
-scope, PKCE challenge, and encrypted upstream tokens through
-`pending_auths`, `authorization_confirmations`, and `auth_codes`. A CIMD
-implementation still needs one trusted representation of refresh eligibility
-and any bounded `client_kind` carried through those records so the token and
-refresh endpoints do not re-fetch metadata or rediscover client type from
-untrusted text. The implementation should prefer the smallest schema or state
-change that preserves that binding.
+Migration 22 adds `refresh_allowed` to `pending_auths`,
+`authorization_confirmations`, and `auth_codes`. This carries the
+authorization-time decision through code exchange without another metadata
+fetch. A bounded `client_kind` should be added only if later confirmation or
+observability work needs it.
 
 In-flight requests created before deployment may lose refresh eligibility but
 must remain safe and able to complete an access-token exchange where otherwise
@@ -244,27 +244,27 @@ valid.
 
 ### Discovery and rollout
 
-Starlogz advertises `client_id_metadata_document_supported` as `true` only
-when CIMD is enabled and all secure resolver and confirmation behavior is
-active.
+Starlogz advertises `client_id_metadata_document_supported` as `true` when
+CIMD is enabled. Application configuration defaults it to false; the current
+Terraform development deployment defaults it to true.
 
-Introduce `CIMD_ENABLED`, defaulting to false for the initial deployment. DCR's
-`registration_endpoint` remains advertised and operational. Rollout order is:
+The development rollout is intentionally lightweight:
 
-1. deploy disabled code and migrations;
-2. enable CIMD in a development environment;
-3. validate real MCP client authorization and DCR fallback;
-4. review resolver and confirmation telemetry; and
-5. enable production and update [auth.md](auth.md) in the release change.
+1. deploy the code and migration together;
+2. complete a real MCP client authorization and confirm DCR fallback;
+3. inspect failures during normal development use; and
+4. set `CIMD_ENABLED=false` if interoperability or security issues require a
+   quick rollback.
 
-The feature flag is not a substitute for secure defaults. Enabling it must not
-activate partially configured network behavior.
+There is no separate production rollout contract while Starlogz remains a 0.x
+development service. Production stability and compatibility gates can be added
+when the project introduces a production environment.
 
 ## Security requirements
 
 - Treat metadata retrieval as server-side request forgery exposure. URL
   parsing, DNS validation, address pinning, redirect rejection, response size,
-  and timeout limits are release-blocking controls.
+  and timeout limits are required controls.
 - Preserve exact client ID and redirect URI comparisons. Do not canonicalize a
   value and then use the canonical form as an authorization identity.
 - Treat fetched metadata as untrusted input in HTML, logs, errors, metrics, and
@@ -298,22 +298,23 @@ authorization query string.
 These controls do not classify the metadata document itself as secret. They
 limit unnecessary propagation and prevent unbounded observability dimensions.
 
-## Implementation outline
+## Implementation summary
 
-1. Add a dedicated `internal/oidc` CIMD resolver with strict URL, DNS,
+1. A dedicated `internal/oidc` CIMD resolver applies URL, DNS,
    transport, size, timeout, and metadata validation rules.
-2. Change `/oauth2/authorize` to resolve registered clients first, then
-   eligible CIMD URL client IDs, and reject all other unknown clients.
-3. Persist authorization-time client decisions needed after GitHub, including
-   refresh eligibility and any bounded client classification, through the
+2. `/oauth2/authorize` resolves registered clients first, then
+   eligible CIMD URL client IDs, and rejects all other unknown clients.
+3. Migration 22 persists authorization-time refresh eligibility through the
    existing single-use server-side state.
-4. Reuse the current post-GitHub confirmation page and one-time completion flow
-   for CIMD clients.
-5. Advertise `client_id_metadata_document_supported` only when the full secure
-   path is enabled and [auth.md](auth.md) is updated to describe supported
-   behavior.
+4. CIMD reuses the current post-GitHub confirmation page and one-time
+   completion flow.
+5. Discovery advertises `client_id_metadata_document_supported` only when the
+   feature flag is enabled.
 
-## Verification plan
+## Verification backlog
+
+The items below guide hardening as the experimental implementation evolves.
+They are not deployment gates for the current development environment.
 
 ### Resolver tests
 
@@ -356,18 +357,19 @@ limit unnecessary propagation and prevent unbounded observability dimensions.
 - failure, cancellation, restart, and multi-instance state transitions fail
   closed without replay.
 
-## Release gates
+## Development rollout checks
 
-CIMD must not be advertised in production until all of these are true:
+Before leaving CIMD enabled in the shared development environment:
 
-- the reviewed draft version and any deviations are recorded;
-- SSRF, DNS rebinding, redirect, timeout, and response-bound tests pass;
-- the confirmation screen and single-use transition are complete;
-- DCR and dashboard compatibility suites pass;
-- raw metadata has been excluded from observability paths;
-- a real development OAuth flow succeeds with a public HTTPS CIMD fixture; and
-- [auth.md](auth.md) describes the enabled client-selection and authorization
-  behavior.
+- the server starts after migration 22 and discovery advertises the capability;
+- the existing automated suite passes;
+- one current MCP client completes authorization through a public HTTPS CIMD
+  document; and
+- DCR and the dashboard remain usable.
+
+Failures discovered during development are fixed in place or handled by
+disabling `CIMD_ENABLED`; they do not require a formal compatibility or release
+process.
 
 ## Deferred decisions
 
