@@ -1,7 +1,7 @@
 # OAuth2 authentication and authorization
 
 > Status: Current contract
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-24
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Architecture
@@ -27,12 +27,14 @@ An MCP client:
 1. Probes `/mcp` and receives a bearer challenge with the protected-resource
    metadata URL.
 2. Reads protected-resource and authorization-server metadata.
-3. Registers as a public client through Dynamic Client Registration (DCR).
+3. Identifies itself through an existing registration, Dynamic Client
+   Registration (DCR), or an HTTPS Client ID Metadata Document (CIMD) when
+   enabled.
 4. Starts an authorization-code flow using PKCE `S256`.
 5. Redirects the user through GitHub authentication.
-6. Confirms the registered client, exact redirect URI, and requested Starlogz
+6. Confirms the resolved client, validated redirect URI, and requested Starlogz
    scopes on a Starlogz-hosted page.
-7. Receives a single-use authorization code at its registered redirect URI.
+7. Receives a single-use authorization code at its validated redirect URI.
 8. Exchanges the code, matching `client_id`, `redirect_uri`, and PKCE verifier,
    for a Starlogz access token and, when eligible, a refresh token.
 9. Sends the access token as `Authorization: Bearer <token>` to `/mcp`.
@@ -45,13 +47,14 @@ operations prevent replay across server instances.
 
 ### Post-GitHub client confirmation
 
-After GitHub authentication and user persistence, every registered client
-except the explicitly configured first-party `starlogz-ui` client requires a
-Starlogz confirmation. A client-supplied name never grants first-party status.
-The server-rendered page shows the registered client name, or `Unnamed client`
-and its client ID, the full validated redirect URI, and each requested scope
-with a fixed Starlogz-owned description. Client-controlled values are escaped;
-the response loads no remote resources.
+After GitHub authentication and user persistence, every resolved client except
+the explicitly configured first-party `starlogz-ui` client requires a Starlogz
+confirmation. A client-supplied name never grants first-party status. The
+server-rendered page shows the client name, or `Unnamed client` and its client
+ID, the full validated redirect URI, and each requested scope with a fixed
+Starlogz-owned description. For CIMD clients it prominently shows the metadata
+hostname and explains that the displayed name came from that domain.
+Client-controlled values are escaped; the response loads no remote resources.
 
 The form contains only a random one-time confirmation token and an
 `approve` or `deny` decision. All identity, client, redirect, scope, PKCE, and
@@ -63,7 +66,7 @@ submissions fail closed with errors that do not disclose token existence.
 
 Approval returns `303 See Other` with `code` and the original client `state`.
 Denial returns `303 See Other` with `error=access_denied` and the original
-state. Both preserve unrelated registered redirect query parameters while
+state. Both preserve unrelated validated redirect query parameters while
 replacing reserved OAuth response parameters. The page replaces the consumed
 GitHub callback URL in browser history before interaction. The first-party
 dashboard retains its direct post-GitHub authorization-code redirect.
@@ -81,10 +84,10 @@ handled entirely by the updated server follow the confirmation requirement.
 | `insights:write` | Additionally required by write, update, and delete tools. |
 | `org:admin` | Advertised and accepted for forward-compatible organization administration; no current MCP tool requires it. |
 
-Scopes are stored in the JWT as a space-delimited `scope` claim. An authorization
-request cannot exceed the client's registered scope set. When the request omits
-scope, Starlogz uses the registered client scope when available and otherwise
-defaults to `insights:read`.
+Scopes are stored in the JWT as a space-delimited `scope` claim. An
+authorization request cannot exceed the resolved client's allowed scope set.
+When the request omits scope, Starlogz uses the resolved client scope when
+available and otherwise defaults to `insights:read`.
 
 ## Dynamic Client Registration
 
@@ -125,14 +128,52 @@ authorization and token operations update `last_used_at` at most once per
 24 hours. This is an activity signal for future conservative cleanup, not a
 current expiry policy.
 
+## Client ID Metadata Documents
+
+When `CIMD_ENABLED` is true, an otherwise unknown HTTPS URL `client_id` is
+resolved as a Client ID Metadata Document. Persisted first-party and DCR clients
+always take precedence, so a registered client ID is never reinterpreted as a
+remote document. DCR remains advertised and operational.
+
+The client identifier is limited to 2048 bytes and must be an absolute HTTPS
+URL with a hostname and path. Userinfo, fragments, query components, dot path
+segments, explicit ports, and IP-literal hosts are rejected. DNS answers must
+pass the dedicated public-address policy. The resolver ignores environment
+proxy settings, validates addresses again when connecting, preserves the TLS
+hostname, never follows redirects, and applies a three-second timeout.
+
+The response must be a `200` JSON document no larger than 5 KiB with no trailing
+JSON value. It must provide an exact string match for `client_id`, a non-empty
+`client_name` no longer than 256 bytes, and one to ten valid `redirect_uris`.
+Scope metadata is limited to 1024 bytes. Only public clients using
+`token_endpoint_auth_method=none`, the authorization-code grant, optional
+refresh-token grant, response type `code`, and supported Starlogz scopes are
+accepted. Omitted authentication method, grant types, response types, and scope
+default to `none`, `authorization_code`, `code`, and
+`insights:read insights:write`, respectively. Key-based or signed client
+metadata is not supported. Remote presentation fields are ignored.
+
+CIMD redirect URIs use the DCR syntax policy. Authorization requires an exact
+match except that an HTTP loopback redirect may select a different port while
+retaining the same loopback host, path, query, and fragment. This supports
+native clients that bind an ephemeral local port.
+
+Resolution happens only when authorization starts. The exact client ID,
+display name, client kind, redirect URI, scope, PKCE challenge, and refresh
+eligibility are bound into single-use server-side state. Token exchange and
+refresh do not fetch the metadata document again, and CIMD documents are not
+copied into `oauth_clients`.
+
+The rationale and lasting tradeoffs are recorded in [cimd.md](cimd.md).
+
 ## Authorization-code grant
 
 PKCE `S256` is mandatory. The authorization request includes:
 
 ```text
 GET /oauth2/authorize
-  ?client_id=<registered-client-id>
-  &redirect_uri=<registered-uri>
+  ?client_id=<resolved-client-id>
+  &redirect_uri=<validated-uri>
   &response_type=code
   &scope=insights:read insights:write
   &state=<client-state>
@@ -157,8 +198,8 @@ a failed or replayed exchange requires restarting the authorization flow. The
 code is bound to the client ID, redirect URI, granted scope, and PKCE challenge.
 
 The response always has `Cache-Control: no-store`. An access token expires in
-15 minutes. A refresh token is included only when the registered client supports
-the refresh grant and GitHub supplied a refresh token:
+15 minutes. A refresh token is included only when the authorization-time client
+metadata permits the refresh grant and GitHub supplied a refresh token:
 
 ```json
 {
@@ -249,10 +290,10 @@ OAuth popup coordination and cross-origin MCP Inspector compatibility.
 The confirmation response replaces the global policy with `default-src
 'none'`, nonce-only inline script and style sources, and framing and base-URI
 denial. Its form action permits the Starlogz origin and only the validated
-registered callback source because browsers apply `form-action` while following
+callback source because browsers apply `form-action` while following
 the form submission's authorization-result redirect. HTTP and HTTPS callbacks
 are limited to their exact origin; custom callbacks are limited to their
-registered scheme. This follows the [CSP Level 3 form-action and redirect
+validated scheme. This follows the [CSP Level 3 form-action and redirect
 matching model](https://www.w3.org/TR/CSP/#directive-form-action). Interactive
 browser-auth responses use `Cache-Control: no-store`; public static assets,
 discovery documents, and JWKS retain their existing cache behavior.
@@ -267,6 +308,7 @@ Authorization-server metadata advertises:
   "token_endpoint": "<server-url>/oauth2/token",
   "jwks_uri": "<server-url>/.well-known/jwks",
   "registration_endpoint": "<server-url>/oauth2/register",
+  "client_id_metadata_document_supported": true,
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "scopes_supported": ["insights:read", "insights:write", "org:admin"],
@@ -274,6 +316,9 @@ Authorization-server metadata advertises:
   "token_endpoint_auth_methods_supported": ["none"]
 }
 ```
+
+`client_id_metadata_document_supported` is present and true only when CIMD is
+enabled.
 
 Protected-resource metadata identifies `<server-url>/mcp`, names the server,
 points `authorization_servers` at the issuer URL, advertises the same scopes,
@@ -285,6 +330,9 @@ and allows bearer credentials only in the `Authorization` header.
 - Only public OAuth clients are supported; no client secret is issued.
 - Token introspection and RFC token-revocation endpoints are not advertised.
 - DCR registrations are permanent; automated stale-registration cleanup is not
+  implemented.
+- CIMD supports unsigned public-client metadata only and fetches the document
+  for each new authorization attempt; persistent or distributed caching is not
   implemented.
 - OAuth state, authorization codes, revocations, clients, and grants require
   PostgreSQL. Database failures fail closed.
