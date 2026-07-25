@@ -1,7 +1,7 @@
 # AWS logging and wide-event uplift
 
 > Status: Implemented decision
-> Last reviewed: 2026-07-16
+> Last reviewed: 2026-07-25
 > Authority: Historical rationale and lasting constraints; current code, Terraform, tests, and the event contract define implementation details.
 
 ## Context
@@ -41,6 +41,12 @@ defense-in-depth key filter.
 API Gateway writes bounded JSON access records without headers, query strings,
 bodies, authorization identity, or raw IP addresses. The log group retains
 records for 30 days.
+
+The later [telemetry attribution decision](telemetry_attribution.md) narrowly
+supersedes the raw-IP restriction for development API Gateway access logs.
+Development retains source IP and raw user-agent for abuse monitoring and
+retrospective incident analysis; other environments retain the original bounded
+format. Raw values remain prohibited in application logs.
 
 An environment-scoped SNS topic receives both `ALARM` and `OK` transitions for:
 
