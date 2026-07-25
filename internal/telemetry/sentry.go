@@ -3,14 +3,13 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	sentryhttp "github.com/getsentry/sentry-go/http"
-	sentryslog "github.com/getsentry/sentry-go/slog"
+	sentryotel "github.com/getsentry/sentry-go/otel"
 )
 
 // InitSentry initializes Sentry when SENTRY_DSN is set.
@@ -27,6 +26,12 @@ func InitSentry(_ context.Context, serviceName, version string) (func(context.Co
 		AttachStacktrace: true,
 		EnableTracing:    false,
 		SendDefaultPII:   false,
+		// Traces go to the OTLP collector, so Sentry only needs to stamp issues with the trace IDs.
+		Integrations: func(i []sentry.Integration) []sentry.Integration {
+			return append(i, sentryotel.NewOtelIntegration())
+		},
+		// Errors are reported as issues; Sentry Logs are unused.
+		DisableLogs: true,
 		Tags: map[string]string{
 			"service": serviceName,
 		},
@@ -40,14 +45,6 @@ func InitSentry(_ context.Context, serviceName, version string) (func(context.Co
 		}
 		return fmt.Errorf("sentry flush timed out: %w", context.DeadlineExceeded)
 	}, true, nil
-}
-
-func NewSentrySlogHandler(ctx context.Context) slog.Handler {
-	return sentryslog.Option{
-		EventLevel: []slog.Level{slog.LevelError},
-		LogLevel:   []slog.Level{},
-		AddSource:  true,
-	}.NewSentryHandler(ctx)
 }
 
 func NewSentryHTTPHandler() func(http.Handler) http.Handler {
