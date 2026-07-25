@@ -41,7 +41,7 @@ func buildProtectedResourceMeta(base *url.URL) *oauthex.ProtectedResourceMetadat
 		Resource:               base.JoinPath("/mcp").String(),
 		ResourceName:           "Starlogz MCP Server",
 		AuthorizationServers:   []string{base.String()},
-		ScopesSupported:        []string{scopeInsightsRead, scopeInsightsWrite, scopeOrgAdmin},
+		ScopesSupported:        []string{scopeInsightsRead, scopeInsightsWrite},
 		BearerMethodsSupported: []string{"header"},
 	}
 }

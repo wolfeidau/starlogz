@@ -375,7 +375,7 @@ func TestProtectedResourceMetadata_RFC9728_SpecCompliance(t *testing.T) {
 
 	require.True(t, strings.HasPrefix(meta.Resource, issuer), "resource %q must be under issuer %q", meta.Resource, issuer)
 	require.Equal(t, []string{"header"}, meta.BearerMethodsSupported)
-	require.ElementsMatch(t, []string{"insights:read", "insights:write", "org:admin"}, meta.ScopesSupported)
+	require.ElementsMatch(t, []string{"insights:read", "insights:write"}, meta.ScopesSupported)
 }
 
 // --- Spec compliance: RFC 7517 JWKS kid cross-document consistency ---
