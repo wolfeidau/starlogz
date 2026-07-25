@@ -21,6 +21,11 @@ access log. These values are imperfect identifiers, but they are useful evidence
 for abuse monitoring and retrospective incident analysis in the development
 environment.
 
+This proposal narrowly supersedes the API Gateway raw-IP restriction recorded
+in [observability_uplift.md](observability_uplift.md) for development only. Its
+prohibition on raw IP addresses and raw user-agent strings in application logs
+remains unchanged.
+
 ## Goals
 
 1. Bind the canonical OAuth client identifier into access tokens.
@@ -39,6 +44,7 @@ environment.
 - Adding encryption keys, log masking, break-glass roles, or other security-log
   controls in this development-only iteration.
 - Defining production retention, access, or incident-response policy.
+- Adding identity references to OAuth or UI completion events.
 - Measuring agent or model quality; this proposal adds attribution, not
   evaluation semantics.
 
@@ -61,6 +67,11 @@ valid. Such a request has an unknown client for telemetry purposes, so the
 MUST include the claim. If the claim is present but is empty, has the wrong type,
 or exceeds 2048 bytes, verification MUST fail.
 
+An existing refresh grant without a stored `client_id` has no authoritative
+client binding. The token endpoint MUST reject it with `invalid_grant` and
+require reauthorization. It MUST NOT copy the caller-supplied `client_id` into a
+new token or rotated grant.
+
 This compatibility rule may be removed in a later change after the maximum
 access-token lifetime has elapsed.
 
@@ -70,8 +81,8 @@ Wide-event schema version 2 adds these optional top-level fields:
 
 | Field | Source | Semantics |
 |---|---|---|
-| `user_id` | Verified JWT subject or an equivalent authenticated session | Canonical user UUID |
-| `client_id` | Verified signed JWT claim or an equivalent authenticated session | Canonical OAuth client identifier |
+| `user_id` | Verified `auth.TokenInfo.UserID` | Canonical user UUID |
+| `client_id` | Verified `auth.TokenInfo.Extra["client_id"]` | Canonical OAuth client identifier |
 
 An authenticated completion event MUST include each field when the handler has
 an authoritative value. It MUST omit a field when the value is unavailable; it
@@ -79,11 +90,10 @@ MUST NOT infer, hash, or substitute a display value. In particular, legacy
 tokens without the new claim produce events with `user_id` but without
 `client_id`.
 
-The initial required event is `mcp.tool_call.completed`, because every registered
-MCP tool enters with verified token information. OAuth and UI completion events
-MAY include the same fields when both the event boundary and implementation have
-an authoritative value, but expanding those events is not required by this
-proposal.
+The required event is `mcp.tool_call.completed`, because every registered MCP
+tool enters with verified token information. OAuth and UI completion events are
+outside this proposal. A later expansion MUST define the session-to-identity
+mapping in [web_sessions.md](web_sessions.md) and update the event contract.
 
 Identity references belong in the event envelope rather than the bounded
 event-specific attributes map. Existing tool attributes such as `tool` and
@@ -101,6 +111,11 @@ The API Gateway JSON access-log format MUST add:
 |---|---|
 | `source_ip` | `$context.identity.sourceIp` |
 | `user_agent` | `$context.identity.userAgent` |
+
+Terraform MUST add these fields only when `var.env == "dev"`. Every other
+environment retains the existing bounded access-log format without raw source IP
+or raw user-agent. Enabling either field outside development requires a separate
+accepted decision covering retention, access, and incident-response policy.
 
 `source_ip` records the immediate peer observed by API Gateway. `user_agent` is
 untrusted caller input. Neither value may be used for authentication or
@@ -156,13 +171,18 @@ data_classification = public | internal | confidential | restricted
 
 The tag is inventory metadata, not an access control.
 
+Resource-level `data_classification` tags augment the provider's existing
+`application`, `environment`, `branch`, and `component` default tags; they do
+not replace them.
+
 The affected CloudWatch log groups MUST be tagged as follows:
 
-| Log group | Classification | Rationale |
-|---|---|---|
-| API Gateway access logs | `confidential` | Contains source IP and raw user-agent |
-| Wide events | `confidential` | Contains canonical user and client identifiers |
-| Lambda application logs | `confidential` | Existing authenticated logs contain canonical user identifiers |
+| Log group | Environment | Classification | Rationale |
+|---|---|---|---|
+| API Gateway access logs | Development | `confidential` | Contains source IP and raw user-agent |
+| API Gateway access logs | Other | `internal` | Retains the existing bounded operational fields |
+| Wide events | All | `confidential` | Contains canonical user and client identifiers |
+| Lambda application logs | All | `confidential` | Existing authenticated logs contain canonical user identifiers |
 
 `data_category` and `data_purpose` are deferred until a concrete operational or
 governance requirement justifies them. This proposal does not require
@@ -174,13 +194,17 @@ classifying unrelated AWS resources.
    add `client_id` to every access-token issuance and refresh path.
 2. Add wide-event schema version 2 identity and edge fields, request-context
    propagation, and validation.
-3. Update the API Gateway access-log format and integration parameter mapping.
-4. Apply `data_classification = confidential` to the three log groups.
+3. Add the `var.env == "dev"` access-log field gate and update the API Gateway
+   integration parameter mapping.
+4. Apply the environment-specific `data_classification` tags to the three log
+   groups.
 5. Deploy to development and verify correlation and legacy-token compatibility
    before considering stricter claim enforcement or production rollout.
 
 Implementation of this proposal MUST update the current contracts in
-`spec/auth.md` and `spec/events.md`.
+`spec/auth.md` and `spec/events.md`. It MUST also add a subsequent-decision note
+to `spec/observability_uplift.md` linking to this proposal while preserving the
+earlier decision's historical rationale.
 
 ## Repository evidence
 
@@ -205,22 +229,30 @@ Implementation of this proposal MUST update the current contracts in
   `auth.TokenInfo.Extra["client_id"]`.
 - A valid legacy token without the claim remains accepted and produces no
   `client_id` event field.
+- A legacy refresh grant without a stored client binding is rejected with
+  `invalid_grant` and is not rotated.
 - Authenticated MCP completion events contain the canonical `user_id` and, for
   new tokens, `client_id`; they contain no email address or client display data.
-- API Gateway access records contain `source_ip` and raw `user_agent`.
+- Development API Gateway access records contain `source_ip` and raw
+  `user_agent`.
+- Non-development API Gateway access records contain neither `source_ip` nor raw
+  `user_agent`.
 - The API Gateway `request_id` equals the corresponding application
   `edge_request_id`.
 - Direct or local requests without an edge identifier continue to work.
-- The three affected CloudWatch log groups have
-  `data_classification = confidential`.
+- Development API Gateway, wide-event, and Lambda log groups have
+  `data_classification = confidential`; a non-development API Gateway log group
+  has `data_classification = internal`.
 - Automated tests cover token issuance, verification, legacy compatibility,
   malformed claims, event serialization, header validation, and missing-header
   behavior.
-- Terraform validation and planning complete without an unexpected resource
-  replacement.
+- Terraform validation and both development and non-development plans complete
+  without an unexpected resource replacement. The plans demonstrate that raw
+  edge fields and their classification change only in development.
 
 ## References
 
 - [AWS API Gateway variables for access logging](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-logging-variables.html)
 - [AWS API Gateway HTTP API parameter mapping](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-parameter-mapping.html)
 - [AWS tagging best practices](https://docs.aws.amazon.com/whitepapers/latest/tagging-best-practices/)
+- [Terraform AWS provider resource tagging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/guides/resource-tagging.html)
