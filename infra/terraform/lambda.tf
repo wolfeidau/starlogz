@@ -34,6 +34,9 @@ resource "aws_lambda_function" "starlogz" {
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${aws_lambda_function.starlogz.function_name}"
   retention_in_days = 30
+  tags = {
+    data_classification = "confidential"
+  }
 }
 
 resource "aws_lambda_permission" "apigw" {

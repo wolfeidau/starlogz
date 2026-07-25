@@ -7,6 +7,9 @@ resource "aws_cloudwatch_event_bus" "wide_events" {
 resource "aws_cloudwatch_log_group" "wide_events" {
   name              = "/aws/events/${local.name_prefix}"
   retention_in_days = 90
+  tags = {
+    data_classification = "confidential"
+  }
 }
 
 resource "aws_cloudwatch_event_rule" "wide_events" {
