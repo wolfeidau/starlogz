@@ -179,7 +179,7 @@ func (f *toolFixture) execSQL(ctx context.Context, t *testing.T, query string, a
 // is the supplied space-separated string.
 func (f *toolFixture) tokenFor(t *testing.T, userID uuid.UUID, scopes string) string {
 	t.Helper()
-	tok, err := f.oidcSrv.IssueJWT(userID.String(), scopes, uuid.New().String(), time.Now().Add(time.Hour))
+	tok, err := f.oidcSrv.IssueJWT(userID.String(), "test-client", scopes, uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	return tok
 }

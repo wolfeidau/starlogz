@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,11 @@ import (
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/wideevent"
+)
+
+const (
+	clientIDClaim         = "client_id"
+	maxClientIDClaimBytes = 2048
 )
 
 // UserUpserter persists user identity on successful GitHub login.
@@ -291,18 +297,34 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: missing sub claim", auth.ErrInvalidToken)
 	}
 
+	var extra map[string]any
+	clientID, err := jwt.Get[string](verifiedToken, clientIDClaim)
+	if err == nil {
+		if err := validateClientIDClaim(clientID); err != nil {
+			ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: invalid client_id claim")
+			return nil, fmt.Errorf("%w: invalid client_id claim", auth.ErrInvalidToken)
+		}
+		extra = map[string]any{clientIDClaim: clientID}
+	} else if !errors.Is(err, jwt.ClaimNotFoundError{}) {
+		ctxlog.LoggerFrom(ctx).WarnContext(ctx, "token rejected: invalid client_id claim type")
+		return nil, fmt.Errorf("%w: invalid client_id claim", auth.ErrInvalidToken)
+	}
+
 	ctxlog.LoggerFrom(ctx).DebugContext(ctx, "token verified")
 	return &auth.TokenInfo{
 		UserID:     sub,
 		Scopes:     strings.Fields(scope),
 		Expiration: expiresAt,
+		Extra:      extra,
 	}, nil
 }
 
-// IssueJWT signs and returns a new ES384 JWT for the given subject, scope,
-// JWT ID and expiration. The caller owns expiration so the value matches what's
-// recorded in the grant row and the revoked_tokens entry.
-func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time) (string, error) {
+// IssueJWT signs and returns a new ES384 JWT. The caller owns expiration so the
+// value matches what's recorded in the grant row and the revoked_tokens entry.
+func (s *Server) IssueJWT(sub, clientID, scope, jti string, exp time.Time) (string, error) {
+	if err := validateClientIDClaim(clientID); err != nil {
+		return "", err
+	}
 	tok, err := jwt.NewBuilder().
 		Issuer(s.baseURL.String()).
 		Subject(sub).
@@ -311,6 +333,7 @@ func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time) (string, error)
 		Audience([]string{s.baseURL.JoinPath("/mcp").String()}).
 		Claim("scope", scope).
 		Claim("jti", jti).
+		Claim(clientIDClaim, clientID).
 		Build()
 	if err != nil {
 		return "", fmt.Errorf("build token: %w", err)
@@ -322,4 +345,14 @@ func (s *Server) IssueJWT(sub, scope, jti string, exp time.Time) (string, error)
 	}
 
 	return string(signed), nil
+}
+
+func validateClientIDClaim(clientID string) error {
+	if clientID == "" {
+		return fmt.Errorf("client_id must not be empty")
+	}
+	if len(clientID) > maxClientIDClaimBytes {
+		return fmt.Errorf("client_id must not exceed %d bytes", maxClientIDClaimBytes)
+	}
+	return nil
 }

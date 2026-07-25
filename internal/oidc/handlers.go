@@ -273,7 +273,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 	)
 	ctx := ctxlog.WithLogger(r.Context(), log)
 
-	tokenString, err := s.IssueJWT(pc.Sub, pc.Scope, jti, jwtExpiry)
+	tokenString, err := s.IssueJWT(pc.Sub, pc.ClientID, pc.Scope, jti, jwtExpiry)
 	if err != nil {
 		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err))
 		writeOAuthError(w, "server_error", "failed to issue token", http.StatusInternalServerError)
@@ -374,8 +374,17 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	)
 	ctx = ctxlog.WithLogger(ctx, log)
 
-	// client_id is validated only when stored on the grant (best-effort per v0.2 constraints).
-	if grant.ClientID != "" && grant.ClientID != clientID {
+	if grant.ClientID == "" {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_binding_missing")
+		log.WarnContext(ctx, "refresh grant missing client binding; reauthorization required",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "client_binding_missing"),
+		)
+		s.tearDownGrant(ctx, grant, refreshToken, storepkg.RetiredRefreshTokenReasonGrantDeleted)
+		writeOAuthError(w, "invalid_grant", "grant requires reauthorization", http.StatusBadRequest)
+		return
+	}
+	if grant.ClientID != clientID {
 		warnFields := []any{
 			slog.String("request_client_id", clientID),
 			slog.String("grant_client_id", grant.ClientID),
@@ -513,7 +522,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		slog.String("reason", "rotated"),
 	)
 
-	tokenString, err := s.IssueJWT(sub, grant.Scope, newJTI, newJWTExpiry)
+	tokenString, err := s.IssueJWT(sub, grant.ClientID, grant.Scope, newJTI, newJWTExpiry)
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "JWT issuance failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
@@ -603,7 +612,16 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 		return
 	}
 
-	if grant.ClientID != "" && grant.ClientID != clientID {
+	if grant.ClientID == "" {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_binding_missing")
+		log.WarnContext(ctx, "replacement grant missing client binding; reauthorization required",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "client_binding_missing"),
+		)
+		writeOAuthError(w, "invalid_grant", "grant requires reauthorization", http.StatusBadRequest)
+		return
+	}
+	if grant.ClientID != clientID {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "client_mismatch")
 		log.WarnContext(ctx, "client_id mismatch on replacement grant",
 			slog.String("outcome", "failure"),
@@ -621,7 +639,7 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 		return
 	}
 
-	tokenString, err := s.IssueJWT(grant.UserID.String(), grant.Scope, grant.JTI, grant.JWTExpiry)
+	tokenString, err := s.IssueJWT(grant.UserID.String(), grant.ClientID, grant.Scope, grant.JTI, grant.JWTExpiry)
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "JWT issuance failed for grace retry", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
