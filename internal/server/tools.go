@@ -110,8 +110,19 @@ func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Conte
 			attributes[wideevent.AttributeResultCountBucket] = resultCountBucket(metadata.resultCount)
 			output = nil
 		}
-		ms.events.Completion(ctx, wideevent.MCPToolCallCompleted, outcome, reason, started, attributes)
+		ms.events.CompletionWithIdentity(ctx, wideevent.MCPToolCallCompleted, outcome, reason, started, attributes, toolEventIdentity(req))
 		return result, output, err
+	}
+}
+
+func toolEventIdentity(req *mcp.CallToolRequest) wideevent.Identity {
+	if req == nil || req.Extra == nil || req.Extra.TokenInfo == nil {
+		return wideevent.Identity{}
+	}
+	clientID, _ := req.Extra.TokenInfo.Extra[clientIDKey].(string)
+	return wideevent.Identity{
+		UserID:   req.Extra.TokenInfo.UserID,
+		ClientID: clientID,
 	}
 }
 

@@ -1,10 +1,10 @@
 # Telemetry attribution and edge request context
 
-> Status: Proposed
+> Status: Implemented decision
 >
 > Last reviewed: 2026-07-25
 >
-> Authority: Design proposal; not an implementation commitment until accepted and implemented.
+> Authority: Historical rationale and lasting constraints; current contracts, code, tests, and Terraform define implementation details.
 
 ## Context
 
@@ -21,7 +21,7 @@ access log. These values are imperfect identifiers, but they are useful evidence
 for abuse monitoring and retrospective incident analysis in the development
 environment.
 
-This proposal narrowly supersedes the API Gateway raw-IP restriction recorded
+This decision narrowly supersedes the API Gateway raw-IP restriction recorded
 in [observability_uplift.md](observability_uplift.md) for development only. Its
 prohibition on raw IP addresses and raw user-agent strings in application logs
 remains unchanged.
@@ -45,7 +45,7 @@ remains unchanged.
   controls in this development-only iteration.
 - Defining production retention, access, or incident-response policy.
 - Adding identity references to OAuth or UI completion events.
-- Measuring agent or model quality; this proposal adds attribution, not
+- Measuring agent or model quality; this decision adds attribution, not
   evaluation semantics.
 
 ## Decisions
@@ -92,7 +92,7 @@ tokens without the new claim produce events with `user_id` but without
 
 The required event is `mcp.tool_call.completed`, because every registered MCP
 tool enters with verified token information. OAuth and UI completion events are
-outside this proposal. A later expansion MUST define the session-to-identity
+outside this decision. A later expansion MUST define the session-to-identity
 mapping in [web_sessions.md](web_sessions.md) and update the event contract.
 
 Identity references belong in the event envelope rather than the bounded
@@ -185,70 +185,34 @@ The affected CloudWatch log groups MUST be tagged as follows:
 | Lambda application logs | All | `confidential` | Existing authenticated logs contain canonical user identifiers |
 
 `data_category` and `data_purpose` are deferred until a concrete operational or
-governance requirement justifies them. This proposal does not require
+governance requirement justifies them. This decision does not require
 classifying unrelated AWS resources.
 
-## Implementation sequence
+## Tradeoffs
 
-1. Add optional claim verification and `TokenInfo.Extra` propagation first, then
-   add `client_id` to every access-token issuance and refresh path.
-2. Add wide-event schema version 2 identity and edge fields, request-context
-   propagation, and validation.
-3. Add the `var.env == "dev"` access-log field gate and update the API Gateway
-   integration parameter mapping.
-4. Apply the environment-specific `data_classification` tags to the three log
-   groups.
-5. Deploy to development and verify correlation and legacy-token compatibility
-   before considering stricter claim enforcement or production rollout.
+- Access tokens issued before this decision remain valid until expiry, but an
+  unbound legacy refresh grant forces reauthorization rather than promoting an
+  untrusted caller-supplied client ID.
+- Canonical identity references make Lambda and wide-event log groups
+  confidential and require an authorized database lookup to resolve user or
+  client details.
+- Raw IP and user-agent evidence is restricted to the development API Gateway
+  log group and its existing 30-day retention.
+- Keeping the application UUID and API Gateway request ID separate adds one
+  field but preserves existing request semantics while enabling correlation.
 
-Implementation of this proposal MUST update the current contracts in
-`spec/auth.md` and `spec/events.md`. It MUST also add a subsequent-decision note
-to `spec/observability_uplift.md` linking to this proposal while preserving the
-earlier decision's historical rationale.
+## Outcome
 
-## Repository evidence
+New access tokens bind the canonical client identifier and verified MCP
+completion events expose canonical user and client references through wide-event
+schema version 2. API Gateway overwrites a correlation header that becomes
+`edge_request_id` in application logs and wide events.
 
-- `internal/oidc/server.go` signs and verifies access tokens but does not
-  currently issue or expose `client_id`.
-- `internal/store/store.go` persists the canonical client identifier on OAuth
-  grants; CIMD uses the resolved URL directly as that identifier.
-- `internal/server/tools.go` receives verified `auth.TokenInfo` for every
-  registered MCP tool and emits `mcp.tool_call.completed`.
-- `internal/wideevent/event.go` enforces schema version 1 and has no identity or
-  edge request fields.
-- `internal/middleware/access_log.go` generates an application UUID and records
-  parsed user-agent dimensions but not the raw edge values.
-- `infra/terraform/apigw.tf` records the API Gateway request ID but not source
-  IP, raw user-agent, or an integration request-header mapping.
-
-## Acceptance criteria
-
-- Access tokens issued by authorization-code and refresh flows contain the
-  canonical `client_id`.
-- JWT verification exposes a valid claim through
-  `auth.TokenInfo.Extra["client_id"]`.
-- A valid legacy token without the claim remains accepted and produces no
-  `client_id` event field.
-- A legacy refresh grant without a stored client binding is rejected with
-  `invalid_grant` and is not rotated.
-- Authenticated MCP completion events contain the canonical `user_id` and, for
-  new tokens, `client_id`; they contain no email address or client display data.
-- Development API Gateway access records contain `source_ip` and raw
-  `user_agent`.
-- Non-development API Gateway access records contain neither `source_ip` nor raw
-  `user_agent`.
-- The API Gateway `request_id` equals the corresponding application
-  `edge_request_id`.
-- Direct or local requests without an edge identifier continue to work.
-- Development API Gateway, wide-event, and Lambda log groups have
-  `data_classification = confidential`; a non-development API Gateway log group
-  has `data_classification = internal`.
-- Automated tests cover token issuance, verification, legacy compatibility,
-  malformed claims, event serialization, header validation, and missing-header
-  behavior.
-- Terraform validation and both development and non-development plans complete
-  without an unexpected resource replacement. The plans demonstrate that raw
-  edge fields and their classification change only in development.
+Development API Gateway access logs retain raw source IP and user-agent; other
+environments retain the bounded format. API Gateway, Lambda, and wide-event log
+groups carry the classification tags defined above. Current authentication,
+refresh, and event behavior is maintained in [auth.md](auth.md),
+[refresh_tokens.md](refresh_tokens.md), and [events.md](events.md).
 
 ## References
 

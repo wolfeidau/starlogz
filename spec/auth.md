@@ -1,7 +1,7 @@
 # OAuth2 authentication and authorization
 
 > Status: Current contract
-> Last reviewed: 2026-07-24
+> Last reviewed: 2026-07-25
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Architecture
@@ -225,13 +225,19 @@ Tokens are signed with ES384 using a P-384 key. Every issued token contains:
 | `aud` | Array containing the exact `<server-url>/mcp` resource URL. |
 | `scope` | Non-empty, space-delimited granted scopes. |
 | `jti` | Unique UUID v4 used for revocation. |
+| `client_id` | Exact canonical OAuth client identifier bound to the authorization or refresh grant. |
 | `iat` | Issued-at timestamp. |
 | `exp` | Expiry timestamp, normally 15 minutes after issuance. |
 
 Verification requires a valid ES384 signature, exact issuer, matching MCP
 audience, non-empty subject and scope, expiry, and `jti`. It then checks the
 persistent revocation store. A revocation-store failure rejects the token rather
-than accepting it without a revocation check.
+than accepting it without a revocation check. A present `client_id` must be a
+non-empty string of at most 2048 bytes and is exposed to MCP handlers through
+`auth.TokenInfo.Extra["client_id"]`.
+
+Access tokens issued before client attribution was deployed remain valid without
+`client_id` until they expire. Newly issued tokens always contain the claim.
 
 `POST /auth/logout` verifies the bearer token and records its `jti` through its
 expiry. Refresh rotation also revokes the previous access token atomically with

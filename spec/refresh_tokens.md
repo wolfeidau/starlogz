@@ -1,7 +1,7 @@
 # OAuth2 refresh-token grant
 
 > Status: Current contract
-> Last reviewed: 2026-07-16
+> Last reviewed: 2026-07-25
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Overview
@@ -108,6 +108,8 @@ A refresh token stops being usable when:
 - it is successfully rotated and its retry grace expires;
 - the upstream GitHub refresh token expires or is rejected;
 - GitHub fails to return a replacement refresh token;
+- it lacks an authoritative client binding, including when discovered as the
+  replacement grant during a retry grace request;
 - its grant is deleted; or
 - the stored grant or replacement grant no longer exists.
 
@@ -132,13 +134,15 @@ Errors use the OAuth2 JSON shape:
 | `unsupported_grant_type` | 400 | The token endpoint does not recognize the requested grant. |
 | `invalid_request` | 400 | `refresh_token` or `client_id` is missing. |
 | `invalid_client` | 400 | The client ID does not match the current or retired grant. |
-| `invalid_grant` | 400 | The token is unknown, already used outside grace, removed, expired, or invalid upstream. |
+| `invalid_grant` | 400 | The token is unknown, already used outside grace, removed, expired, invalid upstream, or lacks an authoritative stored client binding. |
 | `server_error` | 500 | GitHub or internal persistence failed transiently. |
 
 Public errors intentionally avoid disclosing detailed grant history. Bounded
 operator telemetry distinguishes successful rotation and grace retry from
-unknown, expired, removed, mismatched, upstream-invalid, and server-error
-outcomes. Clients must not depend on those internal reason labels.
+unknown, expired, removed, mismatched, upstream-invalid, missing-client-binding,
+and server-error outcomes. Retained refresh-token diagnostics record
+`client_binding_missing` separately from generic grant deletion. Clients must
+not depend on those internal reason labels.
 
 ## Discovery and constraints
 
@@ -146,6 +150,8 @@ Authorization-server metadata advertises both `authorization_code` and
 `refresh_token` grant types.
 
 There is no refresh-token introspection or standalone revocation endpoint.
-Refresh requests synchronously depend on GitHub. Client binding is enforced
-when the grant contains a client ID; legacy or test grants without one retain
-the existing best-effort compatibility behavior.
+Refresh requests synchronously depend on GitHub. Client binding is mandatory. A
+legacy grant without a stored client ID is torn down and rejected with
+`invalid_grant`, including a replacement grant discovered through retry grace;
+the caller must repeat authorization. The server never promotes the
+caller-supplied client ID into an unbound grant.

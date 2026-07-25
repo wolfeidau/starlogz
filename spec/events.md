@@ -1,7 +1,7 @@
 # Wide event contract
 
 > Status: Current contract
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-25
 > Authority: Behavioral contract; current code, tests, and Terraform provide implementation evidence.
 
 Starlogz emits one bounded completion event for each recognized core OAuth, UI session, and MCP tool flow. These events provide operational counts and failure rates without storing user content or authentication material.
@@ -14,18 +14,21 @@ AWS deployments route events with source `starlogz.service` to `/aws/events/star
 
 ## Envelope
 
-All events use schema version 1:
+All events use schema version 2:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "event_id": "0198...",
   "event_name": "mcp.tool_call.completed",
   "occurred_at": "2026-07-14T04:20:00Z",
   "environment": "dev",
   "service_version": "v0.12.0",
   "request_id": "0198...",
+  "edge_request_id": "abc123",
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "user_id": "0198...",
+  "client_id": "https://client.example.com/oauth/client-metadata.json",
   "outcome": "success",
   "reason": "completed",
   "duration_ms": 18,
@@ -36,7 +39,17 @@ All events use schema version 1:
 }
 ```
 
-`request_id` and `trace_id` are omitted when unavailable. `attributes` is omitted for flows without approved attributes.
+`request_id`, `edge_request_id`, and `trace_id` are omitted when unavailable.
+`attributes` is omitted for flows without approved attributes.
+
+`mcp.tool_call.completed` always contains the canonical `user_id` from the
+verified access token. It contains the canonical `client_id` when the signed
+claim is available; access tokens issued before client attribution omit it.
+OAuth and UI events contain neither identity field.
+
+`edge_request_id` is the opaque API Gateway request identifier propagated by the
+configured integration. It is correlation evidence only and is never used for a
+security decision.
 
 ## Events
 
@@ -80,7 +93,11 @@ result set. Other tools cannot include it. `insight_restore` emits only its
 bounded tool name; target and current revisions, content, keys, tags, warnings,
 and actors are not event attributes.
 
-Events never contain insight content, search queries, tags, emails, tokens, OAuth parameters, arbitrary error strings, request or response bodies, headers, query strings, authorization identities, or raw IP addresses.
+Events never contain insight content, search queries, tags, emails, tokens,
+OAuth parameters, arbitrary error strings, request or response bodies, headers,
+query strings, denormalized authorization identity data, or raw IP addresses.
+The only identity values are the canonical `user_id` and `client_id` references
+on MCP completion events.
 
 ## CloudWatch Logs Insights examples
 
@@ -100,6 +117,14 @@ fields @timestamp, detail.attributes.tool, detail.attributes.result_count_bucket
   and detail.attributes.tool = "insight_search"
   and detail.outcome = "success"
 | stats count() as calls by detail.attributes.result_count_bucket, bin(1h)
+```
+
+Compare MCP tool outcomes by client:
+
+```text
+fields @timestamp, detail.client_id, detail.attributes.tool, detail.outcome
+| filter detail.event_name = "mcp.tool_call.completed"
+| stats count() as calls by detail.client_id, detail.attributes.tool, detail.outcome
 ```
 
 Find failures by flow and bounded reason:

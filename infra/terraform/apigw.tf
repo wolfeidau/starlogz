@@ -41,11 +41,17 @@ resource "aws_apigatewayv2_integration" "lambda" {
   integration_type       = "AWS_PROXY"
   integration_uri        = aws_lambda_function.starlogz.invoke_arn
   payload_format_version = "2.0"
+  request_parameters = {
+    "overwrite:header.x-starlogz-edge-request-id" = "$context.requestId"
+  }
 }
 
 resource "aws_cloudwatch_log_group" "apigw" {
   name              = "/aws/apigateway/${local.name_prefix}"
   retention_in_days = 30
+  tags = {
+    data_classification = var.env == "dev" ? "confidential" : "internal"
+  }
 }
 
 resource "aws_apigatewayv2_route" "routes" {
@@ -64,18 +70,24 @@ resource "aws_apigatewayv2_stage" "default" {
 
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.apigw.arn
-    format = jsonencode({
-      request_id             = "$context.requestId"
-      route_key              = "$context.routeKey"
-      http_method            = "$context.httpMethod"
-      status                 = "$context.status"
-      response_length        = "$context.responseLength"
-      response_latency_ms    = "$context.responseLatency"
-      integration_latency_ms = "$context.integrationLatency"
-      integration_status     = "$context.integrationStatus"
-      domain_name            = "$context.domainName"
-      protocol               = "$context.protocol"
-    })
+    format = jsonencode(merge(
+      {
+        request_id             = "$context.requestId"
+        route_key              = "$context.routeKey"
+        http_method            = "$context.httpMethod"
+        status                 = "$context.status"
+        response_length        = "$context.responseLength"
+        response_latency_ms    = "$context.responseLatency"
+        integration_latency_ms = "$context.integrationLatency"
+        integration_status     = "$context.integrationStatus"
+        domain_name            = "$context.domainName"
+        protocol               = "$context.protocol"
+      },
+      var.env == "dev" ? {
+        source_ip  = "$context.identity.sourceIp"
+        user_agent = "$context.identity.userAgent"
+      } : {}
+    ))
   }
 
   default_route_settings {

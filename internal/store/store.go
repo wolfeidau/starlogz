@@ -393,6 +393,7 @@ const (
 	RetiredRefreshTokenReasonGitHubInvalid        = "github_invalid"
 	RetiredRefreshTokenReasonGitHubMissingRefresh = "github_missing_refresh" //nolint:gosec // reason label, not a credential
 	RetiredRefreshTokenReasonGrantDeleted         = "grant_deleted"
+	RetiredRefreshTokenReasonClientBindingMissing = "client_binding_missing"
 )
 
 // RetiredRefreshToken records hashed refresh tokens after rotation or teardown.

@@ -399,7 +399,7 @@ func TestJWKS_KidMatchesJWTHeader(t *testing.T) {
 	jwksKid := keySet.Keys[0].Kid
 	require.NotEmpty(t, jwksKid)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	parts := strings.SplitN(tokenString, ".", 3)
@@ -1134,6 +1134,7 @@ func TestTokenHandler_ValidExchange(t *testing.T) {
 	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
+	require.Equal(t, "test-client", info.Extra[clientIDClaim])
 	require.Equal(t, []string{"test-client"}, clients.touches)
 }
 
@@ -1182,6 +1183,11 @@ func TestTokenHandler_CIMDExchangeIssuesRefreshWithoutRegisteredClientLookup(t *
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.NotEmpty(t, resp["refresh_token"])
+	tokenString, ok := resp["access_token"].(string)
+	require.True(t, ok)
+	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://client.example.com/oauth/client-metadata.json", info.Extra[clientIDClaim])
 	require.Len(t, gs.calls, 1)
 }
 
@@ -1734,6 +1740,7 @@ func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {
 	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, "12345678", info.UserID)
+	require.Equal(t, "test-client", info.Extra[clientIDClaim])
 
 	parsed, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
 	require.NoError(t, err)
@@ -1814,7 +1821,7 @@ func TestTokenHandler_RefreshGrant_UpsertUserFails(t *testing.T) {
 	require.Empty(t, gs.rotateCalls, "must not rotate when the user upsert fails")
 }
 
-func TestTokenHandler_RefreshGrant_EmptyGrantClientIDSkipsCheck(t *testing.T) {
+func TestTokenHandler_RefreshGrant_EmptyGrantClientIDRequiresReauthorization(t *testing.T) {
 	gs := &testGrantStore{}
 	gh := &mockGitHubConnector{
 		refreshToken: &oauth2.Token{
@@ -1829,7 +1836,7 @@ func TestTokenHandler_RefreshGrant_EmptyGrantClientIDSkipsCheck(t *testing.T) {
 	gs.seed(store.Grant{
 		JTI:                uuid.New().String(),
 		OurRefreshToken:    "rt-no-clientid",
-		ClientID:           "", // grant has no stored client_id — best-effort skip per v0.2 spec
+		ClientID:           "", // Legacy grant without an authoritative client binding.
 		Scope:              "insights:read",
 		RefreshToken:       "ghr-old",
 		RefreshTokenExpiry: time.Now().Add(time.Hour),
@@ -1846,8 +1853,16 @@ func TestTokenHandler_RefreshGrant_EmptyGrantClientIDSkipsCheck(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.TokenHandler().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, gs.rotateCalls, 1, "rotation must proceed when grant.ClientID is empty")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	require.Equal(t, "invalid_grant", errResp["error"])
+	require.Empty(t, gh.refreshCalls)
+	require.Empty(t, gs.rotateCalls)
+	require.Equal(t, []string{gs.byRefresh["rt-no-clientid"].JTI}, gs.deleteCalls)
+	require.Len(t, gs.retired, 1)
+	require.Equal(t, store.RetiredRefreshTokenReasonClientBindingMissing, gs.retired[0].Reason)
+	require.Equal(t, store.HashRefreshToken("rt-no-clientid"), gs.retired[0].TokenHash)
 }
 
 func TestTokenHandler_RefreshGrant_UnknownToken(t *testing.T) {
@@ -1919,6 +1934,49 @@ func TestTokenHandler_RefreshGrant_GraceRetry(t *testing.T) {
 	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
 	require.NoError(t, err)
 	require.Equal(t, userID.String(), info.UserID)
+	require.Equal(t, "test-client", info.Extra[clientIDClaim])
+}
+
+func TestTokenHandler_RefreshGrant_GraceRetryMissingReplacementClientIDRequiresReauthorization(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	replacement := store.Grant{
+		JTI:                uuid.New().String(),
+		UserID:             uuid.New(),
+		OurRefreshToken:    "current-refresh-token",
+		Scope:              "insights:read",
+		RefreshToken:       "ghr-current",
+		RefreshTokenExpiry: time.Now().Add(180 * 24 * time.Hour),
+		JWTExpiry:          time.Now().Add(15 * time.Minute),
+	}
+	gs.seed(replacement)
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("old-refresh-token"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		ReplacementJTI: replacement.JTI,
+		GraceExpiresAt: time.Now().Add(DefaultRefreshTokenGracePeriod),
+		RetainedUntil:  time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"old-refresh-token"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Equal(t, []string{replacement.JTI}, gs.deleteCalls)
+	require.Len(t, gs.retired, 2)
+	require.Equal(t, store.RetiredRefreshTokenReasonClientBindingMissing, gs.retired[1].Reason)
+	require.Equal(t, store.HashRefreshToken(replacement.OurRefreshToken), gs.retired[1].TokenHash)
+	revoked, err := srv.revocation.IsTokenRevoked(t.Context(), replacement.JTI)
+	require.NoError(t, err)
+	require.True(t, revoked)
 }
 
 func TestTokenHandler_RefreshGrant_GraceExpired(t *testing.T) {
@@ -2655,7 +2713,7 @@ func confirmationTokenFromBody(t *testing.T, body string) string {
 func TestLogoutHandler_RevokesToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
@@ -2690,7 +2748,7 @@ func TestLogoutHandler_InvalidToken(t *testing.T) {
 
 func TestLogoutHandler_EmptyJTI(t *testing.T) {
 	srv := newTestOIDCServer(t)
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", "", time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read", "", time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -2714,7 +2772,7 @@ func TestLogoutHandler_WrongMethod(t *testing.T) {
 func TestVerifyJWT_ValidToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read insights:write", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	info, err := srv.VerifyJWT(t.Context(), tokenString, nil)
@@ -2723,11 +2781,39 @@ func TestVerifyJWT_ValidToken(t *testing.T) {
 	require.Contains(t, info.Scopes, "insights:read")
 	require.Contains(t, info.Scopes, "insights:write")
 	require.False(t, info.Expiration.IsZero())
+	require.Equal(t, "test-client", info.Extra[clientIDClaim])
+}
+
+func TestVerifyJWT_LegacyTokenWithoutClientID(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	info, err := srv.VerifyJWT(t.Context(), signCustomToken(t, srv, nil), nil)
+	require.NoError(t, err)
+	require.Nil(t, info.Extra)
+}
+
+func TestVerifyJWT_InvalidClientIDClaim(t *testing.T) {
+	tests := map[string]any{
+		"empty":      "",
+		"wrong type": 42,
+		"too long":   strings.Repeat("x", maxClientIDClaimBytes+1),
+	}
+	for name, claim := range tests {
+		t.Run(name, func(t *testing.T) {
+			srv := newTestOIDCServer(t)
+			tokenString := signCustomToken(t, srv, func(builder *jwt.Builder) {
+				builder.Claim(clientIDClaim, claim)
+			})
+
+			_, err := srv.VerifyJWT(t.Context(), tokenString, nil)
+			require.ErrorIs(t, err, auth.ErrInvalidToken)
+		})
+	}
 }
 
 func TestVerifyJWT_EmptyJTI(t *testing.T) {
 	srv := newTestOIDCServer(t)
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", "", time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read", "", time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = srv.VerifyJWT(t.Context(), tokenString, nil)
@@ -2744,7 +2830,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 	a := newTestOIDCServer(t)
 	b := newTestOIDCServer(t)
 
-	tokenString, err := b.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := b.IssueJWT("12345678", "test-client", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	_, err = a.VerifyJWT(t.Context(), tokenString, nil)
@@ -2754,7 +2840,7 @@ func TestVerifyJWT_WrongSigningKey(t *testing.T) {
 func TestVerifyJWT_RevokedToken(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
@@ -2770,7 +2856,7 @@ func TestVerifyJWT_RevokedToken(t *testing.T) {
 func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	srv := newTestOIDCServer(t)
 
-	tokenString, err := srv.IssueJWT("12345678", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	tokenString, err := srv.IssueJWT("12345678", "test-client", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
 	tok, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.ES384(), srv.pubkey))
@@ -2779,6 +2865,19 @@ func TestIssueJWT_ContainsAudClaim(t *testing.T) {
 	aud, ok := tok.Audience()
 	require.True(t, ok, "aud claim must be present")
 	require.Contains(t, aud, "http://example.com/mcp")
+	clientID, err := jwt.Get[string](tok, clientIDClaim)
+	require.NoError(t, err)
+	require.Equal(t, "test-client", clientID)
+}
+
+func TestIssueJWT_RejectsInvalidClientID(t *testing.T) {
+	srv := newTestOIDCServer(t)
+
+	_, err := srv.IssueJWT("12345678", "", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	require.EqualError(t, err, "client_id must not be empty")
+
+	_, err = srv.IssueJWT("12345678", strings.Repeat("x", maxClientIDClaimBytes+1), "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	require.EqualError(t, err, "client_id must not exceed 2048 bytes")
 }
 
 // --- VerifyJWT aud / iss validation ---

@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/ctxlog"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -130,4 +132,33 @@ func TestAccessLogRecordsImplicitOKWithoutBody(t *testing.T) {
 	var event map[string]any
 	require.NoError(t, json.Unmarshal(output.Bytes(), &event))
 	require.Equal(t, float64(http.StatusOK), event["status"])
+}
+
+func TestAccessLogPropagatesEdgeRequestID(t *testing.T) {
+	var output bytes.Buffer
+	var contextValue string
+	handler := AccessLog(slog.New(slog.NewJSONHandler(&output, nil)))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		contextValue = ctxlog.EdgeRequestIDFrom(r.Context())
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set(edgeRequestIDHeader, "edge-request_123")
+
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	var event map[string]any
+	require.NoError(t, json.Unmarshal(output.Bytes(), &event))
+	require.Equal(t, "edge-request_123", contextValue)
+	require.Equal(t, "edge-request_123", event["edge_request_id"])
+}
+
+func TestValidEdgeRequestID(t *testing.T) {
+	require.Equal(t, "opaque/value:=123", validEdgeRequestID("opaque/value:=123"))
+	for _, value := range []string{
+		"",
+		strings.Repeat("x", maxEdgeRequestIDLength+1),
+		"line\nbreak",
+		string([]byte{0xff}),
+	} {
+		require.Empty(t, validEdgeRequestID(value))
+	}
 }
