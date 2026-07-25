@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/medama-io/go-useragent"
@@ -14,7 +16,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const otherClassification = "other"
+const (
+	edgeRequestIDHeader    = "X-Starlogz-Edge-Request-Id"
+	maxEdgeRequestIDLength = 128
+	otherClassification    = "other"
+)
 
 type responseWriter struct {
 	http.ResponseWriter
@@ -53,10 +59,12 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := uuid.New().String()
-			reqLogger := logger.With(
-				slog.String("request_id", requestID),
-			)
+			reqLogger := logger.With(slog.String("request_id", requestID))
 			ctx := ctxlog.WithRequestID(r.Context(), requestID)
+			if edgeRequestID := validEdgeRequestID(r.Header.Get(edgeRequestIDHeader)); edgeRequestID != "" {
+				reqLogger = reqLogger.With(slog.String("edge_request_id", edgeRequestID))
+				ctx = ctxlog.WithEdgeRequestID(ctx, edgeRequestID)
+			}
 			r = r.WithContext(ctxlog.WithLogger(ctx, reqLogger))
 
 			start := time.Now()
@@ -83,6 +91,18 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 			reqLogger.LogAttrs(r.Context(), slog.LevelInfo, "http_request", attrs...)
 		})
 	}
+}
+
+func validEdgeRequestID(value string) string {
+	if value == "" || len(value) > maxEdgeRequestIDLength || !utf8.ValidString(value) {
+		return ""
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return ""
+		}
+	}
+	return value
 }
 
 func routePattern(r *http.Request) string {

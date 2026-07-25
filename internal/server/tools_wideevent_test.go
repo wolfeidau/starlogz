@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"github.com/wolfeidau/starlogz/internal/wideevent"
@@ -25,50 +27,59 @@ func TestTrackToolEmitsSuccessAndFailure(t *testing.T) {
 	emitter, err := wideevent.NewEmitter(publisher, "test", "devel", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	ms := &mcpServer{events: emitter}
+	userID := uuid.New().String()
+	request := &mcp.CallToolRequest{Extra: &mcp.RequestExtra{TokenInfo: &auth.TokenInfo{
+		UserID: userID,
+		Extra:  map[string]any{"client_id": "test-client"},
+	}}}
 
 	success := trackTool(ms, wideevent.ToolWhoami, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{}, nil, nil
 	})
-	_, _, err = success(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, _, err = success(t.Context(), request, struct{}{})
 	require.NoError(t, err)
 
 	counted := trackTool(ms, wideevent.ToolInsightSearch, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{}, toolEventMetadata{resultCount: 7}, nil
 	})
-	_, output, err := counted(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, output, err := counted(t.Context(), request, struct{}{})
 	require.NoError(t, err)
 	require.Nil(t, output)
 	history := trackTool(ms, wideevent.ToolInsightHistory, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{}, toolEventMetadata{resultCount: 51}, nil
 	})
-	_, output, err = history(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, output, err = history(t.Context(), request, struct{}{})
 	require.NoError(t, err)
 	require.Nil(t, output)
 
 	get := trackTool(ms, wideevent.ToolInsightGet, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{}, nil, nil
 	})
-	_, _, err = get(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, _, err = get(t.Context(), request, struct{}{})
 	require.NoError(t, err)
 	restore := trackTool(ms, wideevent.ToolInsightRestore, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{}, nil, nil
 	})
-	_, _, err = restore(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, _, err = restore(t.Context(), request, struct{}{})
 	require.NoError(t, err)
 
 	toolFailure := trackTool(ms, wideevent.ToolInsightUpdate, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{IsError: true}, nil, nil
 	})
-	_, _, err = toolFailure(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, _, err = toolFailure(t.Context(), request, struct{}{})
 	require.NoError(t, err)
 
 	failure := trackTool(ms, wideevent.ToolInsightSearch, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 		return nil, nil, errors.New("failed")
 	})
-	_, _, err = failure(t.Context(), &mcp.CallToolRequest{}, struct{}{})
+	_, _, err = failure(t.Context(), request, struct{}{})
 	require.EqualError(t, err, "failed")
 
 	require.Len(t, publisher.events, 7)
+	for _, event := range publisher.events {
+		require.Equal(t, userID, event.UserID)
+		require.Equal(t, "test-client", event.ClientID)
+	}
 	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[0].Outcome)
 	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolWhoami}, publisher.events[0].Attributes)
 	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[1].Outcome)
@@ -88,6 +99,24 @@ func TestTrackToolEmitsSuccessAndFailure(t *testing.T) {
 	require.Equal(t, wideevent.OutcomeFailure, publisher.events[6].Outcome)
 	require.Equal(t, wideevent.ReasonFailed, publisher.events[6].Reason)
 	require.Equal(t, map[string]string{wideevent.AttributeTool: wideevent.ToolInsightSearch}, publisher.events[6].Attributes)
+}
+
+func TestTrackToolOmitsLegacyClientID(t *testing.T) {
+	publisher := &toolEventPublisher{}
+	emitter, err := wideevent.NewEmitter(publisher, "test", "devel", slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	ms := &mcpServer{events: emitter}
+	userID := uuid.New().String()
+	request := &mcp.CallToolRequest{Extra: &mcp.RequestExtra{TokenInfo: &auth.TokenInfo{UserID: userID}}}
+	handler := trackTool(ms, wideevent.ToolWhoami, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{}, nil, nil
+	})
+
+	_, _, err = handler(t.Context(), request, struct{}{})
+	require.NoError(t, err)
+	require.Len(t, publisher.events, 1)
+	require.Equal(t, userID, publisher.events[0].UserID)
+	require.Empty(t, publisher.events[0].ClientID)
 }
 
 func TestResultCountBucket(t *testing.T) {

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/wolfeidau/starlogz/internal/ctxlog"
@@ -14,8 +16,10 @@ import (
 )
 
 const (
-	SchemaVersion  = 1
-	publishTimeout = 400 * time.Millisecond
+	SchemaVersion         = 2
+	maxClientIDBytes      = 2048
+	maxEdgeRequestIDBytes = 128
+	publishTimeout        = 400 * time.Millisecond
 )
 
 type Name string
@@ -84,11 +88,19 @@ type Event struct {
 	Environment    string            `json:"environment"`
 	ServiceVersion string            `json:"service_version"`
 	RequestID      string            `json:"request_id,omitempty"`
+	EdgeRequestID  string            `json:"edge_request_id,omitempty"`
 	TraceID        string            `json:"trace_id,omitempty"`
+	UserID         string            `json:"user_id,omitempty"`
+	ClientID       string            `json:"client_id,omitempty"`
 	Outcome        Outcome           `json:"outcome"`
 	Reason         string            `json:"reason"`
 	DurationMS     int64             `json:"duration_ms"`
 	Attributes     map[string]string `json:"attributes,omitempty"`
+}
+
+type Identity struct {
+	UserID   string
+	ClientID string
 }
 
 type EventPublisher interface {
@@ -133,6 +145,14 @@ func NewNoopEmitter() *Emitter {
 }
 
 func (e *Emitter) Completion(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string) {
+	e.completion(ctx, name, outcome, reason, started, attributes, Identity{})
+}
+
+func (e *Emitter) CompletionWithIdentity(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string, identity Identity) {
+	e.completion(ctx, name, outcome, reason, started, attributes, identity)
+}
+
+func (e *Emitter) completion(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string, identity Identity) {
 	event := Event{
 		SchemaVersion:  SchemaVersion,
 		EventID:        uuid.New().String(),
@@ -141,6 +161,9 @@ func (e *Emitter) Completion(ctx context.Context, name Name, outcome Outcome, re
 		Environment:    e.environment,
 		ServiceVersion: e.serviceVersion,
 		RequestID:      ctxlog.RequestIDFrom(ctx),
+		EdgeRequestID:  ctxlog.EdgeRequestIDFrom(ctx),
+		UserID:         identity.UserID,
+		ClientID:       identity.ClientID,
 		Outcome:        outcome,
 		Reason:         reason,
 		DurationMS:     max(time.Since(started).Milliseconds(), 0),
@@ -281,6 +304,12 @@ func (e Event) Validate() error {
 			return fmt.Errorf("trace_id must be valid: %w", err)
 		}
 	}
+	if err := validateEdgeRequestID(e.EdgeRequestID); err != nil {
+		return err
+	}
+	if err := validateIdentity(e); err != nil {
+		return err
+	}
 	if e.Outcome != OutcomeSuccess && e.Outcome != OutcomeFailure {
 		return fmt.Errorf("unsupported outcome %q", e.Outcome)
 	}
@@ -297,6 +326,50 @@ func (e Event) Validate() error {
 		return fmt.Errorf("duration_ms must not be negative")
 	}
 	return validateAttributes(e.EventName, e.Outcome, e.Attributes)
+}
+
+func validateEdgeRequestID(requestID string) error {
+	if requestID == "" {
+		return nil
+	}
+	if err := validateOpaqueValue(requestID, maxEdgeRequestIDBytes); err != nil {
+		return fmt.Errorf("edge_request_id %w", err)
+	}
+	return nil
+}
+
+func validateIdentity(e Event) error {
+	if e.EventName != MCPToolCallCompleted {
+		if e.UserID != "" || e.ClientID != "" {
+			return fmt.Errorf("identity fields are not allowed for %q", e.EventName)
+		}
+		return nil
+	}
+	if _, err := uuid.Parse(e.UserID); err != nil {
+		return fmt.Errorf("user_id must be a UUID: %w", err)
+	}
+	if e.ClientID == "" {
+		return nil
+	}
+	if err := validateOpaqueValue(e.ClientID, maxClientIDBytes); err != nil {
+		return fmt.Errorf("client_id %w", err)
+	}
+	return nil
+}
+
+func validateOpaqueValue(value string, maxBytes int) error {
+	if len(value) > maxBytes {
+		return fmt.Errorf("must not exceed %d bytes", maxBytes)
+	}
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("must be valid UTF-8")
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("must not contain control characters")
+		}
+	}
+	return nil
 }
 
 func validateDeploymentFields(e Event) error {

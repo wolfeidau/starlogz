@@ -51,11 +51,13 @@ func TestEmitterBuildsBoundedCorrelatedEvent(t *testing.T) {
 		SpanID:  trace.SpanID{1},
 	})
 	ctx := ctxlog.WithRequestID(t.Context(), requestID)
+	ctx = ctxlog.WithEdgeRequestID(ctx, "edge-request_123")
 	ctx = trace.ContextWithSpanContext(ctx, spanContext)
-	emitter.Completion(ctx, MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{
+	userID := uuid.New().String()
+	emitter.CompletionWithIdentity(ctx, MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{
 		AttributeTool:              ToolInsightSearch,
 		AttributeResultCountBucket: ResultCountOneToTen,
-	})
+	}, Identity{UserID: userID, ClientID: "test-client"})
 
 	require.Len(t, publisher.events, 1)
 	event := publisher.events[0]
@@ -64,7 +66,10 @@ func TestEmitterBuildsBoundedCorrelatedEvent(t *testing.T) {
 	require.Equal(t, "dev", event.Environment)
 	require.Equal(t, "v1.2.3", event.ServiceVersion)
 	require.Equal(t, requestID, event.RequestID)
+	require.Equal(t, "edge-request_123", event.EdgeRequestID)
 	require.Equal(t, spanContext.TraceID().String(), event.TraceID)
+	require.Equal(t, userID, event.UserID)
+	require.Equal(t, "test-client", event.ClientID)
 	require.Equal(t, map[string]string{
 		AttributeTool:              ToolInsightSearch,
 		AttributeResultCountBucket: ResultCountOneToTen,
@@ -122,7 +127,7 @@ func TestEmitterRejectsUnboundedAttributes(t *testing.T) {
 	emitter, err := NewEmitter(publisher, "test", "devel", slog.New(slog.NewJSONHandler(&logs, nil)))
 	require.NoError(t, err)
 
-	emitter.Completion(t.Context(), MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{"query": "private"})
+	emitter.CompletionWithIdentity(t.Context(), MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{"query": "private"}, Identity{UserID: uuid.New().String()})
 
 	require.Empty(t, publisher.events)
 	require.Contains(t, logs.String(), "wide event rejected")
@@ -171,6 +176,10 @@ func TestAllEventNamesValidate(t *testing.T) {
 				OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
 				ServiceVersion: "devel", Outcome: OutcomeSuccess, Reason: ReasonCompleted,
 				Attributes: attributes,
+			}
+			if name == MCPToolCallCompleted {
+				event.UserID = uuid.New().String()
+				event.ClientID = "test-client"
 			}
 			require.NoError(t, event.Validate())
 		})
@@ -253,8 +262,62 @@ func TestResultCountBucketValidation(t *testing.T) {
 				SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: MCPToolCallCompleted,
 				OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
 				ServiceVersion: "devel", Outcome: test.outcome, Reason: reason,
-				Attributes: test.attributes,
+				UserID: uuid.New().String(), Attributes: test.attributes,
 			}
+			err := event.Validate()
+			if test.wantError == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, test.wantError)
+		})
+	}
+}
+
+func TestIdentityAndEdgeValidation(t *testing.T) {
+	base := Event{
+		SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: MCPToolCallCompleted,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
+		ServiceVersion: "devel", Outcome: OutcomeSuccess, Reason: ReasonCompleted,
+		UserID: uuid.New().String(), ClientID: "test-client",
+		Attributes: map[string]string{AttributeTool: ToolWhoami},
+	}
+
+	tests := map[string]struct {
+		change    func(*Event)
+		wantError string
+	}{
+		"legacy client omitted": {
+			change: func(event *Event) { event.ClientID = "" },
+		},
+		"missing user": {
+			change:    func(event *Event) { event.UserID = "" },
+			wantError: "user_id must be a UUID",
+		},
+		"identity on OAuth event": {
+			change: func(event *Event) {
+				event.EventName = OAuthRefreshCompleted
+				event.Attributes = nil
+			},
+			wantError: "identity fields are not allowed",
+		},
+		"oversized client": {
+			change:    func(event *Event) { event.ClientID = strings.Repeat("x", maxClientIDBytes+1) },
+			wantError: "client_id must not exceed 2048 bytes",
+		},
+		"valid edge request": {
+			change: func(event *Event) { event.EdgeRequestID = "opaque/value:=123" },
+		},
+		"edge control character": {
+			change:    func(event *Event) { event.EdgeRequestID = "bad\nvalue" },
+			wantError: "edge_request_id must not contain control characters",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			event := base
+			test.change(&event)
 			err := event.Validate()
 			if test.wantError == "" {
 				require.NoError(t, err)

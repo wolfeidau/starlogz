@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	clientIDKey             = "client_id"
 	uiClientID              = oidc.FirstPartyDashboardClientID
 	uiSessionCookie         = "starlogz_session"
 	uiStateCookie           = "starlogz_ui_state"
@@ -71,7 +72,7 @@ func (s *Server) loginHandler(baseURL string) http.HandlerFunc {
 		http.SetCookie(w, namedCookie(uiVerifierCookie, verifier, cookieBase))
 
 		q := url.Values{
-			"client_id":             {uiClientID},
+			clientIDKey:             {uiClientID},
 			"redirect_uri":          {redirectURI},
 			"response_type":         {authorizationCodeValue},
 			"scope":                 {uiScope},
@@ -235,7 +236,7 @@ func exchangeUICode(ctx context.Context, oidcServer *oidc.Server, code, verifier
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
-		"client_id":     {uiClientID},
+		clientIDKey:     {uiClientID},
 		"code_verifier": {verifier},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode())).WithContext(ctx)
