@@ -1860,6 +1860,9 @@ func TestTokenHandler_RefreshGrant_EmptyGrantClientIDRequiresReauthorization(t *
 	require.Empty(t, gh.refreshCalls)
 	require.Empty(t, gs.rotateCalls)
 	require.Equal(t, []string{gs.byRefresh["rt-no-clientid"].JTI}, gs.deleteCalls)
+	require.Len(t, gs.retired, 1)
+	require.Equal(t, store.RetiredRefreshTokenReasonClientBindingMissing, gs.retired[0].Reason)
+	require.Equal(t, store.HashRefreshToken("rt-no-clientid"), gs.retired[0].TokenHash)
 }
 
 func TestTokenHandler_RefreshGrant_UnknownToken(t *testing.T) {
@@ -1932,6 +1935,48 @@ func TestTokenHandler_RefreshGrant_GraceRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, userID.String(), info.UserID)
 	require.Equal(t, "test-client", info.Extra[clientIDClaim])
+}
+
+func TestTokenHandler_RefreshGrant_GraceRetryMissingReplacementClientIDRequiresReauthorization(t *testing.T) {
+	gs := &testGrantStore{}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	replacement := store.Grant{
+		JTI:                uuid.New().String(),
+		UserID:             uuid.New(),
+		OurRefreshToken:    "current-refresh-token",
+		Scope:              "insights:read",
+		RefreshToken:       "ghr-current",
+		RefreshTokenExpiry: time.Now().Add(180 * 24 * time.Hour),
+		JWTExpiry:          time.Now().Add(15 * time.Minute),
+	}
+	gs.seed(replacement)
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("old-refresh-token"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		ReplacementJTI: replacement.JTI,
+		GraceExpiresAt: time.Now().Add(DefaultRefreshTokenGracePeriod),
+		RetainedUntil:  time.Now().Add(24 * time.Hour),
+	})
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"old-refresh-token"},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Equal(t, []string{replacement.JTI}, gs.deleteCalls)
+	require.Len(t, gs.retired, 2)
+	require.Equal(t, store.RetiredRefreshTokenReasonClientBindingMissing, gs.retired[1].Reason)
+	require.Equal(t, store.HashRefreshToken(replacement.OurRefreshToken), gs.retired[1].TokenHash)
+	revoked, err := srv.revocation.IsTokenRevoked(t.Context(), replacement.JTI)
+	require.NoError(t, err)
+	require.True(t, revoked)
 }
 
 func TestTokenHandler_RefreshGrant_GraceExpired(t *testing.T) {

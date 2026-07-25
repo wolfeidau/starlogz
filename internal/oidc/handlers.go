@@ -380,7 +380,7 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 			slog.String("outcome", "failure"),
 			slog.String("reason", "client_binding_missing"),
 		)
-		s.tearDownGrant(ctx, grant, refreshToken, storepkg.RetiredRefreshTokenReasonGrantDeleted)
+		s.tearDownGrant(ctx, grant, refreshToken, storepkg.RetiredRefreshTokenReasonClientBindingMissing)
 		writeOAuthError(w, "invalid_grant", "grant requires reauthorization", http.StatusBadRequest)
 		return
 	}
@@ -618,6 +618,7 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 			slog.String("outcome", "failure"),
 			slog.String("reason", "client_binding_missing"),
 		)
+		s.tearDownGrant(ctx, grant, grant.OurRefreshToken, storepkg.RetiredRefreshTokenReasonClientBindingMissing)
 		writeOAuthError(w, "invalid_grant", "grant requires reauthorization", http.StatusBadRequest)
 		return
 	}

@@ -108,6 +108,8 @@ A refresh token stops being usable when:
 - it is successfully rotated and its retry grace expires;
 - the upstream GitHub refresh token expires or is rejected;
 - GitHub fails to return a replacement refresh token;
+- it lacks an authoritative client binding, including when discovered as the
+  replacement grant during a retry grace request;
 - its grant is deleted; or
 - the stored grant or replacement grant no longer exists.
 
@@ -137,8 +139,10 @@ Errors use the OAuth2 JSON shape:
 
 Public errors intentionally avoid disclosing detailed grant history. Bounded
 operator telemetry distinguishes successful rotation and grace retry from
-unknown, expired, removed, mismatched, upstream-invalid, and server-error
-outcomes. Clients must not depend on those internal reason labels.
+unknown, expired, removed, mismatched, upstream-invalid, missing-client-binding,
+and server-error outcomes. Retained refresh-token diagnostics record
+`client_binding_missing` separately from generic grant deletion. Clients must
+not depend on those internal reason labels.
 
 ## Discovery and constraints
 
@@ -148,5 +152,6 @@ Authorization-server metadata advertises both `authorization_code` and
 There is no refresh-token introspection or standalone revocation endpoint.
 Refresh requests synchronously depend on GitHub. Client binding is mandatory. A
 legacy grant without a stored client ID is torn down and rejected with
-`invalid_grant`; the caller must repeat authorization. The server never promotes
-the caller-supplied client ID into an unbound grant.
+`invalid_grant`, including a replacement grant discovered through retry grace;
+the caller must repeat authorization. The server never promotes the
+caller-supplied client ID into an unbound grant.

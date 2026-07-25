@@ -3129,7 +3129,7 @@ func TestDeleteGrant_Success(t *testing.T) {
 
 	require.NoError(t, st.DeleteGrant(ctx, "jti-delete", &store.RetiredRefreshToken{
 		TokenHash:     store.HashRefreshToken("deleted-refresh-token"),
-		Reason:        store.RetiredRefreshTokenReasonGitHubExpired,
+		Reason:        store.RetiredRefreshTokenReasonClientBindingMissing,
 		UserID:        u.ID,
 		ClientID:      "client-delete",
 		OldJTI:        "jti-delete",
@@ -3140,7 +3140,7 @@ func TestDeleteGrant_Success(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrNotFound, "deleted grant must not be retrievable")
 	retired, err := st.GetRetiredRefreshToken(ctx, store.HashRefreshToken("deleted-refresh-token"))
 	require.NoError(t, err)
-	require.Equal(t, store.RetiredRefreshTokenReasonGitHubExpired, retired.Reason)
+	require.Equal(t, store.RetiredRefreshTokenReasonClientBindingMissing, retired.Reason)
 	require.Equal(t, "jti-delete", retired.OldJTI)
 }
 
