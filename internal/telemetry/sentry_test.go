@@ -41,8 +41,9 @@ func TestInitSentry_InvalidDSN(t *testing.T) {
 }
 
 func TestNewSentrySlogHandler_CapturesErrorEventsOnly(t *testing.T) {
-	handler := NewSentrySlogHandler(t.Context())
+	handler := NewSentrySlogHandler()
 
+	require.False(t, handler.Enabled(t.Context(), slog.LevelDebug))
 	require.False(t, handler.Enabled(t.Context(), slog.LevelInfo))
 	require.False(t, handler.Enabled(t.Context(), slog.LevelWarn))
 	require.True(t, handler.Enabled(t.Context(), slog.LevelError))

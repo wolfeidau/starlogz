@@ -23,7 +23,7 @@ func TestNewLoggerLevel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("LOG_LEVEL", tt.configured)
-			logger := newLogger(t.Context(), tt.development, false)
+			logger := newLogger(tt.development, false)
 			require.Equal(t, tt.debug, logger.Enabled(t.Context(), slog.LevelDebug))
 			require.Equal(t, tt.info, logger.Enabled(t.Context(), slog.LevelInfo))
 			require.True(t, logger.Enabled(t.Context(), slog.LevelWarn))

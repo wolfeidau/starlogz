@@ -45,7 +45,7 @@ func main() {
 	cmd.FatalIfErrorf(run(ctx, cmd, cli.Development))
 }
 
-func newLogger(ctx context.Context, development, sentryEnabled bool) *slog.Logger {
+func newLogger(development, sentryEnabled bool) *slog.Logger {
 	level := slog.LevelInfo
 	if development {
 		level = slog.LevelDebug
@@ -70,7 +70,7 @@ func newLogger(ctx context.Context, development, sentryEnabled bool) *slog.Logge
 
 	handler = telemetry.NewOTelHandler(handler)
 	if sentryEnabled {
-		handler = slog.NewMultiHandler(handler, telemetry.NewSentrySlogHandler(ctx))
+		handler = slog.NewMultiHandler(handler, telemetry.NewSentrySlogHandler())
 	}
 	handler = logattr.NewPrivacyHandler(handler)
 	return slog.New(handler)
@@ -84,7 +84,7 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		return err
 	}
 
-	logger := newLogger(ctx, development, sentryEnabled)
+	logger := newLogger(development, sentryEnabled)
 	slog.SetDefault(logger)
 
 	child := logger.With(
