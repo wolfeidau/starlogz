@@ -131,14 +131,17 @@ func (r *httpClientIDMetadataResolver) Resolve(ctx context.Context, clientID str
 	if err := validateCIMDDocument(clientID, &doc); err != nil {
 		return nil, err
 	}
+	clientLogoPNG, clientLogoOmittedReason := r.resolveLogo(ctx, doc.LogoURI)
 
 	return &resolvedOAuthClient{
-		ClientID:       clientID,
-		ClientName:     doc.ClientName,
-		ClientKind:     storepkg.OAuthClientKindCIMD,
-		RedirectURIs:   doc.RedirectURIs,
-		Scope:          doc.Scope,
-		RefreshAllowed: slices.Contains(doc.GrantTypes, oauthGrantRefreshToken),
+		ClientID:                clientID,
+		ClientName:              doc.ClientName,
+		ClientKind:              storepkg.OAuthClientKindCIMD,
+		ClientLogoPNG:           clientLogoPNG,
+		ClientLogoOmittedReason: clientLogoOmittedReason,
+		RedirectURIs:            doc.RedirectURIs,
+		Scope:                   doc.Scope,
+		RefreshAllowed:          slices.Contains(doc.GrantTypes, oauthGrantRefreshToken),
 	}, nil
 }
 

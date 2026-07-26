@@ -23,12 +23,14 @@ type oauthRequestError struct {
 }
 
 type resolvedOAuthClient struct {
-	ClientID       string
-	ClientName     string
-	ClientKind     storepkg.OAuthClientKind
-	RedirectURIs   []string
-	Scope          string
-	RefreshAllowed bool
+	ClientID                string
+	ClientName              string
+	ClientKind              storepkg.OAuthClientKind
+	ClientLogoPNG           []byte
+	ClientLogoOmittedReason string
+	RedirectURIs            []string
+	Scope                   string
+	RefreshAllowed          bool
 }
 
 func (s *Server) saveRegisteredClient(ctx context.Context, c storepkg.OAuthClient) error {
@@ -100,6 +102,11 @@ func (s *Server) resolveClientForAuthorize(ctx context.Context, log *slog.Logger
 			log.ErrorContext(ctx, "resolve client metadata failed", slog.Any("error", err))
 			return nil, &oauthRequestError{code: "server_error", description: "internal error", status: http.StatusInternalServerError}
 		}
+	}
+	if client.ClientLogoOmittedReason != "" {
+		log.DebugContext(ctx, "authorize: CIMD logo omitted",
+			slog.String("reason", client.ClientLogoOmittedReason),
+		)
 	}
 	if !redirectURIMatchesAny(client.RedirectURIs, redirectURI, true) {
 		log.DebugContext(ctx, "authorize: redirect_uri mismatch detail",

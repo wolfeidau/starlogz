@@ -2488,6 +2488,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 		ClientID:             "client-abc",
 		ClientName:           "Example client",
 		ClientKind:           store.OAuthClientKindCIMD,
+		ClientLogoPNG:        []byte{0x89, 'P', 'N', 'G'},
 		RedirectURI:          "https://client.example.com/callback",
 		Scope:                "insights:read",
 		CodeChallenge:        "challenge-xyz",
@@ -2502,6 +2503,7 @@ func TestStorePendingAuth_ConsumeSuccess(t *testing.T) {
 	require.Equal(t, p.ClientID, got.ClientID)
 	require.Equal(t, p.ClientName, got.ClientName)
 	require.Equal(t, p.ClientKind, got.ClientKind)
+	require.Equal(t, p.ClientLogoPNG, got.ClientLogoPNG)
 	require.Equal(t, p.RedirectURI, got.RedirectURI)
 	require.Equal(t, p.Scope, got.Scope)
 	require.Equal(t, p.CodeChallenge, got.CodeChallenge)
@@ -2566,7 +2568,20 @@ func TestPendingAuthMigrationDefaultsAllowLegacyRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got.ClientName)
 	require.Equal(t, store.OAuthClientKindRegistered, got.ClientKind)
+	require.Empty(t, got.ClientLogoPNG)
 	require.False(t, got.ConfirmationRequired)
+}
+
+func TestStorePendingAuth_RejectsOversizedClientLogo(t *testing.T) {
+	st := newTestStore(t)
+	err := st.StorePendingAuth(t.Context(), "oversized-logo", store.PendingAuth{
+		ClientLogoPNG: make([]byte, (96<<10)+1),
+		RedirectURI:   "https://client.example.com/callback",
+		Scope:         "insights:read",
+		CodeChallenge: "challenge",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pending_auths_client_logo_png_size")
 }
 
 // --- StoreAuthCode / ConsumeAuthCode ---

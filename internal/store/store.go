@@ -440,6 +440,7 @@ type PendingAuth struct {
 	ClientID             string
 	ClientName           string
 	ClientKind           OAuthClientKind
+	ClientLogoPNG        []byte
 	RedirectURI          string
 	Scope                string
 	CodeChallenge        string

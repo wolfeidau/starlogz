@@ -50,11 +50,14 @@ operations prevent replay across server instances.
 After GitHub authentication and user persistence, every resolved client except
 the explicitly configured first-party `starlogz-ui` client requires a Starlogz
 confirmation. A client-supplied name never grants first-party status. The
-server-rendered page shows the client name, or `Unnamed client` and its client
-ID, the full validated redirect URI, and each requested scope with a fixed
-Starlogz-owned description. For CIMD clients it prominently shows the metadata
-hostname and explains that the displayed name came from that domain.
-Client-controlled values are escaped; the response loads no remote resources.
+server-rendered page shows an identity card with the client name, or `Unnamed
+client`, a Starlogz-owned fallback tile, the full client ID, the full validated
+redirect URI, and each requested scope with a fixed Starlogz-owned description.
+For CIMD clients it prominently shows the metadata hostname and explains that
+the displayed details came from that domain. When a safe CIMD logo was bound at
+authorization start, the card displays its canonical PNG instead of the
+fallback tile. Client-controlled values are escaped; the response loads no
+remote client resources.
 
 The form contains only a random one-time confirmation token and an
 `approve` or `deny` decision. All identity, client, redirect, scope, PKCE, and
@@ -151,7 +154,21 @@ refresh-token grant, response type `code`, and supported Starlogz scopes are
 accepted. Omitted authentication method, grant types, response types, and scope
 default to `none`, `authorization_code`, `code`, and
 `insights:read insights:write`, respectively. Key-based or signed client
-metadata is not supported. Remote presentation fields are ignored.
+metadata is not supported. Presentation fields other than `logo_uri` are
+ignored.
+
+An optional `logo_uri` is presentation data and never affects whether an
+otherwise valid client can authorize. Starlogz accepts an absolute public-host
+HTTPS URL of at most 2048 bytes with a path, no userinfo, fragment, explicit
+port, or IP-literal host; query parameters and a host different from the client
+ID are permitted. The server fetches it without environment proxies or
+redirects, reuses the CIMD public-address and DNS-rebinding protections, and
+applies a two-second timeout and 256 KiB response limit. Only matching PNG and
+JPEG content up to 1024 pixels per dimension and one million pixels is decoded.
+It is scaled without upscaling to fit 128 by 128 pixels, re-encoded as a
+metadata-free PNG, and retained only when the result is at most 96 KiB. Any URL,
+network, status, media, size, dimension, or decode failure omits the logo and
+continues authorization.
 
 CIMD redirect URIs use the DCR syntax policy. Authorization requires an exact
 match except that an HTTP loopback redirect may select a different port while
@@ -159,8 +176,11 @@ retaining the same loopback host, path, query, and fragment. This supports
 native clients that bind an ephemeral local port.
 
 Resolution happens only when authorization starts. The exact client ID,
-display name, client kind, redirect URI, scope, PKCE challenge, and refresh
-eligibility are bound into single-use server-side state. Token exchange and
+display name, client kind, optional canonical client-logo PNG, redirect URI,
+scope, PKCE challenge, and refresh eligibility are bound into single-use
+server-side state. Logo bytes exist only in the ten-minute pending authorization
+row and confirmation response; they are not copied into confirmation records,
+authorization codes, grants, or OAuth client registrations. Token exchange and
 refresh do not fetch the metadata document again, and CIMD documents are not
 copied into `oauth_clients`.
 
@@ -294,9 +314,10 @@ subdomains or preload. COOP and CORP are intentionally omitted to preserve
 OAuth popup coordination and cross-origin MCP Inspector compatibility.
 
 The confirmation response replaces the global policy with `default-src
-'none'`, nonce-only inline script and style sources, and framing and base-URI
-denial. Its form action permits the Starlogz origin and only the validated
-callback source because browsers apply `form-action` while following
+'none'`, nonce-only inline script and style sources, `img-src data:` for the
+server-sanitized embedded logo, and framing and base-URI denial. Its form action
+permits the Starlogz origin and only the validated callback source because
+browsers apply `form-action` while following
 the form submission's authorization-result redirect. HTTP and HTTPS callbacks
 are limited to their exact origin; custom callbacks are limited to their
 validated scheme. This follows the [CSP Level 3 form-action and redirect

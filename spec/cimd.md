@@ -1,7 +1,7 @@
 # OAuth Client ID Metadata Documents
 
 > Status: Implemented decision
-> Last reviewed: 2026-07-24
+> Last reviewed: 2026-07-26
 > Authority: Historical architecture decision; [auth.md](auth.md), current code, migrations, and tests define supported behavior.
 
 ## Outcome
@@ -45,6 +45,11 @@ persisted registrations.
 - Reuse the post-GitHub client confirmation. Prominently display the metadata
   hostname and explain that the client name came from that domain so a
   user-controlled display name cannot stand alone as identity.
+- Use an optional `logo_uri` only after a second SSRF-protected server fetch.
+  Accept bounded PNG and JPEG inputs, resize and re-encode them as a canonical
+  PNG, and bind the result to the pending authorization. The confirmation page
+  embeds that image from a `data:` URL and never asks the browser to contact
+  the client-controlled host. Logo failure is non-fatal presentation failure.
 - Advertise support only while `CIMD_ENABLED` is active. Keep DCR advertised
   and operational as the compatibility path.
 
@@ -58,8 +63,12 @@ single-use state preserves the established GitHub, PKCE, redirect, and approval
 boundaries instead of creating a parallel OAuth flow.
 
 The metadata hostname is a necessary trust signal because the remote
-`client_name` is untrusted. The feature flag provides a low-cost rollback while
-the 0.x service gains interoperability evidence in its development environment.
+`client_name` and logo are untrusted. Prefetching prevents cross-domain browser
+tracking and binds the image the user sees to the same authorization attempt;
+rasterization removes active content and metadata. A small canonical output
+limit bounds temporary PostgreSQL amplification. The feature flag provides a
+low-cost rollback while the 0.x service gains interoperability evidence in its
+development environment.
 
 ## Lasting tradeoffs
 
@@ -69,11 +78,11 @@ the 0.x service gains interoperability evidence in its development environment.
   some clients that the draft could permit. Support should widen only for a
   demonstrated client requirement.
 - CIMD adds an outbound network dependency to authorization startup. Documents
-  are not durable registrations, and persistent or distributed caching is not
-  implemented.
-- Metadata presentation URLs, signed metadata, key-based client
-  authentication, trust marks, and non-default client identifier ports or
-  query components remain unsupported.
+  and logos are fetched once per authorization; persistent or distributed
+  caching is not implemented.
+- SVG, GIF, WebP, localized presentation values, presentation links, signed
+  metadata, key-based client authentication, trust marks, and non-default
+  client identifier ports or query components remain unsupported.
 - DCR remains necessary for clients without a stable public HTTPS metadata
   document.
 
