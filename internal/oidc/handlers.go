@@ -924,14 +924,17 @@ func (s *Server) AuthorizeHandler() http.Handler {
 		githubState := uuid.New().String()
 		clientName := ""
 		clientKind := storepkg.OAuthClientKindRegistered
+		var clientLogoPNG []byte
 		if client != nil {
 			clientName = client.ClientName
 			clientKind = client.ClientKind
+			clientLogoPNG = client.ClientLogoPNG
 		}
 		if err := s.authState.StorePendingAuth(ctx, githubState, storepkg.PendingAuth{
 			ClientID:             clientID,
 			ClientName:           clientName,
 			ClientKind:           clientKind,
+			ClientLogoPNG:        clientLogoPNG,
 			RedirectURI:          redirectURI,
 			Scope:                scope,
 			CodeChallenge:        codeChallenge,

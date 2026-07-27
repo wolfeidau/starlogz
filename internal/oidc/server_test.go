@@ -733,6 +733,7 @@ func TestAuthorizeHandler_UsesRegisteredScopeWhenRequestOmitsScope(t *testing.T)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
 	require.Equal(t, "", pending.ClientName)
 	require.Equal(t, store.OAuthClientKindRegistered, pending.ClientKind)
+	require.Empty(t, pending.ClientLogoPNG)
 	require.True(t, pending.RefreshAllowed)
 	require.True(t, pending.ConfirmationRequired)
 	require.Equal(t, []string{"registered-client"}, clients.touches)
@@ -752,6 +753,7 @@ func TestAuthorizeHandler_ResolvesCIMDClient(t *testing.T) {
 		ClientID:       "https://client.example.com/oauth/client-metadata.json",
 		ClientName:     "Example CIMD Client",
 		ClientKind:     store.OAuthClientKindCIMD,
+		ClientLogoPNG:  []byte{0x89, 'P', 'N', 'G'},
 		RedirectURIs:   []string{"https://client.example.com/callback"},
 		Scope:          "insights:read insights:write",
 		RefreshAllowed: true,
@@ -777,6 +779,7 @@ func TestAuthorizeHandler_ResolvesCIMDClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Example CIMD Client", pending.ClientName)
 	require.Equal(t, store.OAuthClientKindCIMD, pending.ClientKind)
+	require.Equal(t, []byte{0x89, 'P', 'N', 'G'}, pending.ClientLogoPNG)
 	require.Equal(t, "insights:read insights:write", pending.Scope)
 	require.True(t, pending.RefreshAllowed)
 	require.Equal(t, []string{"https://client.example.com/oauth/client-metadata.json"}, resolver.calls)
@@ -2509,7 +2512,7 @@ func TestRenderAuthorizationConfirmationEscapesUnnamedClientAndRedirect(t *testi
 		Scope:       scopeInsightsRead,
 	}, "confirmation-token")
 	require.NoError(t, err)
-	require.Contains(t, w.Body.String(), "Authorize Unnamed client")
+	require.Contains(t, w.Body.String(), "Allow Unnamed client to access Starlogz?")
 	require.Contains(t, w.Body.String(), `&lt;img src=x onerror=&#34;alert(1)&#34;&gt;`)
 	require.Contains(t, w.Body.String(), `next=&lt;script&gt;alert(1)&lt;/script&gt;`)
 	require.NotContains(t, w.Body.String(), `<img src=x`)
@@ -2527,12 +2530,28 @@ func TestRenderAuthorizationConfirmationDisplaysCIMDClientHost(t *testing.T) {
 		Scope:       scopeInsightsRead,
 	}, "confirmation-token")
 	require.NoError(t, err)
-	require.Contains(t, w.Body.String(), "Authorize Example Client")
-	require.Contains(t, w.Body.String(), "Verify client identity")
-	require.Contains(t, w.Body.String(), `<p class="identity-host"><code>client.example.com</code></p>`)
-	require.Contains(t, w.Body.String(), "The client name above comes from metadata hosted on this domain.")
+	require.Contains(t, w.Body.String(), "Allow Example Client to access Starlogz?")
+	require.Contains(t, w.Body.String(), `Published by <code>client.example.com</code>`)
+	require.Contains(t, w.Body.String(), "https://client.example.com/oauth/client-metadata.json")
+	require.Contains(t, w.Body.String(), "Starlogz fetched these client details from the domain above.")
 	require.Contains(t, w.Body.String(), "Continue only if you recognize and trust it.")
-	require.NotContains(t, w.Body.String(), "/oauth/client-metadata.json")
+	require.Contains(t, w.Body.String(), `aria-hidden="true">App</span>`)
+	require.Contains(t, w.Header().Get("Content-Security-Policy"), "img-src data:")
+}
+
+func TestRenderAuthorizationConfirmationEmbedsSanitizedLogo(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := renderAuthorizationConfirmation(w, &store.PendingAuth{
+		ClientID:      "https://client.example.com/oauth/client-metadata.json",
+		ClientName:    "Example Client",
+		ClientKind:    store.OAuthClientKindCIMD,
+		ClientLogoPNG: []byte{0x89, 'P', 'N', 'G'},
+		RedirectURI:   "https://client.example.com/callback",
+		Scope:         scopeInsightsRead,
+	}, "confirmation-token")
+	require.NoError(t, err)
+	require.Contains(t, w.Body.String(), `src="data:image/png;base64,iVBORw=="`)
+	require.NotContains(t, w.Body.String(), `aria-hidden="true">App</span>`)
 }
 
 func TestAuthorizationConfirmationFormActionSource(t *testing.T) {

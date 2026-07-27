@@ -784,12 +784,13 @@ func (s *Store) StorePendingAuth(ctx context.Context, state string, p store.Pend
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO pending_auths
-		    (state, client_id, client_name, client_kind, redirect_uri, scope, code_challenge,
-		     client_state, refresh_allowed, confirmation_required, expires_at)
-		VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, $7, NULLIF($8,''), $9, $10,
+		    (state, client_id, client_name, client_kind, client_logo_png, redirect_uri, scope,
+		     code_challenge, client_state, refresh_allowed, confirmation_required, expires_at)
+		VALUES ($1, NULLIF($2,''), $3, $4, COALESCE($5, '\x'::bytea), $6, $7, $8,
+		        NULLIF($9,''), $10, $11,
 		        now() + interval '10 minutes')`,
-		state, p.ClientID, p.ClientName, clientKind, p.RedirectURI, p.Scope, p.CodeChallenge,
-		p.ClientState, p.RefreshAllowed, p.ConfirmationRequired)
+		state, p.ClientID, p.ClientName, clientKind, p.ClientLogoPNG, p.RedirectURI, p.Scope,
+		p.CodeChallenge, p.ClientState, p.RefreshAllowed, p.ConfirmationRequired)
 	if err != nil {
 		return fmt.Errorf("insert pending auth: %w", err)
 	}
@@ -811,11 +812,11 @@ func (s *Store) ConsumePendingAuth(ctx context.Context, state string) (*store.Pe
 	err := s.pool.QueryRow(ctx, `
 		DELETE FROM pending_auths
 		WHERE state = $1 AND expires_at > now()
-		RETURNING COALESCE(client_id,''), client_name, client_kind, redirect_uri, scope,
-		          code_challenge, COALESCE(client_state,''), refresh_allowed,
+		RETURNING COALESCE(client_id,''), client_name, client_kind, client_logo_png,
+		          redirect_uri, scope, code_challenge, COALESCE(client_state,''), refresh_allowed,
 		          confirmation_required`,
-		state).Scan(&p.ClientID, &p.ClientName, &p.ClientKind, &p.RedirectURI, &p.Scope,
-		&p.CodeChallenge, &p.ClientState, &p.RefreshAllowed, &p.ConfirmationRequired)
+		state).Scan(&p.ClientID, &p.ClientName, &p.ClientKind, &p.ClientLogoPNG, &p.RedirectURI,
+		&p.Scope, &p.CodeChallenge, &p.ClientState, &p.RefreshAllowed, &p.ConfirmationRequired)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

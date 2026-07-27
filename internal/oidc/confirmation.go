@@ -44,14 +44,18 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
     :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111827; color: #e5e7eb; }
     main { width: min(38rem, calc(100% - 2rem)); box-sizing: border-box; padding: 2rem; border: 1px solid #374151; border-radius: .75rem; background: #1f2937; }
-	    h1 { margin-top: 0; font-size: 1.5rem; } h2 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
-	    code { overflow-wrap: anywhere; } ul { padding-left: 1.25rem; } li + li { margin-top: .75rem; }
-	    .muted { color: #9ca3af; } .actions { display: flex; gap: .75rem; margin-top: 2rem; }
-	    .identity { margin: 1.25rem 0; padding: 1rem; border: 1px solid #4b5563; border-left: .25rem solid #60a5fa; border-radius: .5rem; background: #111827; }
-	    .identity-label { margin: 0 0 .35rem; color: #93c5fd; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-	    .identity-host { margin: 0; font-size: 1.125rem; font-weight: 700; }
-	    .identity-help { margin: .65rem 0 0; color: #cbd5e1; font-size: .9rem; line-height: 1.4; }
-	    button { border: 0; border-radius: .4rem; padding: .7rem 1rem; font: inherit; cursor: pointer; }
+    h1 { margin-top: 0; font-size: 1.5rem; line-height: 1.3; } h2 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
+    code { overflow-wrap: anywhere; } ul { padding-left: 1.25rem; } li + li { margin-top: .75rem; }
+    .muted { color: #9ca3af; } .actions { display: flex; gap: .75rem; margin-top: 2rem; }
+    .identity { display: flex; gap: 1rem; align-items: center; margin: 1.25rem 0 .75rem; padding: 1rem; border: 1px solid #4b5563; border-radius: .65rem; background: #111827; }
+    .client-logo { width: 4rem; height: 4rem; flex: 0 0 4rem; display: grid; place-items: center; overflow: hidden; border: 1px solid #4b5563; border-radius: .75rem; background: #1f2937; color: #93c5fd; font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .client-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .client-details { min-width: 0; }
+    .client-name { margin: 0; font-size: 1.125rem; font-weight: 700; }
+    .client-publisher { margin: .35rem 0 0; color: #cbd5e1; font-size: .9rem; }
+    .client-id { margin: .5rem 0 0; color: #9ca3af; font-size: .75rem; line-height: 1.4; overflow-wrap: anywhere; }
+    .identity-help { margin: 0 0 1.25rem; color: #cbd5e1; font-size: .9rem; line-height: 1.4; }
+    button { border: 0; border-radius: .4rem; padding: .7rem 1rem; font: inherit; cursor: pointer; }
     .approve { background: #2563eb; color: white; } .deny { background: #4b5563; color: white; }
   </style>
   <script nonce="{{.Nonce}}">
@@ -80,12 +84,16 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
 </head>
 <body>
 <main>
-  <h1>Authorize {{.DisplayName}}</h1>
-  {{if .ClientIDHost}}<section class="identity" aria-labelledby="client-identity-label">
-    <p id="client-identity-label" class="identity-label">Verify client identity</p>
-    <p class="identity-host"><code>{{.ClientIDHost}}</code></p>
-    <p class="identity-help">The client name above comes from metadata hosted on this domain. Continue only if you recognize and trust it.</p>
-  </section>{{else if .Unnamed}}<p class="muted">Client ID: <code>{{.ClientID}}</code></p>{{end}}
+  <h1>Allow {{.DisplayName}} to access Starlogz?</h1>
+  <section class="identity" aria-label="Client identity">
+    <div class="client-logo">{{if .ClientLogoBase64}}<img src="data:image/png;base64,{{.ClientLogoBase64}}" width="64" height="64" alt="">{{else}}<span aria-hidden="true">App</span>{{end}}</div>
+    <div class="client-details">
+      <p class="client-name">{{.DisplayName}}</p>
+      {{if .ClientIDHost}}<p class="client-publisher">Published by <code>{{.ClientIDHost}}</code></p>{{end}}
+      {{if .ClientID}}<p class="client-id">Client ID: <code>{{.ClientID}}</code></p>{{end}}
+    </div>
+  </section>
+  {{if .ClientIDHost}}<p class="identity-help">Starlogz fetched these client details from the domain above. Continue only if you recognize and trust it.</p>{{end}}
   <p>This client is requesting access to Starlogz.</p>
   <h2>Redirect destination</h2>
   <code>{{.RedirectURI}}</code>
@@ -94,8 +102,8 @@ var authorizationConfirmationTemplate = template.Must(template.New("authorizatio
   <form id="authorization-confirmation" method="post" action="` + confirmationPath + `">
     <input type="hidden" name="token" value="{{.Token}}">
     <div class="actions">
-      <button class="approve" type="submit" name="decision" value="` + confirmationDecisionApprove + `">Continue</button>
-      <button class="deny" type="submit" name="decision" value="` + confirmationDecisionDeny + `">Cancel</button>
+      <button class="approve" type="submit" name="decision" value="` + confirmationDecisionApprove + `">Allow access</button>
+      <button class="deny" type="submit" name="decision" value="` + confirmationDecisionDeny + `">Deny</button>
     </div>
   </form>
 </main>
@@ -108,14 +116,15 @@ type confirmationScope struct {
 }
 
 type confirmationPageData struct {
-	Nonce        string
-	Token        string
-	DisplayName  string
-	Unnamed      bool
-	ClientID     string
-	ClientIDHost string
-	RedirectURI  string
-	Scopes       []confirmationScope
+	Nonce            string
+	Token            string
+	DisplayName      string
+	Unnamed          bool
+	ClientID         string
+	ClientIDHost     string
+	ClientLogoBase64 string
+	RedirectURI      string
+	Scopes           []confirmationScope
 }
 
 var scopeDescriptions = map[string]string{
@@ -168,11 +177,12 @@ func renderAuthorizationConfirmation(w http.ResponseWriter, pending *store.Pendi
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' "+formActionSource+"; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' "+formActionSource+"; img-src data:; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'")
 	return authorizationConfirmationTemplate.Execute(w, confirmationPageData{
 		Nonce: nonce, Token: token, DisplayName: displayName, Unnamed: unnamed,
 		ClientID: pending.ClientID, ClientIDHost: clientIDHost,
-		RedirectURI: pending.RedirectURI, Scopes: scopes,
+		ClientLogoBase64: base64.StdEncoding.EncodeToString(pending.ClientLogoPNG),
+		RedirectURI:      pending.RedirectURI, Scopes: scopes,
 	})
 }
 
