@@ -86,6 +86,7 @@ type Store interface {
 	ListInsights(ctx context.Context, p ListInsightsParams) (*InsightPage, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
 	GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*ProjectDashboard, error)
+	GetOperationsOverview(ctx context.Context, limit int) (*OperationsOverview, error)
 
 	SaveClient(ctx context.Context, c OAuthClient) error
 	UpsertClient(ctx context.Context, c OAuthClient) error
@@ -380,6 +381,40 @@ type ProjectDashboard struct {
 	TopTags        []CountBucket
 	RecentActivity []ActivityBucket
 	RecentInsights []*Insight
+}
+
+// OperationsOverview contains credential-free service-wide operational data.
+type OperationsOverview struct {
+	ActiveWebSessions int
+	ActiveOAuthGrants int
+	RecentWebSessions []*WebSessionSummary
+	RecentOAuthGrants []*OAuthGrantSummary
+}
+
+type WebSessionSummary struct {
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	Login         string
+	DisplayName   string
+	CreatedAt     time.Time
+	LastSeenAt    time.Time
+	IdleExpiresAt time.Time
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
+	Active        bool
+}
+
+type OAuthGrantSummary struct {
+	UserID              uuid.UUID
+	Login               string
+	DisplayName         string
+	ClientID            string
+	ClientName          string
+	Scope               string
+	JWTExpiresAt        time.Time
+	RefreshTokenExpires time.Time
+	UpdatedAt           time.Time
+	Active              bool
 }
 
 // Grant holds a single authorization grant with the associated GitHub App tokens.

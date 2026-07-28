@@ -70,6 +70,17 @@ variable "github_client_id" {
   type        = string
 }
 
+variable "operator_github_ids" {
+  description = "GitHub numeric IDs allowed to access service-wide operations."
+  type        = list(number)
+  default     = []
+
+  validation {
+    condition     = alltrue([for id in var.operator_github_ids : id > 0 && floor(id) == id])
+    error_message = "operator_github_ids must contain positive integer GitHub IDs."
+  }
+}
+
 variable "lambda_web_adapter_layer_arn" {
   description = "ARN of the AWS Lambda Web Adapter layer for the target region and architecture. See https://github.com/awslabs/aws-lambda-web-adapter#lwa-arn"
   type        = string

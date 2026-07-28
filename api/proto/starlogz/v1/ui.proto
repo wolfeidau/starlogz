@@ -36,6 +36,10 @@ service UIService {
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  rpc GetOperationsOverview(GetOperationsOverviewRequest) returns (GetOperationsOverviewResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 message GetSessionRequest {}
@@ -48,6 +52,7 @@ message GetSessionResponse {
   string display_name = 5;
   string avatar_url = 6;
   string profile_url = 7;
+  bool is_operator = 8;
 }
 
 message ListProjectsRequest {}
@@ -190,4 +195,41 @@ message ListTagsRequest {
 
 message ListTagsResponse {
   repeated CountBucket tags = 1;
+}
+
+message GetOperationsOverviewRequest {
+  int32 limit = 1;
+}
+
+message WebSessionSummary {
+  string id = 1;
+  string user_id = 2;
+  string login = 3;
+  string display_name = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp last_seen_at = 6;
+  google.protobuf.Timestamp idle_expires_at = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  google.protobuf.Timestamp revoked_at = 9;
+  bool active = 10;
+}
+
+message OAuthGrantSummary {
+  string user_id = 1;
+  string login = 2;
+  string display_name = 3;
+  string client_id = 4;
+  string client_name = 5;
+  string scope = 6;
+  google.protobuf.Timestamp jwt_expires_at = 7;
+  google.protobuf.Timestamp refresh_token_expires_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  bool active = 10;
+}
+
+message GetOperationsOverviewResponse {
+  int32 active_web_sessions = 1;
+  int32 active_oauth_grants = 2;
+  repeated WebSessionSummary recent_web_sessions = 3;
+  repeated OAuthGrantSummary recent_oauth_grants = 4;
 }

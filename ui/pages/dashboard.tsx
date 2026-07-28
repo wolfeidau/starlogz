@@ -11,6 +11,7 @@ import type {
 } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
 import {
   getInsight,
+  getOperationsOverview,
   getProjectDashboard,
   getSession,
   listProjects,
@@ -23,6 +24,7 @@ import {
 } from "./dashboard_pagination";
 import { formatTimestamp, RenderedMarkdown } from "./insight_content";
 import { InsightDetail } from "./insight_detail";
+import { OperationsView } from "./operations";
 import "./dashboard.css";
 
 function LoginView() {
@@ -183,10 +185,11 @@ function ProjectSelector({
 function DashboardView() {
   const session = useQuery(getSession, {});
   const isAuthenticated = Boolean(session.data) && !session.error;
+  const operationsRoute = window.location.pathname === "/admin/operations";
   const projectsQuery = useQuery(
     listProjects,
     {},
-    { enabled: isAuthenticated },
+    { enabled: isAuthenticated && !operationsRoute },
   );
   const projects = projectsQuery.data?.projects ?? [];
   const { activeProject, detailSelector, navigate } =
@@ -222,12 +225,54 @@ function DashboardView() {
         isAuthenticated && activeProject !== "" && detailSelector !== null,
     },
   );
+  const operations = useQuery(
+    getOperationsOverview,
+    { limit: 50 },
+    {
+      enabled:
+        isAuthenticated && operationsRoute && Boolean(session.data?.isOperator),
+    },
+  );
 
   if (session.error) {
     return <LoginView />;
   }
-  if (session.isLoading || projectsQuery.isLoading) {
+  if (session.isLoading || (!operationsRoute && projectsQuery.isLoading)) {
     return <div className="center-state">Loading</div>;
+  }
+  if (operationsRoute) {
+    if (!session.data?.isOperator) {
+      return (
+        <main className="app-shell">
+          <TopBar
+            login={session.data?.login ?? ""}
+            displayName={session.data?.displayName ?? ""}
+            avatarUrl={session.data?.avatarUrl ?? ""}
+            isOperator={false}
+            activeView="operations"
+          />
+          <section className="empty-panel">
+            Service-operator access is required.
+          </section>
+        </main>
+      );
+    }
+    return (
+      <main className="app-shell">
+        <TopBar
+          login={session.data.login}
+          displayName={session.data.displayName}
+          avatarUrl={session.data.avatarUrl}
+          isOperator={session.data.isOperator}
+          activeView="operations"
+        />
+        <OperationsView
+          overview={operations.data}
+          loading={operations.isLoading}
+          error={operations.error}
+        />
+      </main>
+    );
   }
   if (projects.length === 0) {
     return (
@@ -236,6 +281,8 @@ function DashboardView() {
           login={session.data?.login ?? ""}
           displayName={session.data?.displayName ?? ""}
           avatarUrl={session.data?.avatarUrl ?? ""}
+          isOperator={session.data?.isOperator ?? false}
+          activeView="insights"
         />
         <section className="empty-panel">No projects yet.</section>
       </main>
@@ -251,6 +298,8 @@ function DashboardView() {
         login={session.data?.login ?? ""}
         displayName={session.data?.displayName ?? ""}
         avatarUrl={session.data?.avatarUrl ?? ""}
+        isOperator={session.data?.isOperator ?? false}
+        activeView="insights"
       />
 
       <section className="toolbar">
@@ -365,18 +414,40 @@ function TopBar({
   login,
   displayName,
   avatarUrl,
+  isOperator,
+  activeView,
 }: {
   login: string;
   displayName: string;
   avatarUrl: string;
+  isOperator: boolean;
+  activeView: "insights" | "operations";
 }) {
   return (
     <header className="topbar">
       <div>
         <p className="eyebrow">starlogz</p>
-        <h1>Insights Dashboard</h1>
+        <h1>
+          {activeView === "operations" ? "Operations" : "Insights Dashboard"}
+        </h1>
       </div>
       <div className="topbar-actions">
+        <nav className="app-nav" aria-label="Primary">
+          <a
+            className={activeView === "insights" ? "active" : undefined}
+            href="/dashboard"
+          >
+            Insights
+          </a>
+          {isOperator && (
+            <a
+              className={activeView === "operations" ? "active" : undefined}
+              href="/admin/operations"
+            >
+              Operations
+            </a>
+          )}
+        </nav>
         {avatarUrl && <img className="user-avatar" src={avatarUrl} alt="" />}
         <span>{displayName || login}</span>
         <form action="/logout" method="post">

@@ -31,6 +31,7 @@ type HTTPCmd struct {
 	RetiredRefreshTokenRetention time.Duration `help:"How long hashed retired refresh tokens are retained for refresh diagnostics." default:"24h" env:"RETIRED_REFRESH_TOKEN_RETENTION"`
 	UISessionIdleTTL             time.Duration `help:"How long an inactive web UI session remains valid." default:"168h" env:"UI_SESSION_IDLE_TTL"`
 	UISessionTTL                 time.Duration `help:"Maximum lifetime of a web UI session." default:"720h" env:"UI_SESSION_TTL"`
+	OperatorGitHubIDs            []int64       `help:"GitHub numeric IDs allowed to access service operations." env:"OPERATOR_GITHUB_IDS" sep:","`
 	EventBusName                 string        `help:"EventBridge bus for privacy-safe wide events; empty disables publishing." env:"EVENT_BUS_NAME"`
 	Environment                  string        `help:"Deployment environment included in wide events." default:"local" env:"ENVIRONMENT"`
 }
@@ -94,6 +95,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		RetiredRefreshTokenRetention: &c.RetiredRefreshTokenRetention,
 		UISessionIdleTTL:             c.UISessionIdleTTL,
 		UISessionTTL:                 c.UISessionTTL,
+		OperatorGitHubIDs:            c.OperatorGitHubIDs,
 		SentryHandler:                globals.SentryHandler,
 		Events:                       eventEmitter,
 	})

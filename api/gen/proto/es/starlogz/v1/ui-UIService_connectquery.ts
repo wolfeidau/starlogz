@@ -43,3 +43,8 @@ export const listInsightHistory = UIService.method.listInsightHistory;
  * @generated from rpc starlogz.v1.UIService.ListTags
  */
 export const listTags = UIService.method.listTags;
+
+/**
+ * @generated from rpc starlogz.v1.UIService.GetOperationsOverview
+ */
+export const getOperationsOverview = UIService.method.getOperationsOverview;

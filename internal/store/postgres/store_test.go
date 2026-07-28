@@ -2091,6 +2091,56 @@ func TestGetProjectDashboard(t *testing.T) {
 	require.Zero(t, tagCounts["deleted"])
 }
 
+func TestGetOperationsOverview(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 76, Email: "operator@example.com", Login: "operator", DisplayName: "Operator",
+	})
+	require.NoError(t, err)
+	now := time.Now()
+
+	_, err = st.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken("active-operations-session"), UserID: user.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+	_, err = st.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken("revoked-operations-session"), UserID: user.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.RevokeWebSessionByTokenHash(ctx, store.HashSessionToken("revoked-operations-session")))
+
+	clientID := "operations-client"
+	require.NoError(t, st.SaveClient(ctx, store.OAuthClient{
+		ClientID: clientID, ClientName: "Operations Client",
+		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"authorization_code", "refresh_token"},
+		ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: "none", Scope: "insights:read",
+		IssuedAt: now,
+	}))
+	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
+		JTI: "operations-jti", UserID: user.ID, OurRefreshToken: "operations-refresh",
+		ClientID: clientID, Scope: "insights:read", AccessToken: "github-access",
+		RefreshToken: "github-refresh", AccessTokenExpiry: now.Add(time.Hour),
+		RefreshTokenExpiry: now.Add(24 * time.Hour), JWTExpiry: now.Add(15 * time.Minute),
+	}))
+
+	overview, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, overview.ActiveWebSessions)
+	require.Equal(t, 1, overview.ActiveOAuthGrants)
+	require.Len(t, overview.RecentWebSessions, 2)
+	require.Len(t, overview.RecentOAuthGrants, 1)
+
+	grant := overview.RecentOAuthGrants[0]
+	require.Equal(t, user.ID, grant.UserID)
+	require.Equal(t, "operator", grant.Login)
+	require.Equal(t, "Operations Client", grant.ClientName)
+	require.Equal(t, "insights:read", grant.Scope)
+	require.True(t, grant.Active)
+}
+
 func TestUpdateInsight(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()

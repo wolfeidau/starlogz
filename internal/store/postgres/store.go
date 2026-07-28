@@ -1767,6 +1767,97 @@ func (s *Store) GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*
 	return out, nil
 }
 
+func (s *Store) GetOperationsOverview(ctx context.Context, limit int) (*store.OperationsOverview, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	out := &store.OperationsOverview{}
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM web_sessions
+		WHERE revoked_at IS NULL AND idle_expires_at > now() AND expires_at > now()`,
+	).Scan(&out.ActiveWebSessions); err != nil {
+		return nil, fmt.Errorf("count active web sessions: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM grants
+		WHERE our_refresh_token IS NOT NULL AND refresh_token_expiry > now()`,
+	).Scan(&out.ActiveOAuthGrants); err != nil {
+		return nil, fmt.Errorf("count active OAuth grants: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT ws.id, ws.user_id, u.login, u.display_name, ws.created_at, ws.last_seen_at,
+		       ws.idle_expires_at, ws.expires_at, ws.revoked_at,
+		       ws.revoked_at IS NULL AND ws.idle_expires_at > now() AND ws.expires_at > now()
+		FROM web_sessions ws
+		JOIN users u ON u.id = ws.user_id
+		ORDER BY ws.last_seen_at DESC, ws.id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent web sessions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		summary := &store.WebSessionSummary{}
+		var idStr, userIDStr string
+		if err := rows.Scan(
+			&idStr, &userIDStr, &summary.Login, &summary.DisplayName, &summary.CreatedAt,
+			&summary.LastSeenAt, &summary.IdleExpiresAt, &summary.ExpiresAt,
+			&summary.RevokedAt, &summary.Active,
+		); err != nil {
+			return nil, fmt.Errorf("scan web session summary: %w", err)
+		}
+		if summary.ID, err = uuid.Parse(idStr); err != nil {
+			return nil, fmt.Errorf("parse web session summary id: %w", err)
+		}
+		if summary.UserID, err = uuid.Parse(userIDStr); err != nil {
+			return nil, fmt.Errorf("parse web session summary user id: %w", err)
+		}
+		out.RecentWebSessions = append(out.RecentWebSessions, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recent web sessions: %w", err)
+	}
+	rows.Close()
+
+	rows, err = s.pool.Query(ctx, `
+		SELECT g.user_id, u.login, u.display_name, COALESCE(g.client_id, ''),
+		       COALESCE(c.client_name, ''), g.scope, g.jwt_expiry, g.refresh_token_expiry,
+		       g.updated_at,
+		       g.our_refresh_token IS NOT NULL AND g.refresh_token_expiry > now()
+		FROM grants g
+		JOIN users u ON u.id = g.user_id
+		LEFT JOIN oauth_clients c ON c.client_id = g.client_id
+		ORDER BY g.updated_at DESC, g.jti DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent OAuth grants: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		summary := &store.OAuthGrantSummary{}
+		var userIDStr string
+		if err := rows.Scan(
+			&userIDStr, &summary.Login, &summary.DisplayName, &summary.ClientID,
+			&summary.ClientName, &summary.Scope, &summary.JWTExpiresAt,
+			&summary.RefreshTokenExpires, &summary.UpdatedAt, &summary.Active,
+		); err != nil {
+			return nil, fmt.Errorf("scan OAuth grant summary: %w", err)
+		}
+		if summary.UserID, err = uuid.Parse(userIDStr); err != nil {
+			return nil, fmt.Errorf("parse OAuth grant summary user id: %w", err)
+		}
+		out.RecentOAuthGrants = append(out.RecentOAuthGrants, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recent OAuth grants: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Store) countBuckets(ctx context.Context, query string, projectID uuid.UUID) ([]store.CountBucket, error) {
 	rows, err := s.pool.Query(ctx, query, projectID)
 	if err != nil {
