@@ -1,7 +1,7 @@
 # Insight search
 
 > Status: Current contract
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-28
 > Authority: Behavioral contract; current code and tests provide implementation evidence.
 
 `insight_search` provides project-scoped PostgreSQL full-text search over live
@@ -15,10 +15,19 @@ category, source, update time, and revision. They do not contain an unbounded
 `content` field; callers use `insight_get` to retrieve a selected result in
 full. A short insight may fit entirely inside the bounded snippet.
 
+The optional `detail` input selects the discovery projection:
+
+| Detail | Fragments | Approximate words | UTF-8 byte maximum |
+|---|---:|---:|---:|
+| `standard` | 1 | 40 | 512 |
+| `brief` | 1 | 20 | 256 |
+
+`standard` is the default and preserves the existing response. Both projections
+return the same metadata fields and omit full content.
+
 Snippets use PostgreSQL `ts_headline` with the same text-search configuration
 and query used for matching. Generation occurs after the ranked page is
-selected and is limited to one fragment of approximately 40 words and 512 UTF-8
-bytes. A byte-truncated snippet ends with an ellipsis within that bound.
+selected. A byte-truncated snippet ends with an ellipsis within its bound.
 Highlight markers are disabled. A result matching through tags alone receives
 a bounded leading content fragment.
 
@@ -57,3 +66,15 @@ the MCP boundary.
 Search is limited to the caller's personal organization and the requested
 project. Soft-deleted insights are excluded. The default result limit is 20
 and the maximum is 100.
+
+The optional `exclude_ids` array suppresses already surfaced insights before
+ranking and limiting. It accepts at most 100 valid, non-nil UUIDs. Values are
+canonicalized, deduplicated, and sorted; malformed values fail before the store
+is queried. Unknown IDs and IDs from another project match nothing and disclose
+no existence information. Omitted or empty exclusions preserve existing
+behavior.
+
+Callers own exclusion state. Starlogz does not retain exposure history or create
+server-side recall sessions. A compound-knowledge invocation can accumulate
+returned IDs across focused searches and use `insight_get` only for candidates
+whose full content is required.

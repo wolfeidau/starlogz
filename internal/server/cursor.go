@@ -112,13 +112,13 @@ func insightHistoryFilterHash(projectID, insightID uuid.UUID) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func encodeInsightSearchCursor(projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, cursor *store.InsightSearchCursor) (string, error) {
+func encodeInsightSearchCursor(projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, excludeIDs []uuid.UUID, cursor *store.InsightSearchCursor) (string, error) {
 	updatedAtUS := cursor.UpdatedAt.UnixMicro()
 	rankBits := math.Float32bits(cursor.Rank)
 	payload := cursorPayload{
 		Version:     cursorVersion,
 		Kind:        insightSearchCursorKind,
-		FilterHash:  insightSearchFilterHash(projectID, query, queryMode, tags, tagMode),
+		FilterHash:  insightSearchFilterHash(projectID, query, queryMode, tags, tagMode, excludeIDs),
 		RankBits:    &rankBits,
 		UpdatedAtUS: &updatedAtUS,
 		ID:          cursor.ID.String(),
@@ -130,8 +130,8 @@ func encodeInsightSearchCursor(projectID uuid.UUID, query string, queryMode stor
 	return base64.RawURLEncoding.EncodeToString(encoded), nil
 }
 
-func decodeInsightSearchCursor(value string, projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode) (*store.InsightSearchCursor, error) {
-	decoded, err := decodeCursor(value, insightSearchCursorKind, insightSearchFilterHash(projectID, query, queryMode, tags, tagMode))
+func decodeInsightSearchCursor(value string, projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, excludeIDs []uuid.UUID) (*store.InsightSearchCursor, error) {
+	decoded, err := decodeCursor(value, insightSearchCursorKind, insightSearchFilterHash(projectID, query, queryMode, tags, tagMode, excludeIDs))
 	if err != nil || decoded == nil {
 		return nil, err
 	}
@@ -192,18 +192,28 @@ func canonicalSearchTags(tags []string) []string {
 	return slices.Compact(normalised)
 }
 
-func insightSearchFilterHash(projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode) string {
+func canonicalSearchExcludeIDs(ids []uuid.UUID) []uuid.UUID {
+	canonical := slices.Clone(ids)
+	slices.SortFunc(canonical, func(a, b uuid.UUID) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	return slices.Compact(canonical)
+}
+
+func insightSearchFilterHash(projectID uuid.UUID, query string, queryMode store.SearchQueryMode, tags []string, tagMode store.SearchTagMode, excludeIDs []uuid.UUID) string {
 	filter, _ := json.Marshal(struct {
-		Kind      string                `json:"operation"`
-		ProjectID uuid.UUID             `json:"project_id"`
-		Query     string                `json:"query"`
-		QueryMode store.SearchQueryMode `json:"query_mode"`
-		Tags      []string              `json:"tags"`
-		TagMode   store.SearchTagMode   `json:"tag_mode"`
+		Kind       string                `json:"operation"`
+		ProjectID  uuid.UUID             `json:"project_id"`
+		Query      string                `json:"query"`
+		QueryMode  store.SearchQueryMode `json:"query_mode"`
+		Tags       []string              `json:"tags"`
+		TagMode    store.SearchTagMode   `json:"tag_mode"`
+		ExcludeIDs []uuid.UUID           `json:"exclude_ids,omitempty"`
 	}{
 		Kind: insightSearchCursorKind, ProjectID: projectID,
 		Query: query, QueryMode: queryMode,
 		Tags: canonicalSearchTags(tags), TagMode: tagMode,
+		ExcludeIDs: canonicalSearchExcludeIDs(excludeIDs),
 	})
 	sum := sha256.Sum256(filter)
 	return base64.RawURLEncoding.EncodeToString(sum[:])

@@ -1,7 +1,7 @@
 # Codex compound-knowledge plugin
 
 > Status: Implemented decision
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-28
 > Authority: Historical rationale and lasting constraints; the packaged skill, plugin manifests, and README define current implementation details.
 
 ## Context
@@ -25,13 +25,18 @@ invoked, it follows this lifecycle:
 
 1. Derive the project slug from the current repository unless the user supplies
    one.
-2. Run one focused search with five compact results, broadening once only when
-   missing context creates material risk.
-3. Retrieve full content only for selected results and verify it against user
+2. Run focused searches with five brief results while tracking every surfaced
+   insight ID within the invocation.
+3. Pass accumulated IDs as exclusions on each later search, and search again
+   only to address a distinct unresolved question.
+4. Retrieve full content only for selected results and verify it against user
    instructions and current repository evidence.
-4. Persist at most one reusable, specific, verified, concise result when the
+5. Stop at sufficient context, exhaustion, no remaining uncertainty, or 100
+   surfaced IDs. Fall back to one focused and at most one broader search when
+   the server lacks the additive inputs.
+6. Persist at most one reusable, specific, verified, concise result when the
    repository does not already preserve it.
-5. Continue safely with repository-local context when Starlogz is unavailable.
+7. Continue safely with repository-local context when Starlogz is unavailable.
 
 Repository files remain authoritative. The skill never stores credentials,
 access tokens, private keys, secrets, raw logs, speculative findings, or
@@ -69,5 +74,6 @@ prior project knowledge would help. Other agent integrations remain separate
 packages even when they share the same concise knowledge policy.
 
 The repository ships the marketplace entry, plugin manifest, MCP dependency
-metadata, and explicit compound-knowledge skill. The README documents
-installation and on-demand use during Starlogz development.
+metadata, and explicit compound-knowledge skill. Version `0.2.0` adds
+invocation-local duplicate suppression and progressive brief discovery. The
+README documents installation and on-demand use during Starlogz development.

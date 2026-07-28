@@ -27,7 +27,7 @@ All tools require `insights:read`. Write tools require `insights:write`.
 | `insight_get` | `insights:read` | Retrieves one insight by ID or key with bounded outgoing links and backlinks. |
 | `insight_history` | `insights:read` | Lists immutable revisions for an insight by ID, including soft-deleted insights, with opaque cursor continuation. |
 | `insight_restore` | `insights:write` | Restores an earlier snapshot as a new live revision. Requires `expected_revision`. |
-| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns bounded snippets and metadata in deterministic relevance order with optional opaque cursor continuation; use `insight_get` for full content. |
+| `insight_search` | `insights:read` | Full-text search over live insights using PostgreSQL `tsvector`. Returns standard or brief bounded snippets in deterministic relevance order, supports caller-carried ID exclusions and optional opaque cursor continuation, and uses `insight_get` for full content. |
 | `insight_list` | `insights:read` | Lists live insights by most recent update. Optional tag filter and opaque cursor continuation. |
 | `insight_update` | `insights:write` | Updates content and/or tags of an existing insight. Accepts optional `expected_revision`. |
 | `insight_delete` | `insights:write` | Soft-deletes an insight by ID and returns its resulting revision. Accepts optional `expected_revision`. |
@@ -92,7 +92,7 @@ Point it at `http://localhost:8088/mcp`. The inspector walks through the full OA
 
 ### Use Starlogz with Codex
 
-Starlogz is used during its own development as persistent project memory for OpenAI Codex. Invoke the optional `$compound-knowledge` skill when a task needs prior decisions, conventions, architecture, known pitfalls, or preferences. It performs one focused compact search, retrieves full records selectively, verifies them against the current repository, and writes at most one concise reusable result.
+Starlogz is used during its own development as persistent project memory for OpenAI Codex. Invoke the optional `$compound-knowledge` skill when a task needs prior decisions, conventions, architecture, known pitfalls, or preferences. It can perform multiple focused brief searches without returning previously surfaced insight IDs, retrieves full records selectively, verifies them against the current repository, and writes at most one concise reusable result.
 
 Install the repository marketplace and plugin:
 
@@ -111,7 +111,7 @@ The plugin is an explicit opt-in Codex workflow, not a runtime dependency of the
 
 ### Use Starlogz with Claude Code
 
-Starlogz is also used during its own development as persistent project memory for Claude Code, via the same `compound-knowledge` skill packaged as a Claude Code plugin. It performs focused compact recall, verifies selected results against the current repository, and preserves at most one concise reusable result.
+Starlogz is also used during its own development as persistent project memory for Claude Code, via the same `compound-knowledge` skill packaged as a Claude Code plugin. It performs duplicate-free progressive recall with brief discovery results, verifies selected records against the current repository, and preserves at most one concise reusable result.
 
 Install the repository marketplace and plugin:
 

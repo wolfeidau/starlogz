@@ -1,7 +1,7 @@
 # Cursor pagination
 
 > Status: Current contract
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-28
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz supports cursor pagination for MCP `insight_list` and
@@ -47,10 +47,17 @@ This preserves traversal for insights written at the Unix epoch or earlier.
 ## Search contract
 
 Search cursors are bound to the project, exact query, effective query mode,
-effective tag mode, and a canonical tag set. Tag order and duplicates are
-ignored because they do not change PostgreSQL array containment or overlap
-semantics. Existing MCP lower-casing is applied before canonicalization;
-Connect retains its existing case-sensitive input behavior.
+effective tag mode, a canonical tag set, and the canonical `exclude_ids` set.
+Tag or exclusion order and duplicates are ignored because they do not change
+the result set. Existing MCP tag lower-casing is applied before
+canonicalization; Connect retains its existing case-sensitive tag input
+behavior. UUID exclusions are parsed, deduplicated, and sorted before hashing.
+
+Omitted and empty exclusion sets preserve the earlier filter-hash encoding, so
+already-issued cursors remain valid. Continuation requires the same exclusions;
+changing them returns `invalid_cursor`. Callers normally start a new search
+when expanding the surfaced-ID set. `detail` is not cursor-bound because it
+changes only the response projection, not membership or ordering.
 
 Search results are ordered by:
 

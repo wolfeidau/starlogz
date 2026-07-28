@@ -68,7 +68,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	}, trackTool(ms, wideevent.ToolInsightRestore, ms.insightRestore))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
-		Description: "Full-text search over live insights in a project. Returns bounded snippets and metadata; use insight_get for full content. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Results are ordered by relevance and support opaque cursor continuation.",
+		Description: "Full-text search over live insights in a project. Returns bounded snippets and metadata; use insight_get for full content. Use detail=brief for progressive discovery and exclude_ids to omit insights already surfaced in the current recall. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Results are ordered by relevance and support opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
 	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
 	mcp.AddTool(ms.server, &mcp.Tool{
@@ -175,13 +175,15 @@ type insightWriteInput struct {
 }
 
 type insightSearchInput struct {
-	Project   string   `json:"project"`
-	Query     string   `json:"query"`
-	QueryMode string   `json:"query_mode"`
-	Tags      []string `json:"tags"`
-	TagMode   string   `json:"tag_mode"`
-	Limit     int      `json:"limit"`
-	Cursor    string   `json:"cursor"`
+	Project    string   `json:"project"`
+	Query      string   `json:"query"`
+	QueryMode  string   `json:"query_mode"`
+	Tags       []string `json:"tags"`
+	TagMode    string   `json:"tag_mode"`
+	Limit      int      `json:"limit"`
+	Cursor     string   `json:"cursor"`
+	ExcludeIDs []string `json:"exclude_ids"`
+	Detail     string   `json:"detail"`
 }
 
 type insightGetInput struct {
@@ -244,6 +246,8 @@ const (
 	revisionResultProperty = "revision"
 	toolErrorCodeProperty  = "code"
 	uuidSchemaFormat       = "uuid"
+	searchDetailStandard   = "standard"
+	searchDetailBrief      = "brief"
 )
 
 var (
@@ -315,6 +319,9 @@ var (
 		s.Properties["tag_mode"].Enum = []any{"all", "any"}
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Properties["exclude_ids"].MaxItems = jsonschema.Ptr(store.MaxInsightSearchExcludeIDs)
+		s.Properties["exclude_ids"].Items.Format = uuidSchemaFormat
+		s.Properties["detail"].Enum = []any{searchDetailStandard, searchDetailBrief}
 		s.Required = []string{projectSchemaProperty, "query"}
 		return s
 	}()
@@ -364,6 +371,21 @@ func normaliseTags(tags []string) []string {
 		out[i] = strings.ToLower(t)
 	}
 	return out
+}
+
+func parseInsightSearchExcludeIDs(values []string) ([]uuid.UUID, error) {
+	if len(values) > store.MaxInsightSearchExcludeIDs {
+		return nil, fmt.Errorf("exclude_ids must contain at most %d entries", store.MaxInsightSearchExcludeIDs)
+	}
+	ids := make([]uuid.UUID, len(values))
+	for i, value := range values {
+		id, err := uuid.Parse(value)
+		if err != nil || id == uuid.Nil {
+			return nil, errors.New("exclude_ids must contain valid non-nil UUIDs")
+		}
+		ids[i] = id
+	}
+	return canonicalSearchExcludeIDs(ids), nil
 }
 
 type tagCountResponse struct {
@@ -735,6 +757,18 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	if ms.store == nil {
 		return nil, nil, fmt.Errorf("database not configured")
 	}
+	excludeIDs, err := parseInsightSearchExcludeIDs(in.ExcludeIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	projection := store.InsightSearchProjectionStandard
+	switch in.Detail {
+	case "", searchDetailStandard:
+	case searchDetailBrief:
+		projection = store.InsightSearchProjectionBrief
+	default:
+		return nil, nil, errors.New("detail must be standard or brief")
+	}
 	_, org, err := ms.resolveUserAndOrg(ctx, req.Extra.TokenInfo.UserID)
 	if err != nil {
 		return nil, nil, err
@@ -760,20 +794,21 @@ func (ms *mcpServer) insightSearch(ctx context.Context, req *mcp.CallToolRequest
 	}
 	query := in.Query
 	tags := canonicalSearchTags(normaliseTags(in.Tags))
-	after, err := decodeInsightSearchCursor(in.Cursor, project.ID, query, queryMode, tags, tagMode)
+	after, err := decodeInsightSearchCursor(in.Cursor, project.ID, query, queryMode, tags, tagMode, excludeIDs)
 	if err != nil {
 		return nil, nil, errInvalidCursor
 	}
 	page, err := ms.store.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: project.ID, Query: query, QueryMode: queryMode,
-		Tags: tags, TagMode: tagMode, Limit: limit, After: after, Compact: true,
+		Tags: tags, TagMode: tagMode, Limit: limit, After: after,
+		ExcludeIDs: excludeIDs, Projection: projection,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("search insights: %w", err)
 	}
 	output := map[string]any{"insights": toInsightSearchHitResponses(page.Hits)}
 	if page.NextCursor != nil {
-		nextCursor, err := encodeInsightSearchCursor(project.ID, query, queryMode, tags, tagMode, page.NextCursor)
+		nextCursor, err := encodeInsightSearchCursor(project.ID, query, queryMode, tags, tagMode, excludeIDs, page.NextCursor)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encode next cursor: %w", err)
 		}
