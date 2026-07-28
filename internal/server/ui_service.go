@@ -144,7 +144,7 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 		limit = 50
 	}
 	tags := canonicalSearchTags(req.Msg.GetTags())
-	after, err := decodeInsightSearchCursor(req.Msg.GetCursor(), project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll)
+	after, err := decodeInsightSearchCursor(req.Msg.GetCursor(), project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, nil)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
 	}
@@ -165,7 +165,7 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 	}
 	response := &starlogzv1.SearchInsightsResponse{Insights: protoInsights}
 	if page.NextCursor != nil {
-		response.NextCursor, err = encodeInsightSearchCursor(project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, page.NextCursor)
+		response.NextCursor, err = encodeInsightSearchCursor(project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, nil, page.NextCursor)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
 		}

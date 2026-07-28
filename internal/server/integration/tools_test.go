@@ -946,6 +946,13 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	requireSchemaNumber(t, 1, schemaProperty(t, insightSearch, "query")["minLength"])
 	require.ElementsMatch(t, []any{"all", "web"}, schemaProperty(t, insightSearch, "query_mode")["enum"])
 	require.ElementsMatch(t, []any{"all", "any"}, schemaProperty(t, insightSearch, "tag_mode")["enum"])
+	require.ElementsMatch(t, []any{"standard", "brief"}, schemaProperty(t, insightSearch, "detail")["enum"])
+	excludeIDs := schemaProperty(t, insightSearch, "exclude_ids")
+	requireSchemaNumber(t, store.MaxInsightSearchExcludeIDs, excludeIDs["maxItems"])
+	require.NotContains(t, excludeIDs, "uniqueItems")
+	excludeIDItems, ok := excludeIDs["items"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "uuid", excludeIDItems["format"])
 	requireSchemaNumber(t, 0, schemaProperty(t, insightSearch, "limit")["minimum"])
 	requireSchemaNumber(t, 100, schemaProperty(t, insightSearch, "limit")["maximum"])
 	require.NotContains(t, schemaProperty(t, insightSearch, "cursor"), "minLength")
@@ -1848,6 +1855,24 @@ func TestInsightSearch_ReturnsBoundedSnippetAndRequiresGetForFullContent(t *test
 	require.Less(t, len(searchText), fullContentBytes/4)
 	require.Less(t, len(searchText), 5000)
 
+	brief := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "compact-search",
+		"query":   "compactneedle",
+		"limit":   5,
+		"detail":  "brief",
+	})
+	require.False(t, brief.IsError, "brief insight_search failed: %s", resultText(t, brief))
+	var briefResponse searchResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, brief)), &briefResponse))
+	require.Len(t, briefResponse.Insights, 5)
+	for _, insight := range briefResponse.Insights {
+		require.Nil(t, insight.Content)
+		require.Contains(t, insight.Snippet, "compactneedle")
+		require.LessOrEqual(t, len(strings.Fields(insight.Snippet)), 20)
+		require.LessOrEqual(t, len(insight.Snippet), store.MaxInsightSearchBriefSnippetBytes)
+		require.True(t, utf8.ValidString(insight.Snippet))
+	}
+
 	get := callTool(t, ctx, sess, "insight_get", map[string]any{
 		"project": "compact-search",
 		"id":      response.Insights[0].ID,
@@ -1872,6 +1897,130 @@ func TestInsightSearch_ReturnsBoundedSnippetAndRequiresGetForFullContent(t *test
 	require.LessOrEqual(t, len(oversizedResponse.Insights[0].Snippet), store.MaxInsightSearchSnippetBytes)
 	require.True(t, utf8.ValidString(oversizedResponse.Insights[0].Snippet))
 	require.True(t, strings.HasSuffix(oversizedResponse.Insights[0].Snippet, "…"))
+}
+
+func TestInsightSearch_ExcludesSurfacedIDs(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "progressive-recall-user")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+	for i := range 5 {
+		wr := callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+			"progressive-recall", fmt.Sprintf("progressiveneedle result %d", i), nil,
+		))
+		require.False(t, wr.IsError, "insight_write failed: %s", resultText(t, wr))
+	}
+	other := callTool(t, ctx, sess, "insight_write", insightWriteArgs(
+		"other-project", "progressiveneedle other project", nil,
+	))
+	require.False(t, other.IsError, "insight_write failed: %s", resultText(t, other))
+
+	type searchResponse struct {
+		Insights []struct {
+			ID        string   `json:"id"`
+			Key       string   `json:"key"`
+			Snippet   string   `json:"snippet"`
+			Tags      []string `json:"tags"`
+			Category  string   `json:"category"`
+			Source    string   `json:"source"`
+			UpdatedAt string   `json:"updated_at"`
+			Revision  int      `json:"revision"`
+			Content   *string  `json:"content"`
+		} `json:"insights"`
+	}
+	search := func(excludeIDs []string) searchResponse {
+		t.Helper()
+		res := callTool(t, ctx, sess, "insight_search", map[string]any{
+			"project":     "progressive-recall",
+			"query":       "progressiveneedle",
+			"limit":       2,
+			"detail":      "brief",
+			"exclude_ids": excludeIDs,
+		})
+		require.False(t, res.IsError, "insight_search failed: %s", resultText(t, res))
+		var response searchResponse
+		require.NoError(t, json.Unmarshal([]byte(resultText(t, res)), &response))
+		return response
+	}
+
+	first := search(nil)
+	require.Len(t, first.Insights, 2)
+	surfaced := []string{first.Insights[0].ID, first.Insights[1].ID}
+	for _, hit := range first.Insights {
+		require.Nil(t, hit.Content)
+		require.NotEmpty(t, hit.Snippet)
+		require.NotEmpty(t, hit.Category)
+		require.NotEmpty(t, hit.Source)
+		require.NotEmpty(t, hit.UpdatedAt)
+		require.Equal(t, 1, hit.Revision)
+	}
+
+	second := search(surfaced)
+	require.Len(t, second.Insights, 2)
+	for _, hit := range second.Insights {
+		require.NotContains(t, surfaced, hit.ID)
+		surfaced = append(surfaced, hit.ID)
+	}
+	withDuplicateRepresentations := search([]string{
+		first.Insights[0].ID,
+		first.Insights[0].ID,
+		strings.ToUpper(first.Insights[1].ID),
+	})
+	require.Len(t, withDuplicateRepresentations.Insights, 2)
+	require.Equal(
+		t,
+		[]string{second.Insights[0].ID, second.Insights[1].ID},
+		[]string{withDuplicateRepresentations.Insights[0].ID, withDuplicateRepresentations.Insights[1].ID},
+	)
+
+	var otherWritten struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, other)), &otherWritten))
+	withUnknownProjectID := search([]string{otherWritten.ID})
+	require.Equal(t, []string{first.Insights[0].ID, first.Insights[1].ID}, []string{withUnknownProjectID.Insights[0].ID, withUnknownProjectID.Insights[1].ID})
+
+	last := search(surfaced)
+	require.Len(t, last.Insights, 1)
+	require.NotContains(t, surfaced, last.Insights[0].ID)
+	surfaced = append(surfaced, last.Insights[0].ID)
+	require.Empty(t, search(surfaced).Insights)
+}
+
+func TestInsightSearch_ValidatesProgressiveRecallInputs(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "progressive-recall-validation-user")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	for name, args := range map[string]map[string]any{
+		"malformed UUID": {
+			"project": "missing", "query": "needle", "exclude_ids": []string{"not-a-uuid"},
+		},
+		"nil UUID": {
+			"project": "missing", "query": "needle", "exclude_ids": []string{uuid.Nil.String()},
+		},
+		"invalid detail": {
+			"project": "missing", "query": "needle", "detail": "full",
+		},
+		"too many exclusions": {
+			"project": "missing", "query": "needle", "exclude_ids": func() []string {
+				ids := make([]string, store.MaxInsightSearchExcludeIDs+1)
+				for i := range ids {
+					ids[i] = uuid.NewString()
+				}
+				return ids
+			}(),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := callTool(t, ctx, sess, "insight_search", args)
+			require.True(t, res.IsError)
+			require.NotContains(t, resultText(t, res), "project not found")
+		})
+	}
 }
 
 func TestInsightSearch_WebQueryAndTagModes(t *testing.T) {
@@ -2157,6 +2306,31 @@ func TestInsightSearch_CursorPagination(t *testing.T) {
 	})
 	require.True(t, invalid.IsError)
 	require.Contains(t, resultText(t, invalid), "invalid_cursor")
+
+	withExclusion := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1,
+		"exclude_ids": []string{seen[2]},
+	})
+	require.False(t, withExclusion.IsError)
+	var excludedFirstPage searchResponse
+	require.NoError(t, json.Unmarshal([]byte(resultText(t, withExclusion)), &excludedFirstPage))
+	require.NotEmpty(t, excludedFirstPage.NextCursor)
+
+	changedDetail := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1,
+		"exclude_ids": []string{strings.ToUpper(seen[2])},
+		"detail":      "brief",
+		"cursor":      excludedFirstPage.NextCursor,
+	})
+	require.False(t, changedDetail.IsError, "detail must not affect cursor binding: %s", resultText(t, changedDetail))
+
+	changedExclusions := callTool(t, ctx, sess, "insight_search", map[string]any{
+		"project": "cursor-search", "query": "searchable", "tags": []string{"go", "page"}, "limit": 1,
+		"exclude_ids": []string{seen[1]},
+		"cursor":      excludedFirstPage.NextCursor,
+	})
+	require.True(t, changedExclusions.IsError)
+	require.Contains(t, resultText(t, changedExclusions), "invalid_cursor")
 }
 
 func TestInsightList_CursorPaginationForPreEpochTimestamps(t *testing.T) {

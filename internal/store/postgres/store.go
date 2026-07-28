@@ -1524,7 +1524,7 @@ func (s *Store) ListInsightHistory(ctx context.Context, p store.ListInsightHisto
 
 // SearchInsights runs a full-text search over live insights in a project.
 func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams) (*store.InsightSearchPage, error) {
-	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", p.ProjectID.String()), slog.Int("query_length", len(p.Query)), slog.String("query_mode", string(p.QueryMode)), slog.Int("tag_count", len(p.Tags)), slog.String("tag_mode", string(p.TagMode)), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil), slog.Bool("compact", p.Compact))
+	s.logger(ctx).DebugContext(ctx, "searching insights", slog.String("project_id", p.ProjectID.String()), slog.Int("query_length", len(p.Query)), slog.String("query_mode", string(p.QueryMode)), slog.Int("tag_count", len(p.Tags)), slog.String("tag_mode", string(p.TagMode)), slog.Int("limit", p.Limit), slog.Bool("after_cursor", p.After != nil), slog.Int("exclude_count", len(p.ExcludeIDs)), slog.Int("projection", int(p.Projection)))
 
 	if p.Limit <= 0 {
 		return &store.InsightSearchPage{}, nil
@@ -1549,15 +1549,26 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 			ELSE tags @> $4
 		  END)`
 	args := []any{p.ProjectID, p.Query, p.QueryMode, p.Tags, p.TagMode}
+	if len(p.ExcludeIDs) > 0 {
+		args = append(args, p.ExcludeIDs)
+		query += fmt.Sprintf(" AND NOT (id = ANY($%d::uuid[]))", len(args))
+	}
 	if p.After != nil {
 		args = append(args, p.After.Rank, p.After.UpdatedAt, p.After.ID)
 		query += fmt.Sprintf(" AND (ranking.rank, updated_at, id) < ($%d::real, $%d, $%d)", len(args)-2, len(args)-1, len(args))
 	}
 	args = append(args, p.Limit+1)
 	query += fmt.Sprintf(" ORDER BY ranking.rank DESC, updated_at DESC, id DESC LIMIT $%d\n)", len(args))
-	args = append(args, p.Compact)
+	compact := p.Projection != store.InsightSearchProjectionFull
+	snippetMaxBytes := store.MaxInsightSearchSnippetBytes
+	headlineOptions := `MaxFragments=1, MaxWords=40, MinWords=15, StartSel="", StopSel=""`
+	if p.Projection == store.InsightSearchProjectionBrief {
+		snippetMaxBytes = store.MaxInsightSearchBriefSnippetBytes
+		headlineOptions = `MaxFragments=1, MaxWords=20, MinWords=8, StartSel="", StopSel=""`
+	}
+	args = append(args, compact)
 	compactParam := len(args)
-	args = append(args, `MaxFragments=1, MaxWords=40, MinWords=15, StartSel="", StopSel=""`)
+	args = append(args, headlineOptions)
 	headlineOptionsParam := len(args)
 	query += fmt.Sprintf(`
 		SELECT id, project_id, key,
@@ -1587,7 +1598,7 @@ func (s *Store) SearchInsights(ctx context.Context, p store.SearchInsightsParams
 		if err := rows.Scan(&idStr, &projectIDStr, &f.Key, &f.Content, &f.Tags, &f.Category, &f.Source, &createdByStr, &f.CreatedAt, &f.UpdatedAt, &f.Revision, &item.hit.Snippet, &item.rank); err != nil {
 			return nil, fmt.Errorf("scan insight search result: %w", err)
 		}
-		item.hit.Snippet = truncateUTF8(item.hit.Snippet, store.MaxInsightSearchSnippetBytes)
+		item.hit.Snippet = truncateUTF8(item.hit.Snippet, snippetMaxBytes)
 		if f.ID, err = uuid.Parse(idStr); err != nil {
 			return nil, fmt.Errorf("parse insight id: %w", err)
 		}

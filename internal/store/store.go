@@ -23,8 +23,10 @@ var (
 )
 
 const (
-	MaxInsightRevision           = 1<<31 - 1
-	MaxInsightSearchSnippetBytes = 512
+	MaxInsightRevision                = 1<<31 - 1
+	MaxInsightSearchExcludeIDs        = 100
+	MaxInsightSearchSnippetBytes      = 512
+	MaxInsightSearchBriefSnippetBytes = 256
 )
 
 type RevisionConflictError struct {
@@ -222,15 +224,24 @@ type InsightHistoryPage struct {
 }
 
 type SearchInsightsParams struct {
-	ProjectID uuid.UUID
-	Query     string
-	QueryMode SearchQueryMode
-	Tags      []string
-	TagMode   SearchTagMode
-	Limit     int
-	After     *InsightSearchCursor
-	Compact   bool
+	ProjectID  uuid.UUID
+	Query      string
+	QueryMode  SearchQueryMode
+	Tags       []string
+	TagMode    SearchTagMode
+	Limit      int
+	After      *InsightSearchCursor
+	ExcludeIDs []uuid.UUID
+	Projection InsightSearchProjection
 }
+
+type InsightSearchProjection uint8
+
+const (
+	InsightSearchProjectionFull InsightSearchProjection = iota
+	InsightSearchProjectionStandard
+	InsightSearchProjectionBrief
+)
 
 type InsightSearchCursor struct {
 	Rank      float32

@@ -1570,7 +1570,7 @@ func TestSearchInsightsCompactProjection(t *testing.T) {
 
 	compact, err := st.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: p.ID, Query: "compactneedle", QueryMode: store.SearchQueryModeAll,
-		TagMode: store.SearchTagModeAll, Limit: 5, Compact: true,
+		TagMode: store.SearchTagModeAll, Limit: 5, Projection: store.InsightSearchProjectionStandard,
 	})
 	require.NoError(t, err)
 	require.Len(t, compact.Hits, 1)
@@ -1581,7 +1581,7 @@ func TestSearchInsightsCompactProjection(t *testing.T) {
 
 	tagOnly, err := st.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: p.ID, Query: "tagneedle", QueryMode: store.SearchQueryModeAll,
-		TagMode: store.SearchTagModeAll, Limit: 5, Compact: true,
+		TagMode: store.SearchTagModeAll, Limit: 5, Projection: store.InsightSearchProjectionStandard,
 	})
 	require.NoError(t, err)
 	require.Len(t, tagOnly.Hits, 1)
@@ -1591,13 +1591,99 @@ func TestSearchInsightsCompactProjection(t *testing.T) {
 
 	oversized, err := st.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: p.ID, Query: "oversizedneedle", QueryMode: store.SearchQueryModeAll,
-		TagMode: store.SearchTagModeAll, Limit: 5, Compact: true,
+		TagMode: store.SearchTagModeAll, Limit: 5, Projection: store.InsightSearchProjectionStandard,
 	})
 	require.NoError(t, err)
 	require.Len(t, oversized.Hits, 1)
 	require.LessOrEqual(t, len(oversized.Hits[0].Snippet), store.MaxInsightSearchSnippetBytes)
 	require.True(t, utf8.ValidString(oversized.Hits[0].Snippet))
 	require.True(t, strings.HasSuffix(oversized.Hits[0].Snippet, "…"))
+
+	brief, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "compactneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5, Projection: store.InsightSearchProjectionBrief,
+	})
+	require.NoError(t, err)
+	require.Len(t, brief.Hits, 1)
+	require.Empty(t, brief.Hits[0].Insight.Content)
+	require.Contains(t, brief.Hits[0].Snippet, "compactneedle")
+	require.LessOrEqual(t, len(strings.Fields(brief.Hits[0].Snippet)), 20)
+	require.LessOrEqual(t, len(brief.Hits[0].Snippet), store.MaxInsightSearchBriefSnippetBytes)
+
+	tagOnlyBrief, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "tagneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5, Projection: store.InsightSearchProjectionBrief,
+	})
+	require.NoError(t, err)
+	require.Len(t, tagOnlyBrief.Hits, 1)
+	require.NotEmpty(t, tagOnlyBrief.Hits[0].Snippet)
+	require.LessOrEqual(t, len(strings.Fields(tagOnlyBrief.Hits[0].Snippet)), 20)
+
+	oversizedBrief, err := st.SearchInsights(ctx, store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "oversizedneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 5, Projection: store.InsightSearchProjectionBrief,
+	})
+	require.NoError(t, err)
+	require.Len(t, oversizedBrief.Hits, 1)
+	require.LessOrEqual(t, len(oversizedBrief.Hits[0].Snippet), store.MaxInsightSearchBriefSnippetBytes)
+	require.True(t, utf8.ValidString(oversizedBrief.Hits[0].Snippet))
+	require.True(t, strings.HasSuffix(oversizedBrief.Hits[0].Snippet, "…"))
+}
+
+func TestSearchInsightsExcludesIDsBeforeLimit(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 34)
+
+	for i := range 4 {
+		_, err := st.WriteInsight(ctx, store.WriteInsightParams{
+			ProjectID: p.ID,
+			Content:   fmt.Sprintf("recallneedle result %d", i),
+			Tags:      []string{"recall"},
+			CreatedBy: u.ID,
+		})
+		require.NoError(t, err)
+	}
+
+	base := store.SearchInsightsParams{
+		ProjectID: p.ID, Query: "recallneedle", QueryMode: store.SearchQueryModeAll,
+		TagMode: store.SearchTagModeAll, Limit: 2,
+		Projection: store.InsightSearchProjectionStandard,
+	}
+	first, err := st.SearchInsights(ctx, base)
+	require.NoError(t, err)
+	require.Len(t, first.Hits, 2)
+
+	excluded := []uuid.UUID{first.Hits[0].Insight.ID, first.Hits[1].Insight.ID}
+	next := base
+	next.ExcludeIDs = excluded
+	second, err := st.SearchInsights(ctx, next)
+	require.NoError(t, err)
+	require.Len(t, second.Hits, 2)
+	for _, hit := range second.Hits {
+		require.NotContains(t, excluded, hit.Insight.ID)
+	}
+
+	duplicateExclusions := base
+	duplicateExclusions.ExcludeIDs = []uuid.UUID{excluded[0], excluded[0], excluded[1], uuid.New()}
+	withDuplicates, err := st.SearchInsights(ctx, duplicateExclusions)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{second.Hits[0].Insight.ID, second.Hits[1].Insight.ID}, []uuid.UUID{withDuplicates.Hits[0].Insight.ID, withDuplicates.Hits[1].Insight.ID})
+
+	allExcluded := base
+	allExcluded.ExcludeIDs = []uuid.UUID{
+		excluded[0], excluded[1],
+		second.Hits[0].Insight.ID, second.Hits[1].Insight.ID,
+	}
+	empty, err := st.SearchInsights(ctx, allExcluded)
+	require.NoError(t, err)
+	require.Empty(t, empty.Hits)
+
+	unknown := base
+	unknown.ExcludeIDs = []uuid.UUID{uuid.New()}
+	unchanged, err := st.SearchInsights(ctx, unknown)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{first.Hits[0].Insight.ID, first.Hits[1].Insight.ID}, []uuid.UUID{unchanged.Hits[0].Insight.ID, unchanged.Hits[1].Insight.ID})
 }
 
 func TestSearchInsightsCursorPaginationAcrossRankAndIDBoundaries(t *testing.T) {

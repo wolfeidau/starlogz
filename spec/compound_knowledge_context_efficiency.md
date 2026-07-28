@@ -1,7 +1,7 @@
 # Compound-knowledge context efficiency
 
 > Status: Implemented decision
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-07-28
 > Authority: Historical design rationale and rollout outcome; current contracts,
 > code, tests, and packaged skills define implementation behavior.
 
@@ -19,6 +19,8 @@ coordinated changes:
 Current behavior is authoritative in:
 
 - [Search](search.md) for the compact MCP search contract;
+- [Duplicate-free progressive compound-knowledge recall](compound_knowledge_progressive_recall.md)
+  for the subsequent multi-search decision;
 - [Codex compound-knowledge plugin](codex_plugin.md) for invocation and recall
   policy; and
 - `plugins/starlogz-codex/skills/compound-knowledge/` and
@@ -64,10 +66,11 @@ Set Codex `allow_implicit_invocation` to `false`. Users invoke the workflow
 through `$compound-knowledge` or the skill picker. Routine Git, status, and
 small-edit requests do not load the skill or call Starlogz automatically.
 
-An invoked workflow runs one focused search with `limit=5`, retrieves full
-content only for selected hits, and broadens once only when missing context
-creates material risk. Repository instructions, specifications, source, and
-tests remain authoritative over recalled records.
+This initial increment used one focused search with `limit=5`, retrieved full
+content only for selected hits, and broadened once only when missing context
+created material risk. The subsequent progressive-recall decision retains
+selective full retrieval while permitting bounded multi-search discovery
+without repeating surfaced IDs.
 
 ### Concise durable writes
 
@@ -114,7 +117,8 @@ the skill for explicit invocation with implicit invocation disabled.
 The following remain separate, evidence-driven decisions rather than unfinished
 scope:
 
-- configurable snippet bounds;
+- arbitrary caller-selected snippet bounds beyond the fixed `standard` and
+  `brief` projections;
 - compact `insight_list` responses;
 - raw regular-expression search; and
 - server-side enforcement of insight length guidance.
