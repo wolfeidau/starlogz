@@ -21,6 +21,7 @@ resource "aws_lambda_function" "starlogz" {
       SERVER_URL           = local.server_url
       CIMD_ENABLED         = tostring(var.cimd_enabled)
       GITHUB_CLIENT_ID     = var.github_client_id
+      OPERATOR_GITHUB_IDS  = join(",", var.operator_github_ids)
       GITHUB_CLIENT_SECRET = var.github_client_secret
       DATABASE_URL         = var.database_url
       TOKEN_ENCRYPTION_KEY = var.token_encryption_key

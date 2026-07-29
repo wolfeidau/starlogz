@@ -26,11 +26,12 @@ func webSessionFromContext(ctx context.Context) (*store.WebSession, bool) {
 }
 
 type uiService struct {
-	store store.Store
+	store     store.Store
+	operators operatorAuthorizer
 }
 
-func newUIService(st store.Store) *uiService {
-	return &uiService{store: st}
+func newUIService(st store.Store, operators operatorAuthorizer) *uiService {
+	return &uiService{store: st, operators: operators}
 }
 
 func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv1.GetSessionRequest]) (*connect.Response[starlogzv1.GetSessionResponse], error) {
@@ -45,6 +46,31 @@ func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv
 		DisplayName: user.DisplayName,
 		AvatarUrl:   user.AvatarURL,
 		ProfileUrl:  user.ProfileURL,
+		IsOperator:  s.operators.Allows(user),
+	}), nil
+}
+
+func (s *uiService) GetOperationsOverview(ctx context.Context, req *connect.Request[starlogzv1.GetOperationsOverviewRequest]) (*connect.Response[starlogzv1.GetOperationsOverviewResponse], error) {
+	_, user, _, err := s.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !s.operators.Allows(user) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+	}
+	limit := int(req.Msg.GetLimit())
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	overview, err := s.store.GetOperationsOverview(ctx, limit)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get operations overview: %w", err))
+	}
+	return connect.NewResponse(&starlogzv1.GetOperationsOverviewResponse{
+		ActiveWebSessions: int32Count(overview.ActiveWebSessions),
+		ActiveOauthGrants: int32Count(overview.ActiveOAuthGrants),
+		RecentWebSessions: toProtoWebSessionSummaries(overview.RecentWebSessions),
+		RecentOauthGrants: toProtoOAuthGrantSummaries(overview.RecentOAuthGrants),
 	}), nil
 }
 
@@ -428,6 +454,36 @@ func toProtoActivityBuckets(buckets []store.ActivityBucket) []*starlogzv1.Activi
 	out := make([]*starlogzv1.ActivityBucket, len(buckets))
 	for i, b := range buckets {
 		out[i] = &starlogzv1.ActivityBucket{Date: b.Date, Count: int32Count(b.Count)}
+	}
+	return out
+}
+
+func toProtoWebSessionSummaries(summaries []*store.WebSessionSummary) []*starlogzv1.WebSessionSummary {
+	out := make([]*starlogzv1.WebSessionSummary, len(summaries))
+	for i, summary := range summaries {
+		out[i] = &starlogzv1.WebSessionSummary{
+			Id: summary.ID.String(), UserId: summary.UserID.String(), Login: summary.Login,
+			DisplayName: summary.DisplayName, CreatedAt: timestamppb.New(summary.CreatedAt),
+			LastSeenAt: timestamppb.New(summary.LastSeenAt), IdleExpiresAt: timestamppb.New(summary.IdleExpiresAt),
+			ExpiresAt: timestamppb.New(summary.ExpiresAt), Active: summary.Active,
+		}
+		if summary.RevokedAt != nil {
+			out[i].RevokedAt = timestamppb.New(*summary.RevokedAt)
+		}
+	}
+	return out
+}
+
+func toProtoOAuthGrantSummaries(summaries []*store.OAuthGrantSummary) []*starlogzv1.OAuthGrantSummary {
+	out := make([]*starlogzv1.OAuthGrantSummary, len(summaries))
+	for i, summary := range summaries {
+		out[i] = &starlogzv1.OAuthGrantSummary{
+			UserId: summary.UserID.String(), Login: summary.Login, DisplayName: summary.DisplayName,
+			ClientId: summary.ClientID, ClientName: summary.ClientName, Scope: summary.Scope,
+			JwtExpiresAt:          timestamppb.New(summary.JWTExpiresAt),
+			RefreshTokenExpiresAt: timestamppb.New(summary.RefreshTokenExpires),
+			UpdatedAt:             timestamppb.New(summary.UpdatedAt), Active: summary.Active,
+		}
 	}
 	return out
 }

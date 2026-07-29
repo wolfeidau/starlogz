@@ -1,7 +1,7 @@
 # OAuth2 refresh-token grant
 
 > Status: Current contract
-> Last reviewed: 2026-07-25
+> Last reviewed: 2026-07-29
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Overview
@@ -12,7 +12,8 @@ access-token JWT. The refresh token allows the client to obtain another
 
 The grant depends on an upstream GitHub App refresh token. Starlogz does not
 issue its own refresh token when GitHub did not supply one or when the registered
-client does not support the `refresh_token` grant.
+client does not support the `refresh_token` grant. In either case, Starlogz
+issues only the access-token JWT and does not persist a grant row.
 
 ## Token and response
 

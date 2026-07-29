@@ -40,6 +40,7 @@ type Config struct {
 	RetiredRefreshTokenRetention *time.Duration
 	UISessionIdleTTL             time.Duration
 	UISessionTTL                 time.Duration
+	OperatorGitHubIDs            []int64
 	SentryHandler                func(http.Handler) http.Handler
 	Events                       *wideevent.Emitter
 }
@@ -127,11 +128,14 @@ func New(cfg Config) (*Server, error) {
 	metadata := oidcServer.ProtectedResourceMeta()
 
 	mux := http.NewServeMux()
-	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(newUIService(cfg.Store))
+	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(
+		newUIService(cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs)),
+	)
 	mux.Handle(uiPath, srv.uiAuthMiddleware(uiHandler))
 	mux.Handle("/public/", publicHandler())
 	mux.HandleFunc("/", srv.redirectIfSession(pageHandler("starlogz")).ServeHTTP)
 	mux.HandleFunc("/dashboard", pageHandler("starlogz dashboard"))
+	mux.HandleFunc("/admin/operations", pageHandler("starlogz operations"))
 	mux.HandleFunc("/login", srv.loginHandler(cfg.BaseURL))
 	mux.HandleFunc("/logout", srv.uiLogoutHandler())
 	mux.HandleFunc("/ui/auth/callback", srv.uiCallbackHandler(oidcServer, cfg.BaseURL))

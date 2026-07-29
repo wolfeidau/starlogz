@@ -52,6 +52,9 @@ const (
 	UIServiceListInsightHistoryProcedure = "/starlogz.v1.UIService/ListInsightHistory"
 	// UIServiceListTagsProcedure is the fully-qualified name of the UIService's ListTags RPC.
 	UIServiceListTagsProcedure = "/starlogz.v1.UIService/ListTags"
+	// UIServiceGetOperationsOverviewProcedure is the fully-qualified name of the UIService's
+	// GetOperationsOverview RPC.
+	UIServiceGetOperationsOverviewProcedure = "/starlogz.v1.UIService/GetOperationsOverview"
 )
 
 // UIServiceClient is a client for the starlogz.v1.UIService service.
@@ -64,6 +67,7 @@ type UIServiceClient interface {
 	GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error)
 	ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error)
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
+	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
 }
 
 // NewUIServiceClient constructs a client for the starlogz.v1.UIService service. By default, it uses
@@ -133,19 +137,27 @@ func NewUIServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getOperationsOverview: connect.NewClient[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse](
+			httpClient,
+			baseURL+UIServiceGetOperationsOverviewProcedure,
+			connect.WithSchema(uIServiceMethods.ByName("GetOperationsOverview")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // uIServiceClient implements UIServiceClient.
 type uIServiceClient struct {
-	getSession          *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listProjects        *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
-	getProjectDashboard *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
-	listInsights        *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
-	searchInsights      *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
-	getInsight          *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
-	listInsightHistory  *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
-	listTags            *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
+	getSession            *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listProjects          *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
+	getProjectDashboard   *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
+	listInsights          *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
+	searchInsights        *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
+	getInsight            *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
+	listInsightHistory    *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
+	listTags              *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
+	getOperationsOverview *connect.Client[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse]
 }
 
 // GetSession calls starlogz.v1.UIService.GetSession.
@@ -188,6 +200,11 @@ func (c *uIServiceClient) ListTags(ctx context.Context, req *connect.Request[v1.
 	return c.listTags.CallUnary(ctx, req)
 }
 
+// GetOperationsOverview calls starlogz.v1.UIService.GetOperationsOverview.
+func (c *uIServiceClient) GetOperationsOverview(ctx context.Context, req *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error) {
+	return c.getOperationsOverview.CallUnary(ctx, req)
+}
+
 // UIServiceHandler is an implementation of the starlogz.v1.UIService service.
 type UIServiceHandler interface {
 	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
@@ -198,6 +215,7 @@ type UIServiceHandler interface {
 	GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error)
 	ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error)
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
+	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
 }
 
 // NewUIServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -263,6 +281,13 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	uIServiceGetOperationsOverviewHandler := connect.NewUnaryHandler(
+		UIServiceGetOperationsOverviewProcedure,
+		svc.GetOperationsOverview,
+		connect.WithSchema(uIServiceMethods.ByName("GetOperationsOverview")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/starlogz.v1.UIService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UIServiceGetSessionProcedure:
@@ -281,6 +306,8 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 			uIServiceListInsightHistoryHandler.ServeHTTP(w, r)
 		case UIServiceListTagsProcedure:
 			uIServiceListTagsHandler.ServeHTTP(w, r)
+		case UIServiceGetOperationsOverviewProcedure:
+			uIServiceGetOperationsOverviewHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -320,4 +347,8 @@ func (UnimplementedUIServiceHandler) ListInsightHistory(context.Context, *connec
 
 func (UnimplementedUIServiceHandler) ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.ListTags is not implemented"))
+}
+
+func (UnimplementedUIServiceHandler) GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetOperationsOverview is not implemented"))
 }

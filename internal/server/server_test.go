@@ -327,6 +327,17 @@ func TestDashboard_Route(t *testing.T) {
 	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
 }
 
+func TestOperations_Route(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := http.Get(ts.URL + "/admin/operations")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+}
+
 func TestPublicAsset_Route(t *testing.T) {
 	ts, _ := testFixture(t)
 
