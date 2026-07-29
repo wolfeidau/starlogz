@@ -55,6 +55,9 @@ const (
 	// UIServiceGetOperationsOverviewProcedure is the fully-qualified name of the UIService's
 	// GetOperationsOverview RPC.
 	UIServiceGetOperationsOverviewProcedure = "/starlogz.v1.UIService/GetOperationsOverview"
+	// UIServiceGetOperationsTelemetryProcedure is the fully-qualified name of the UIService's
+	// GetOperationsTelemetry RPC.
+	UIServiceGetOperationsTelemetryProcedure = "/starlogz.v1.UIService/GetOperationsTelemetry"
 )
 
 // UIServiceClient is a client for the starlogz.v1.UIService service.
@@ -68,6 +71,7 @@ type UIServiceClient interface {
 	ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error)
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
 	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
+	GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error)
 }
 
 // NewUIServiceClient constructs a client for the starlogz.v1.UIService service. By default, it uses
@@ -144,20 +148,28 @@ func NewUIServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getOperationsTelemetry: connect.NewClient[v1.GetOperationsTelemetryRequest, v1.GetOperationsTelemetryResponse](
+			httpClient,
+			baseURL+UIServiceGetOperationsTelemetryProcedure,
+			connect.WithSchema(uIServiceMethods.ByName("GetOperationsTelemetry")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // uIServiceClient implements UIServiceClient.
 type uIServiceClient struct {
-	getSession            *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listProjects          *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
-	getProjectDashboard   *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
-	listInsights          *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
-	searchInsights        *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
-	getInsight            *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
-	listInsightHistory    *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
-	listTags              *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
-	getOperationsOverview *connect.Client[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse]
+	getSession             *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listProjects           *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
+	getProjectDashboard    *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
+	listInsights           *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
+	searchInsights         *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
+	getInsight             *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
+	listInsightHistory     *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
+	listTags               *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
+	getOperationsOverview  *connect.Client[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse]
+	getOperationsTelemetry *connect.Client[v1.GetOperationsTelemetryRequest, v1.GetOperationsTelemetryResponse]
 }
 
 // GetSession calls starlogz.v1.UIService.GetSession.
@@ -205,6 +217,11 @@ func (c *uIServiceClient) GetOperationsOverview(ctx context.Context, req *connec
 	return c.getOperationsOverview.CallUnary(ctx, req)
 }
 
+// GetOperationsTelemetry calls starlogz.v1.UIService.GetOperationsTelemetry.
+func (c *uIServiceClient) GetOperationsTelemetry(ctx context.Context, req *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error) {
+	return c.getOperationsTelemetry.CallUnary(ctx, req)
+}
+
 // UIServiceHandler is an implementation of the starlogz.v1.UIService service.
 type UIServiceHandler interface {
 	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
@@ -216,6 +233,7 @@ type UIServiceHandler interface {
 	ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error)
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
 	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
+	GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error)
 }
 
 // NewUIServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -288,6 +306,13 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	uIServiceGetOperationsTelemetryHandler := connect.NewUnaryHandler(
+		UIServiceGetOperationsTelemetryProcedure,
+		svc.GetOperationsTelemetry,
+		connect.WithSchema(uIServiceMethods.ByName("GetOperationsTelemetry")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/starlogz.v1.UIService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UIServiceGetSessionProcedure:
@@ -308,6 +333,8 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 			uIServiceListTagsHandler.ServeHTTP(w, r)
 		case UIServiceGetOperationsOverviewProcedure:
 			uIServiceGetOperationsOverviewHandler.ServeHTTP(w, r)
+		case UIServiceGetOperationsTelemetryProcedure:
+			uIServiceGetOperationsTelemetryHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -351,4 +378,8 @@ func (UnimplementedUIServiceHandler) ListTags(context.Context, *connect.Request[
 
 func (UnimplementedUIServiceHandler) GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetOperationsOverview is not implemented"))
+}
+
+func (UnimplementedUIServiceHandler) GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetOperationsTelemetry is not implemented"))
 }

@@ -8,9 +8,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/wolfeidau/starlogz/internal/operations"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/store/postgres"
@@ -33,6 +36,7 @@ type HTTPCmd struct {
 	UISessionTTL                 time.Duration `help:"Maximum lifetime of a web UI session." default:"720h" env:"UI_SESSION_TTL"`
 	OperatorGitHubIDs            []int64       `help:"GitHub numeric IDs allowed to access service operations." env:"OPERATOR_GITHUB_IDS" sep:","`
 	EventBusName                 string        `help:"EventBridge bus for privacy-safe wide events; empty disables publishing." env:"EVENT_BUS_NAME"`
+	OperationsLogGroupName       string        `help:"CloudWatch log group queried for operator telemetry; empty disables telemetry." env:"OPERATIONS_LOG_GROUP_NAME"`
 	Environment                  string        `help:"Deployment environment included in wide events." default:"local" env:"ENVIRONMENT"`
 }
 
@@ -65,13 +69,23 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	var awsCfg aws.Config
+	if c.EventBusName != "" || c.OperationsLogGroupName != "" {
+		awsCfg, err = awsconfig.LoadDefaultConfig(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to load AWS config: %w", err)
+		}
+	}
+
 	var eventPublisher wideevent.EventPublisher = wideevent.NoopPublisher{}
 	if c.EventBusName != "" {
-		awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to load AWS config for EventBridge: %w", err)
-		}
 		eventPublisher = wideevent.NewEventBridgePublisher(eventbridge.NewFromConfig(awsCfg), c.EventBusName)
+	}
+	var operationsTelemetry operations.Provider
+	if c.OperationsLogGroupName != "" {
+		operationsTelemetry = operations.NewCloudWatch(
+			cloudwatchlogs.NewFromConfig(awsCfg), c.OperationsLogGroupName,
+		)
 	}
 	serviceVersion := globals.Version
 	if serviceVersion == "" {
@@ -96,6 +110,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		UISessionIdleTTL:             c.UISessionIdleTTL,
 		UISessionTTL:                 c.UISessionTTL,
 		OperatorGitHubIDs:            c.OperatorGitHubIDs,
+		OperationsTelemetry:          operationsTelemetry,
 		SentryHandler:                globals.SentryHandler,
 		Events:                       eventEmitter,
 	})

@@ -13,21 +13,22 @@ resource "aws_lambda_function" "starlogz" {
 
   environment {
     variables = {
-      PORT                 = "8088"
-      LOG_LEVEL            = "INFO"
-      READINESS_CHECK_PATH = "/health"
-      EVENT_BUS_NAME       = aws_cloudwatch_event_bus.wide_events.name
-      ENVIRONMENT          = var.env
-      SERVER_URL           = local.server_url
-      CIMD_ENABLED         = tostring(var.cimd_enabled)
-      GITHUB_CLIENT_ID     = var.github_client_id
-      OPERATOR_GITHUB_IDS  = join(",", var.operator_github_ids)
-      GITHUB_CLIENT_SECRET = var.github_client_secret
-      DATABASE_URL         = var.database_url
-      TOKEN_ENCRYPTION_KEY = var.token_encryption_key
-      JWK_CONTENT          = var.jwk_content
-      SENTRY_DSN           = var.sentry_dsn
-      SENTRY_ENVIRONMENT   = var.sentry_environment
+      PORT                      = "8088"
+      LOG_LEVEL                 = "INFO"
+      READINESS_CHECK_PATH      = "/health"
+      EVENT_BUS_NAME            = aws_cloudwatch_event_bus.wide_events.name
+      OPERATIONS_LOG_GROUP_NAME = aws_cloudwatch_log_group.wide_events.name
+      ENVIRONMENT               = var.env
+      SERVER_URL                = local.server_url
+      CIMD_ENABLED              = tostring(var.cimd_enabled)
+      GITHUB_CLIENT_ID          = var.github_client_id
+      OPERATOR_GITHUB_IDS       = join(",", var.operator_github_ids)
+      GITHUB_CLIENT_SECRET      = var.github_client_secret
+      DATABASE_URL              = var.database_url
+      TOKEN_ENCRYPTION_KEY      = var.token_encryption_key
+      JWK_CONTENT               = var.jwk_content
+      SENTRY_DSN                = var.sentry_dsn
+      SENTRY_ENVIRONMENT        = var.sentry_environment
     }
   }
 }

@@ -145,6 +145,7 @@ All configuration is via environment variables.
 | `UI_SESSION_TTL` | `720h` | No | Maximum lifetime of a dashboard session. Must be at least the idle lifetime. |
 | `OPERATOR_GITHUB_IDS` | (none) | No | Comma-separated GitHub numeric IDs allowed to access service-wide operations. An empty value disables operator access. |
 | `EVENT_BUS_NAME` | (none) | No | EventBridge bus for privacy-safe core-flow events. Omit to use the no-op publisher. |
+| `OPERATIONS_LOG_GROUP_NAME` | (none) | No | CloudWatch wide-event log group queried for operator-only 24-hour aggregates. Omit to disable operational telemetry. |
 | `ENVIRONMENT` | `local` | No | Deployment environment included in wide events. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | No | OTLP collector endpoint. Omit to disable telemetry entirely. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | (none) | No | e.g. `x-honeycomb-team=<key>` |
