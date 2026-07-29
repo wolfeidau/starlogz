@@ -327,6 +327,63 @@ func TestMigrateDropsInsightAuditTrigger(t *testing.T) {
 	require.False(t, triggerExists)
 }
 
+func TestMigrateRemovesNonRefreshGrants(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 4, Email: "legacy-grant@example.com", Login: "legacy-grant",
+	})
+	require.NoError(t, err)
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `
+		ALTER TABLE grants DROP CONSTRAINT grants_our_refresh_token_nonempty;
+		ALTER TABLE grants ALTER COLUMN our_refresh_token DROP NOT NULL;
+		DELETE FROM schema_migrations WHERE version = 26`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO grants (
+			jti, user_id, our_refresh_token, scope, access_token, refresh_token,
+			access_token_expiry, refresh_token_expiry, jwt_expiry
+		) VALUES (
+			'legacy-non-refresh-jti', $1, NULL, 'insights:read', '\x00', '\x00',
+			now() + interval '1 hour', now(), now() + interval '15 minutes'
+		), (
+			'legacy-empty-refresh-jti', $1, '', 'insights:read', '\x00', '\x00',
+			now() + interval '1 hour', now(), now() + interval '15 minutes'
+		)`, user.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM grants
+		WHERE jti IN ('legacy-non-refresh-jti', 'legacy-empty-refresh-jti')`,
+	).Scan(&count))
+	require.Zero(t, count)
+
+	var nullable string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'grants' AND column_name = 'our_refresh_token'`,
+	).Scan(&nullable))
+	require.Equal(t, "NO", nullable)
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO grants (
+			jti, user_id, our_refresh_token, scope, access_token, refresh_token,
+			access_token_expiry, refresh_token_expiry, jwt_expiry
+		) VALUES (
+			'invalid-empty-refresh-jti', $1, '', 'insights:read', '\x00', '\x00',
+			now() + interval '1 hour', now(), now() + interval '15 minutes'
+		)`, user.ID)
+	require.Error(t, err)
+}
+
 func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
@@ -2197,6 +2254,7 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	g := store.Grant{
 		JTI:                "test-jti-001",
 		UserID:             u.ID,
+		OurRefreshToken:    "our-refresh-token-001",
 		AccessToken:        "gha_accesstoken123",
 		RefreshToken:       "ghr_refreshtoken456",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),
@@ -2216,6 +2274,25 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 	require.WithinDuration(t, g.RefreshTokenExpiry, got.RefreshTokenExpiry, time.Second)
 }
 
+func TestUpsertGrant_RequiresRefreshTokens(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 101, Email: "grant-validation@example.com", Login: "grant-validation",
+	})
+	require.NoError(t, err)
+
+	err = st.UpsertGrant(ctx, store.Grant{
+		JTI: "missing-our-refresh", UserID: user.ID, RefreshToken: "github-refresh",
+	})
+	require.EqualError(t, err, "our refresh token is required")
+
+	err = st.UpsertGrant(ctx, store.Grant{
+		JTI: "missing-github-refresh", UserID: user.ID, OurRefreshToken: "our-refresh",
+	})
+	require.EqualError(t, err, "GitHub refresh token is required")
+}
+
 func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
@@ -2227,6 +2304,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	expired := store.Grant{
 		JTI:                "expired-jti",
 		UserID:             u.ID,
+		OurRefreshToken:    "expired-refresh-token",
 		ClientID:           "client-A",
 		AccessToken:        "old-access",
 		RefreshToken:       "old-refresh",
@@ -2240,6 +2318,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	expiredOtherClient := store.Grant{
 		JTI:                "expired-other-client-jti",
 		UserID:             u.ID,
+		OurRefreshToken:    "expired-other-client-refresh-token",
 		ClientID:           "client-B",
 		AccessToken:        "other-access",
 		RefreshToken:       "other-refresh",
@@ -2259,6 +2338,7 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 	fresh := store.Grant{
 		JTI:                "fresh-jti",
 		UserID:             u.ID,
+		OurRefreshToken:    "fresh-refresh-token",
 		ClientID:           "client-A",
 		AccessToken:        "new-access",
 		RefreshToken:       "new-refresh",
@@ -3271,6 +3351,7 @@ func TestDeleteGrant_Success(t *testing.T) {
 	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
 		JTI:                "jti-delete",
 		UserID:             u.ID,
+		OurRefreshToken:    "delete-refresh-token",
 		AccessToken:        "gha_access",
 		RefreshToken:       "ghr_refresh",
 		AccessTokenExpiry:  now.Add(8 * time.Hour),

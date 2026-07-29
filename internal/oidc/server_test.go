@@ -1622,7 +1622,7 @@ func TestTokenHandler_AuthCodeClientWithoutRefreshGrantSkipsGrantPersistence(t *
 	require.Empty(t, gs.calls)
 }
 
-func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
+func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsGrantPersistence(t *testing.T) {
 	gs := &testGrantStore{}
 	srv := newRefreshTestServer(t, gs, nil)
 
@@ -1658,8 +1658,7 @@ func TestTokenHandler_AuthCodeNoGitHubRefreshSkipsOurRefresh(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	_, hasRefresh := resp["refresh_token"]
 	require.False(t, hasRefresh, "no refresh_token should be issued without a GitHub refresh token")
-	require.Len(t, gs.calls, 1)
-	require.Empty(t, gs.calls[0].OurRefreshToken)
+	require.Empty(t, gs.calls)
 }
 
 func TestTokenHandler_RefreshGrant_HappyPath(t *testing.T) {

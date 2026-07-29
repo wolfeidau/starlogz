@@ -288,14 +288,12 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, for
 
 	// Issue an opaque refresh token only when we have a GitHub refresh token to back it.
 	var ourRefreshToken string
-	if s.grants != nil && pc.AccessToken != "" && refreshAllowed {
-		if pc.RefreshToken != "" {
-			ourRefreshToken, err = generateOpaqueToken()
-			if err != nil {
-				log.ErrorContext(ctx, "generate refresh token failed", slog.Any("error", err))
-				writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
-				return
-			}
+	if s.grants != nil && pc.AccessToken != "" && pc.RefreshToken != "" && refreshAllowed {
+		ourRefreshToken, err = generateOpaqueToken()
+		if err != nil {
+			log.ErrorContext(ctx, "generate refresh token failed", slog.Any("error", err))
+			writeOAuthError(w, "server_error", "failed to issue refresh token", http.StatusInternalServerError)
+			return
 		}
 		grantUserID, parseErr := uuid.Parse(pc.Sub)
 		if parseErr != nil {

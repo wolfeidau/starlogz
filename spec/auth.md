@@ -1,7 +1,7 @@
 # OAuth2 authentication and authorization
 
 > Status: Current contract
-> Last reviewed: 2026-07-25
+> Last reviewed: 2026-07-29
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Architecture
@@ -18,7 +18,7 @@ session described in [web_sessions.md](web_sessions.md).
 Production requires a GitHub App with expiring user authorization tokens
 enabled. GitHub access and refresh tokens are encrypted before persistence.
 Without a GitHub refresh token, Starlogz can issue an access-token JWT but
-cannot issue its own refresh token.
+cannot issue its own refresh token or persist a refresh grant.
 
 ## Discovery and authorization flow
 
@@ -275,11 +275,12 @@ must authenticate again. Zero-downtime multi-key rotation is not supported.
 
 ## Persisted credentials
 
-The `grants` table associates a JWT `jti`, internal user UUID, client ID, scope,
-Starlogz refresh token, encrypted GitHub access and refresh tokens, and their
-expiries. `TOKEN_ENCRYPTION_KEY` supplies the 32-byte encryption key. Current
-table shape and encryption mechanics are owned by the migrations and store
-implementation.
+The `grants` table contains only refresh-capable grants. Each row associates a
+JWT `jti`, internal user UUID, client ID, scope, non-empty Starlogz refresh
+token, encrypted GitHub access and refresh tokens, and their expiries.
+Access-token-only JWTs remain stateless and do not create a grant row.
+`TOKEN_ENCRYPTION_KEY` supplies the 32-byte encryption key. Current table shape
+and encryption mechanics are owned by the migrations and store implementation.
 
 Standalone API-key bearer authentication is not implemented. OAuth access-token
 JWTs are the only credentials accepted by the MCP bearer-token verifier.

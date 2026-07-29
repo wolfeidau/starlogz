@@ -432,6 +432,12 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	if s.enc == nil {
 		return fmt.Errorf("encryption key not configured")
 	}
+	if g.OurRefreshToken == "" {
+		return fmt.Errorf("our refresh token is required")
+	}
+	if g.RefreshToken == "" {
+		return fmt.Errorf("GitHub refresh token is required")
+	}
 	encAccess, err := s.enc.Seal(g.AccessToken)
 	if err != nil {
 		return fmt.Errorf("encrypt access token: %w", err)
@@ -447,10 +453,6 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var ourRefreshToken *string
-	if g.OurRefreshToken != "" {
-		ourRefreshToken = &g.OurRefreshToken
-	}
 	var clientID *string
 	if g.ClientID != "" {
 		clientID = &g.ClientID
@@ -471,7 +473,7 @@ func (s *Store) UpsertGrant(ctx context.Context, g store.Grant) error {
 		        refresh_token_expiry  = EXCLUDED.refresh_token_expiry,
 		        jwt_expiry            = EXCLUDED.jwt_expiry,
 		        updated_at            = now()`,
-		g.JTI, g.UserID, ourRefreshToken, clientID, g.Scope, encAccess, encRefresh,
+		g.JTI, g.UserID, g.OurRefreshToken, clientID, g.Scope, encAccess, encRefresh,
 		g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
 	)
 	if err != nil {
@@ -497,7 +499,7 @@ func (s *Store) GetGrant(ctx context.Context, jti string) (*store.Grant, error) 
 		return nil, fmt.Errorf("encryption key not configured")
 	}
 	return s.scanGrant(s.pool.QueryRow(ctx, `
-		SELECT jti, user_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
+		SELECT jti, user_id, our_refresh_token, COALESCE(client_id,''), scope,
 		       access_token, refresh_token,
 		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
 		FROM grants WHERE jti = $1`, jti))
@@ -511,7 +513,7 @@ func (s *Store) GetGrantByRefreshToken(ctx context.Context, token string) (*stor
 		return nil, fmt.Errorf("encryption key not configured")
 	}
 	return s.scanGrant(s.pool.QueryRow(ctx, `
-		SELECT jti, user_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
+		SELECT jti, user_id, our_refresh_token, COALESCE(client_id,''), scope,
 		       access_token, refresh_token,
 		       access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at
 		FROM grants WHERE our_refresh_token = $1`, token))
@@ -655,6 +657,12 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 	if s.enc == nil {
 		return nil, fmt.Errorf("encryption key not configured")
 	}
+	if g.OurRefreshToken == "" {
+		return nil, fmt.Errorf("our refresh token is required")
+	}
+	if g.RefreshToken == "" {
+		return nil, fmt.Errorf("GitHub refresh token is required")
+	}
 	encAccess, err := s.enc.Seal(g.AccessToken)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt access token: %w", err)
@@ -664,10 +672,6 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 		return nil, fmt.Errorf("encrypt refresh token: %w", err)
 	}
 
-	var ourRefreshToken *string
-	if g.OurRefreshToken != "" {
-		ourRefreshToken = &g.OurRefreshToken
-	}
 	var clientID *string
 	if g.ClientID != "" {
 		clientID = &g.ClientID
@@ -695,10 +699,10 @@ func (s *Store) RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWT
 		    jwt_expiry           = $10,
 		    updated_at           = now()
 		WHERE our_refresh_token = $1
-		RETURNING jti, user_id, COALESCE(our_refresh_token,''), COALESCE(client_id,''), scope,
+		RETURNING jti, user_id, our_refresh_token, COALESCE(client_id,''), scope,
 		          access_token, refresh_token,
 		          access_token_expiry, refresh_token_expiry, jwt_expiry, updated_at`,
-		oldToken, g.JTI, ourRefreshToken, clientID, g.Scope,
+		oldToken, g.JTI, g.OurRefreshToken, clientID, g.Scope,
 		encAccess, encRefresh, g.AccessTokenExpiry, g.RefreshTokenExpiry, g.JWTExpiry,
 	).Scan(&updated.JTI, &updatedUserIDStr, &updated.OurRefreshToken, &updated.ClientID, &updated.Scope,
 		&encA, &encR,
@@ -1783,7 +1787,7 @@ func (s *Store) GetOperationsOverview(ctx context.Context, limit int) (*store.Op
 	if err := s.pool.QueryRow(ctx, `
 		SELECT count(*)
 		FROM grants
-		WHERE our_refresh_token IS NOT NULL AND refresh_token_expiry > now()`,
+		WHERE refresh_token_expiry > now()`,
 	).Scan(&out.ActiveOAuthGrants); err != nil {
 		return nil, fmt.Errorf("count active OAuth grants: %w", err)
 	}
@@ -1827,7 +1831,7 @@ func (s *Store) GetOperationsOverview(ctx context.Context, limit int) (*store.Op
 		SELECT g.user_id, u.login, u.display_name, COALESCE(g.client_id, ''),
 		       COALESCE(c.client_name, ''), g.scope, g.jwt_expiry, g.refresh_token_expiry,
 		       g.updated_at,
-		       g.our_refresh_token IS NOT NULL AND g.refresh_token_expiry > now()
+		       g.refresh_token_expiry > now()
 		FROM grants g
 		JOIN users u ON u.id = g.user_id
 		LEFT JOIN oauth_clients c ON c.client_id = g.client_id
