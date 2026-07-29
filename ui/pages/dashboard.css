@@ -67,8 +67,7 @@ select {
   line-height: 1.55;
 }
 
-.primary-link,
-.topbar-actions a {
+.primary-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -86,8 +85,7 @@ select {
     transform 120ms ease;
 }
 
-.primary-link:hover,
-.topbar-actions a:hover {
+.primary-link:hover {
   background: var(--primary-strong);
   box-shadow: 0 10px 22px rgb(37 99 235 / 24%);
   transform: translateY(-1px);
@@ -143,18 +141,32 @@ select {
 }
 
 .app-nav a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
   border-radius: 5px;
   padding: 7px 10px;
+  background: transparent;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
 }
 
-.app-nav a:hover,
-.app-nav a.active {
+.app-nav a:hover {
   color: var(--primary-strong);
-  background: var(--line-soft);
+  background: var(--primary-soft);
+}
+
+.app-nav a.active {
+  color: #ffffff;
+  background: var(--primary);
+}
+
+.app-nav a:focus-visible {
+  outline: 3px solid rgb(37 99 235 / 24%);
+  outline-offset: 2px;
 }
 
 .user-avatar {
