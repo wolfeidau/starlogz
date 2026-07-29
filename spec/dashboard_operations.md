@@ -1,66 +1,54 @@
 # Dashboard operations view
 
-> Status: Proposed
-> Last reviewed: 2026-07-28
-> Authority: Design proposal; no behavioral commitment until accepted and implemented.
+> Status: Current contract
+> Last reviewed: 2026-07-29
+> Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
-## Context
+## Authorization boundary
 
-The dashboard currently exposes project-scoped insight data to the owner of a
-personal organization. Operators also need a service-wide view of recent
-dashboard sessions, OAuth grants, and aggregate MCP tool activity.
+Service-operator access is separate from organization membership and OAuth
+scopes. The `org:admin` MCP scope does not grant access to service operations.
 
-These are different authorization domains. Organization membership and the
-forward-compatible `org:admin` MCP scope do not grant service-operator access.
-Dashboard sessions also do not retain OAuth scopes.
+`OPERATOR_GITHUB_IDS` configures an allowlist of stable GitHub numeric user IDs.
+The server resolves each authenticated dashboard session to its durable user
+record and enforces this allowlist on every operations RPC. An empty allowlist
+disables operator access.
 
-## Proposed authorization boundary
+The dashboard session response includes `is_operator` so the React application
+can show operator navigation. This capability hint is not an authorization
+boundary; a direct request from a non-operator is denied by the server.
 
-The initial service-operator role is an allowlist of stable GitHub numeric IDs
-configured through `OPERATOR_GITHUB_IDS`. The server resolves the authenticated
-dashboard session to its durable user record and checks the allowlist for every
-operations RPC. The UI receives only an `is_operator` capability hint for
-navigation; it is never the enforcement boundary.
+## Read model
 
-An empty allowlist disables service-operator access. Operator responses must not
-contain credentials, token hashes, JWT IDs, authorization parameters, insight
-content, search queries, emails, or raw audit-log JSON.
+The operations overview returns active counts and bounded, most-recent lists for
+browser sessions and refresh-capable OAuth grants. A non-positive or greater
+than 100 requested limit is replaced with 50.
 
-## Proposed read model
+Browser-session summaries include identity references, bounded display fields,
+lifecycle timestamps, revocation state, and derived active status. They omit
+the session token hash.
 
-PostgreSQL supplies recent browser sessions and OAuth grants:
+OAuth-grant summaries include identity references, client ID and registered
+name when available, scope, lifecycle timestamps, and derived active status.
+They omit the Starlogz refresh token, GitHub credentials, token ciphertext, and
+JWT ID. The grants table contains only refresh-capable credentials; stateless
+access-token JWTs do not create a grant row.
 
-- Browser-session rows omit `token_hash` and expose only identity references,
-  bounded display fields, lifecycle timestamps, and derived status.
-- OAuth-grant rows omit Starlogz and GitHub credentials and expose only identity
-  references, client ID and registered name when available, scope, lifecycle
-  timestamps, and derived status.
-- The UI labels the latter as grants rather than sessions. Stateless MCP access
-  tokens and clients without a refresh grant do not have a durable session row.
+Operator responses do not contain authorization parameters, insight content,
+search queries, emails, or raw audit-log JSON.
 
-The existing CloudWatch wide-event log remains the proposed source for aggregate
-OAuth outcomes and MCP tool calls. The server will execute fixed, bounded Logs
-Insights queries, cache the aggregate result briefly, and return no raw log
-events. This avoids duplicating the existing 90-day operational event store.
-A PostgreSQL aggregate read model remains an option if measured query latency or
-scan cost becomes material.
+## UI
 
-## Proposed UI
+`/dashboard` and `/admin/operations` use one React application shell. Operator
+navigation is shown only when `is_operator` is true. The operations route
+displays active counts and recent browser-session and OAuth-grant tables.
 
-`/dashboard` and `/admin/operations` share one React application shell. The
-operations route is visible only when `is_operator` is true and still relies on
-server enforcement.
+Tool-call and OAuth outcome aggregates are not part of the current read model.
+Their proposed data source and visualization approach are described in
+[dashboard_operations_telemetry.md](dashboard_operations_telemetry.md).
 
-Simple categorical bars remain CSS. Time-series charts use modular D3 packages
-such as `d3-scale`, `d3-shape`, and `d3-array`, with React rendering SVG
-declaratively. D3 selection-based DOM mutation is excluded unless a later
-interaction requires it.
+## Related contracts
 
-## References
-
-- [D3 in React and modular imports](https://d3js.org/getting-started)
-- [CloudWatch Logs StartQuery](https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_StartQuery.html)
-- [CloudWatch Logs Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/AnalyzingLogData.html)
-- [Wide event contract](events.md)
-- [Telemetry attribution](telemetry_attribution.md)
+- [OAuth2 authentication and authorization](auth.md)
+- [OAuth2 refresh-token grant](refresh_tokens.md)
 - [Web UI sessions](web_sessions.md)
