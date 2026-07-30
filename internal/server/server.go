@@ -17,6 +17,7 @@ import (
 	starlogzv1connect "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1/starlogzv1connect"
 	"github.com/wolfeidau/starlogz/internal/middleware"
 	"github.com/wolfeidau/starlogz/internal/oidc"
+	"github.com/wolfeidau/starlogz/internal/operations"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"github.com/wolfeidau/starlogz/internal/wideevent"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -41,6 +42,7 @@ type Config struct {
 	UISessionIdleTTL             time.Duration
 	UISessionTTL                 time.Duration
 	OperatorGitHubIDs            []int64
+	OperationsTelemetry          operations.Provider
 	SentryHandler                func(http.Handler) http.Handler
 	Events                       *wideevent.Emitter
 }
@@ -129,7 +131,7 @@ func New(cfg Config) (*Server, error) {
 
 	mux := http.NewServeMux()
 	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(
-		newUIService(cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs)),
+		newUIService(cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs), cfg.OperationsTelemetry),
 	)
 	mux.Handle(uiPath, srv.uiAuthMiddleware(uiHandler))
 	mux.Handle("/public/", publicHandler())

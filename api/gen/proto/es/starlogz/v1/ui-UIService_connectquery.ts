@@ -48,3 +48,8 @@ export const listTags = UIService.method.listTags;
  * @generated from rpc starlogz.v1.UIService.GetOperationsOverview
  */
 export const getOperationsOverview = UIService.method.getOperationsOverview;
+
+/**
+ * @generated from rpc starlogz.v1.UIService.GetOperationsTelemetry
+ */
+export const getOperationsTelemetry = UIService.method.getOperationsTelemetry;

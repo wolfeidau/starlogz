@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	starlogzv1 "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1"
 	"github.com/wolfeidau/starlogz/internal/insightlinks"
+	"github.com/wolfeidau/starlogz/internal/operations"
 	"github.com/wolfeidau/starlogz/internal/store"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -28,10 +29,11 @@ func webSessionFromContext(ctx context.Context) (*store.WebSession, bool) {
 type uiService struct {
 	store     store.Store
 	operators operatorAuthorizer
+	telemetry operations.Provider
 }
 
-func newUIService(st store.Store, operators operatorAuthorizer) *uiService {
-	return &uiService{store: st, operators: operators}
+func newUIService(st store.Store, operators operatorAuthorizer, telemetry operations.Provider) *uiService {
+	return &uiService{store: st, operators: operators, telemetry: telemetry}
 }
 
 func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv1.GetSessionRequest]) (*connect.Response[starlogzv1.GetSessionResponse], error) {
@@ -72,6 +74,27 @@ func (s *uiService) GetOperationsOverview(ctx context.Context, req *connect.Requ
 		RecentWebSessions: toProtoWebSessionSummaries(overview.RecentWebSessions),
 		RecentOauthGrants: toProtoOAuthGrantSummaries(overview.RecentOAuthGrants),
 	}), nil
+}
+
+func (s *uiService) GetOperationsTelemetry(ctx context.Context, _ *connect.Request[starlogzv1.GetOperationsTelemetryRequest]) (*connect.Response[starlogzv1.GetOperationsTelemetryResponse], error) {
+	_, user, _, err := s.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !s.operators.Allows(user) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+	}
+	if s.telemetry == nil {
+		return connect.NewResponse(&starlogzv1.GetOperationsTelemetryResponse{}), nil
+	}
+	snapshot, err := s.telemetry.Get(ctx)
+	if errors.Is(err, operations.ErrUnavailable) {
+		return connect.NewResponse(&starlogzv1.GetOperationsTelemetryResponse{}), nil
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get operations telemetry: %w", err))
+	}
+	return connect.NewResponse(toProtoOperationsTelemetry(snapshot)), nil
 }
 
 func (s *uiService) ListProjects(ctx context.Context, _ *connect.Request[starlogzv1.ListProjectsRequest]) (*connect.Response[starlogzv1.ListProjectsResponse], error) {
@@ -486,6 +509,49 @@ func toProtoOAuthGrantSummaries(summaries []*store.OAuthGrantSummary) []*starlog
 		}
 	}
 	return out
+}
+
+func toProtoOperationsTelemetry(snapshot *operations.Snapshot) *starlogzv1.GetOperationsTelemetryResponse {
+	if snapshot == nil {
+		return &starlogzv1.GetOperationsTelemetryResponse{}
+	}
+	response := &starlogzv1.GetOperationsTelemetryResponse{
+		Available:                 true,
+		GeneratedAt:               timestamppb.New(snapshot.GeneratedAt),
+		WindowStartedAt:           timestamppb.New(snapshot.WindowStartedAt),
+		WindowEndedAt:             timestamppb.New(snapshot.WindowEndedAt),
+		TotalToolCalls:            int32Count(snapshot.TotalToolCalls),
+		FailedToolCalls:           int32Count(snapshot.FailedToolCalls),
+		P95ToolDurationMs:         snapshot.P95ToolDurationMS,
+		SuccessfulDashboardLogins: int32Count(snapshot.SuccessfulDashboardLogins),
+		ToolSeries:                make([]*starlogzv1.OperationsTimeBucket, len(snapshot.ToolSeries)),
+		Tools:                     make([]*starlogzv1.OperationsToolAggregate, len(snapshot.Tools)),
+		OauthFlows:                make([]*starlogzv1.OperationsFlowAggregate, len(snapshot.OAuthFlows)),
+		OauthFailures:             make([]*starlogzv1.OperationsFailureAggregate, len(snapshot.OAuthFailures)),
+	}
+	for i, bucket := range snapshot.ToolSeries {
+		response.ToolSeries[i] = &starlogzv1.OperationsTimeBucket{
+			StartedAt: timestamppb.New(bucket.StartedAt),
+			Success:   int32Count(bucket.Success),
+			Failure:   int32Count(bucket.Failure),
+		}
+	}
+	for i, tool := range snapshot.Tools {
+		response.Tools[i] = &starlogzv1.OperationsToolAggregate{
+			Tool: tool.Tool, Calls: int32Count(tool.Calls), Failures: int32Count(tool.Failures),
+		}
+	}
+	for i, flow := range snapshot.OAuthFlows {
+		response.OauthFlows[i] = &starlogzv1.OperationsFlowAggregate{
+			EventName: flow.EventName, Success: int32Count(flow.Success), Failure: int32Count(flow.Failure),
+		}
+	}
+	for i, failure := range snapshot.OAuthFailures {
+		response.OauthFailures[i] = &starlogzv1.OperationsFailureAggregate{
+			EventName: failure.EventName, Reason: failure.Reason, Count: int32Count(failure.Count),
+		}
+	}
+	return response
 }
 
 func int32Count(n int) int32 {

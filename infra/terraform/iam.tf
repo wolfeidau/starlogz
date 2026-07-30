@@ -43,3 +43,21 @@ resource "aws_iam_role_policy" "lambda_wide_events" {
   role   = aws_iam_role.lambda.id
   policy = data.aws_iam_policy_document.lambda_wide_events.json
 }
+
+data "aws_iam_policy_document" "lambda_operations_telemetry" {
+  statement {
+    actions   = ["logs:StartQuery", "logs:GetQueryResults"]
+    resources = [aws_cloudwatch_log_group.wide_events.arn]
+  }
+
+  statement {
+    actions   = ["logs:StopQuery"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_operations_telemetry" {
+  name   = "cloudwatch-operations-telemetry"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.lambda_operations_telemetry.json
+}

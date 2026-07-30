@@ -12,6 +12,7 @@ import type {
 import {
   getInsight,
   getOperationsOverview,
+  getOperationsTelemetry,
   getProjectDashboard,
   getSession,
   listProjects,
@@ -233,6 +234,14 @@ function DashboardView() {
         isAuthenticated && operationsRoute && Boolean(session.data?.isOperator),
     },
   );
+  const operationsTelemetry = useQuery(
+    getOperationsTelemetry,
+    {},
+    {
+      enabled:
+        isAuthenticated && operationsRoute && Boolean(session.data?.isOperator),
+    },
+  );
 
   if (session.error) {
     return <LoginView />;
@@ -270,6 +279,9 @@ function DashboardView() {
           overview={operations.data}
           loading={operations.isLoading}
           error={operations.error}
+          telemetry={operationsTelemetry.data}
+          telemetryLoading={operationsTelemetry.isLoading}
+          telemetryError={operationsTelemetry.error}
         />
       </main>
     );

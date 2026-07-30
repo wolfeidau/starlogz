@@ -1,35 +1,47 @@
 # Dashboard operations telemetry
 
-> Status: Proposed
+> Status: Current contract
 > Last reviewed: 2026-07-29
-> Authority: Design proposal; no behavioral commitment until accepted and implemented.
+> Authority: Behavioral and security contract; current code, Terraform, and tests provide implementation evidence.
 
-## Context
+## Read model
 
-The current [dashboard operations view](dashboard_operations.md) exposes recent
-dashboard sessions and refresh-capable OAuth grants from PostgreSQL. Operators
-also need aggregate OAuth outcomes and MCP tool activity without exposing raw
-event payloads or duplicating the operational event store.
+The operator dashboard exposes aggregate OAuth, dashboard-login, and MCP
+tool-call activity from the existing CloudWatch wide-event log. Telemetry uses
+a separate `GetOperationsTelemetry` RPC so CloudWatch failure does not prevent
+the PostgreSQL-backed operations overview from loading.
 
-## Proposed read model
+The server executes fixed Logs Insights queries over the preceding 24 hours.
+Callers cannot supply query text, log groups, timestamps, bucket sizes, or
+limits. Results are cached in each server process for 60 seconds. Each refresh
+has a five-second deadline and attempts to stop queries that remain incomplete.
 
-Use the existing CloudWatch wide-event log as the source for aggregate OAuth
-outcomes and MCP tool calls. The server executes fixed, bounded Logs Insights
-queries, briefly caches aggregate results, and returns no raw log events.
+The response contains:
 
-A PostgreSQL aggregate read model remains an option if measured query latency
-or scan cost becomes material.
+- total and failed MCP tool calls;
+- MCP tool-call p95 duration;
+- successful dashboard-session creation count;
+- hourly successful and failed MCP tool-call buckets;
+- per-tool call and failure counts; and
+- OAuth success, failure, and bounded failure-reason counts.
 
-## Proposed visualization
+The response never contains raw log events, `@ptr`, user or client identity,
+request IDs, queries, tokens, credentials, insight content, or arbitrary error
+strings. The existing operator allowlist is enforced on the RPC.
 
-Keep simple categorical bars in CSS. Use direct modular D3 packages such as
-`d3-scale`, `d3-shape`, and `d3-array` for time-series calculations, while
-React renders the SVG declaratively. Avoid D3 selection-based DOM mutation
-unless a later interaction demonstrates a need for it.
+When `OPERATIONS_LOG_GROUP_NAME` is empty, the RPC returns telemetry as
+unavailable without loading AWS configuration. Terraform configures the
+wide-event log group and grants the Lambda role only the query actions required
+to start, retrieve, and stop Logs Insights queries.
 
-This keeps the dependency and runtime surface small without introducing a
-charting framework. Bundle size and accessibility must be verified with the
-first implemented chart.
+## Visualization
+
+The dashboard shows summary cards, an hourly tool-call time series, per-tool
+bars, OAuth flow outcomes, and bounded OAuth failure reasons.
+
+Time-series calculations use direct modular imports from `d3-array`,
+`d3-scale`, and `d3-shape`. React renders the SVG declaratively. D3 does not
+mutate the DOM.
 
 ## References
 

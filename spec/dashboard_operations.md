@@ -43,8 +43,9 @@ search queries, emails, or raw audit-log JSON.
 navigation is shown only when `is_operator` is true. The operations route
 displays active counts and recent browser-session and OAuth-grant tables.
 
-Tool-call and OAuth outcome aggregates are not part of the current read model.
-Their proposed data source and visualization approach are described in
+Tool-call and OAuth outcome aggregates are supplied by a separate, optional
+CloudWatch read model so query failures do not affect PostgreSQL-backed session
+and grant data. Its query, caching, and visualization behavior is described in
 [dashboard_operations_telemetry.md](dashboard_operations_telemetry.md).
 
 ## Related contracts
