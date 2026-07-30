@@ -47,7 +47,7 @@ resource "aws_iam_role_policy" "lambda_wide_events" {
 data "aws_iam_policy_document" "lambda_operations_telemetry" {
   statement {
     actions   = ["logs:StartQuery", "logs:GetQueryResults"]
-    resources = [aws_cloudwatch_log_group.wide_events.arn]
+    resources = ["${aws_cloudwatch_log_group.wide_events.arn}:*"]
   }
 
   statement {

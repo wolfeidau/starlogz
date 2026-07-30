@@ -12,6 +12,7 @@
   --accent: #f59e0b;
   --accent-soft: #fff7ed;
   --chart: #0ea5e9;
+  --failure: #dc2626;
   color-scheme: light;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
@@ -340,15 +341,43 @@ select {
   font-size: 11px;
 }
 
-.chart-axis {
+.chart-axis-line {
   stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-grid-line {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-grid-line-vertical {
+  stroke-dasharray: 2 5;
+}
+
+.chart-axis-label,
+.chart-axis-title {
+  fill: var(--muted);
+}
+
+.chart-axis-title {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.chart-area-success {
+  fill: var(--primary);
+  opacity: 0.08;
 }
 
 .chart-line {
   fill: none;
-  stroke-width: 3;
+  stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .chart-line-success {
@@ -356,7 +385,22 @@ select {
 }
 
 .chart-line-failure {
-  stroke: #dc2626;
+  stroke: var(--failure);
+  stroke-dasharray: 5 4;
+}
+
+.chart-point {
+  fill: var(--surface);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-point-success {
+  stroke: var(--primary);
+}
+
+.chart-point-failure {
+  stroke: var(--failure);
 }
 
 .chart-legend {
@@ -382,8 +426,10 @@ select {
   background: var(--primary);
 }
 
-.legend-failure {
-  background: #dc2626;
+.chart-legend .legend-failure {
+  height: 0;
+  border-top: 2px dashed var(--failure);
+  background: transparent;
 }
 
 .operations-tool-list {

@@ -1,7 +1,7 @@
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { max } from "d3-array";
 import { scaleLinear, scaleUtc } from "d3-scale";
-import { line } from "d3-shape";
+import { area, line } from "d3-shape";
 import type {
   GetOperationsOverviewResponse,
   GetOperationsTelemetryResponse,
@@ -36,14 +36,24 @@ function flowName(eventName: string): string {
     .replaceAll("_", " ");
 }
 
+function chartHour(date: Date): string {
+  return date
+    .toLocaleString([], {
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    .replace(",", "");
+}
+
 function ToolCallChart({
   telemetry,
 }: {
   telemetry: GetOperationsTelemetryResponse;
 }) {
   const width = 720;
-  const height = 220;
-  const margin = { top: 16, right: 20, bottom: 32, left: 38 };
+  const height = 250;
+  const margin = { top: 28, right: 16, bottom: 42, left: 48 };
   const buckets = telemetry.toolSeries.filter((bucket) => bucket.startedAt);
   const start = timestampToDate(buckets[0]?.startedAt);
   const end = timestampToDate(buckets.at(-1)?.startedAt);
@@ -56,17 +66,33 @@ function ToolCallChart({
     return <p className="muted">No tool calls in this window.</p>;
   }
 
+  const maxCalls =
+    max(buckets, (bucket) => bucket.success + bucket.failure) ?? 1;
   const x = scaleUtc()
     .domain([start, end])
     .range([margin.left, width - margin.right]);
   const y = scaleLinear()
-    .domain([0, max(buckets, (bucket) => bucket.success + bucket.failure) ?? 1])
+    .domain([0, maxCalls])
     .nice()
     .range([height - margin.bottom, margin.top]);
+  const tickCount = Math.min(5, buckets.length);
+  const xTicks = Array.from({ length: tickCount }, (_, index) => {
+    if (tickCount === 1) return buckets[0];
+    return buckets[
+      Math.round((index * (buckets.length - 1)) / (tickCount - 1))
+    ];
+  });
+  const yTicks = y.ticks(Math.min(4, maxCalls)).filter(Number.isInteger);
+  const hasFailures = buckets.some((bucket) => bucket.failure > 0);
   const path = (field: "success" | "failure") =>
     line<OperationsTimeBucket>()
       .x((bucket) => x(timestampToDate(bucket.startedAt) ?? start))
       .y((bucket) => y(bucket[field]))(buckets) ?? "";
+  const successArea =
+    area<OperationsTimeBucket>()
+      .x((bucket) => x(timestampToDate(bucket.startedAt) ?? start))
+      .y0(y(0))
+      .y1((bucket) => y(bucket.success))(buckets) ?? "";
 
   return (
     <div>
@@ -77,21 +103,110 @@ function ToolCallChart({
         aria-label="Successful and failed MCP tool calls by hour"
       >
         <title>Successful and failed MCP tool calls by hour</title>
+        <desc>
+          {telemetry.totalToolCalls} tool calls in the last 24 hours, including{" "}
+          {telemetry.failedToolCalls} failures.
+        </desc>
+        <text className="chart-axis-title" x={margin.left} y={14}>
+          Calls per hour
+        </text>
+        {yTicks.map((tick) => (
+          <g className="chart-y-tick" key={tick}>
+            <line
+              className="chart-grid-line"
+              x1={margin.left}
+              x2={width - margin.right}
+              y1={y(tick)}
+              y2={y(tick)}
+            />
+            <text
+              className="chart-axis-label"
+              textAnchor="end"
+              x={margin.left - 10}
+              y={y(tick) + 4}
+            >
+              {tick}
+            </text>
+          </g>
+        ))}
+        {xTicks.map((bucket, index) => {
+          const date = timestampToDate(bucket.startedAt) ?? start;
+          const textAnchor =
+            index === 0
+              ? "start"
+              : index === xTicks.length - 1
+                ? "end"
+                : "middle";
+          return (
+            <g className="chart-x-tick" key={date.toISOString()}>
+              <line
+                className="chart-grid-line chart-grid-line-vertical"
+                x1={x(date)}
+                x2={x(date)}
+                y1={margin.top}
+                y2={height - margin.bottom}
+              />
+              <text
+                className="chart-axis-label"
+                textAnchor={textAnchor}
+                x={x(date)}
+                y={height - 16}
+              >
+                {chartHour(date)}
+              </text>
+            </g>
+          );
+        })}
         <line
-          className="chart-axis"
+          className="chart-axis-line"
+          x1={margin.left}
+          x2={margin.left}
+          y1={margin.top}
+          y2={height - margin.bottom}
+        />
+        <line
+          className="chart-axis-line"
           x1={margin.left}
           x2={width - margin.right}
           y1={height - margin.bottom}
           y2={height - margin.bottom}
         />
+        <path className="chart-area-success" d={successArea} />
         <path className="chart-line chart-line-success" d={path("success")} />
-        <path className="chart-line chart-line-failure" d={path("failure")} />
-        <text x={margin.left} y={height - 8}>
-          {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </text>
-        <text textAnchor="end" x={width - margin.right} y={height - 8}>
-          {end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </text>
+        {hasFailures && (
+          <path className="chart-line chart-line-failure" d={path("failure")} />
+        )}
+        {buckets.map((bucket) => {
+          const date = timestampToDate(bucket.startedAt) ?? start;
+          return (
+            <g key={date.toISOString()}>
+              {bucket.success > 0 && (
+                <circle
+                  className="chart-point chart-point-success"
+                  cx={x(date)}
+                  cy={y(bucket.success)}
+                  r={3.5}
+                >
+                  <title>
+                    {chartHour(date)}: {bucket.success} successful
+                  </title>
+                </circle>
+              )}
+              {bucket.failure > 0 && (
+                <circle
+                  className="chart-point chart-point-failure"
+                  cx={x(date)}
+                  cy={y(bucket.failure)}
+                  r={3.5}
+                >
+                  <title>
+                    {chartHour(date)}: {bucket.failure} failed
+                  </title>
+                </circle>
+              )}
+            </g>
+          );
+        })}
       </svg>
       <div className="chart-legend">
         <span>

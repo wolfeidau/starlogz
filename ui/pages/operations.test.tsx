@@ -88,22 +88,20 @@ describe("operations view", () => {
     expect(screen.getByText("invalid_request")).toBeTruthy();
   });
 
-  test("aligns the chart domain with hourly buckets", () => {
+  test("renders labeled chart axes aligned with hourly buckets", () => {
     const telemetry = create(GetOperationsTelemetryResponseSchema, {
       available: true,
       windowStartedAt: timestamp("2026-07-29T12:30:00Z"),
       windowEndedAt: timestamp("2026-07-30T12:30:00Z"),
       totalToolCalls: 3,
-      toolSeries: [
-        {
-          startedAt: timestamp("2026-07-29T12:00:00Z"),
-          success: 1,
-        },
-        {
-          startedAt: timestamp("2026-07-30T12:00:00Z"),
-          success: 2,
-        },
-      ],
+      toolSeries: Array.from({ length: 25 }, (_, hour) => ({
+        startedAt: timestamp(
+          new Date(
+            Date.parse("2026-07-29T12:00:00Z") + hour * 60 * 60 * 1000,
+          ).toISOString(),
+        ),
+        success: hour === 0 ? 1 : hour === 24 ? 2 : 0,
+      })),
     });
 
     render(
@@ -120,7 +118,17 @@ describe("operations view", () => {
       name: "Successful and failed MCP tool calls by hour",
     });
     const path = chart.querySelector(".chart-line-success")?.getAttribute("d");
-    expect(path?.startsWith("M38,")).toBe(true);
-    expect(path).toContain("L700,");
+    expect(path?.startsWith("M48,")).toBe(true);
+    expect(path).toContain("L704,");
+    expect(chart.querySelectorAll(".chart-x-tick")).toHaveLength(5);
+    expect(chart.querySelectorAll(".chart-y-tick").length).toBeGreaterThan(1);
+    expect(chart.querySelector(".chart-axis-title")?.textContent).toBe(
+      "Calls per hour",
+    );
+    expect(chart.querySelector("desc")?.textContent).toContain(
+      "3 tool calls in the last 24 hours",
+    );
+    expect(chart.querySelector(".chart-line-failure")).toBeNull();
+    expect(chart.querySelectorAll(".chart-point-success")).toHaveLength(2);
   });
 });
