@@ -29,7 +29,7 @@ lifecycle timestamps, revocation state, and derived active status. They omit
 the session token hash.
 
 OAuth-grant summaries include identity references, client ID and registered
-name when available, scope, lifecycle timestamps, and derived active status.
+name when available, a stable grant UUID, scope, lifecycle timestamps, and derived active status.
 They omit the Starlogz refresh token, GitHub credentials, token ciphertext, and
 JWT ID. The grants table contains only refresh-capable credentials; stateless
 access-token JWTs do not create a grant row.
@@ -48,8 +48,13 @@ CloudWatch read model so query failures do not affect PostgreSQL-backed session
 and grant data. Its query, caching, and visualization behavior is described in
 [dashboard_operations_telemetry.md](dashboard_operations_telemetry.md).
 
+Individual dashboard-session and OAuth-grant revocation, confirmation, and
+credential-free operator-action records are defined in
+[dashboard_operations_controls.md](dashboard_operations_controls.md).
+
 ## Related contracts
 
 - [OAuth2 authentication and authorization](auth.md)
 - [OAuth2 refresh-token grant](refresh_tokens.md)
 - [Web UI sessions](web_sessions.md)
+- [Dashboard operations controls](dashboard_operations_controls.md)

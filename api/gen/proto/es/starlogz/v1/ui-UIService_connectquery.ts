@@ -53,3 +53,15 @@ export const getOperationsOverview = UIService.method.getOperationsOverview;
  * @generated from rpc starlogz.v1.UIService.GetOperationsTelemetry
  */
 export const getOperationsTelemetry = UIService.method.getOperationsTelemetry;
+
+/**
+ * @generated from rpc starlogz.v1.UIService.RevokeOperationsWebSession
+ */
+export const revokeOperationsWebSession =
+  UIService.method.revokeOperationsWebSession;
+
+/**
+ * @generated from rpc starlogz.v1.UIService.RevokeOperationsOAuthGrant
+ */
+export const revokeOperationsOAuthGrant =
+  UIService.method.revokeOperationsOAuthGrant;

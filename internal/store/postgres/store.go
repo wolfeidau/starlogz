@@ -272,6 +272,49 @@ func (s *Store) RevokeWebSessionByTokenHash(ctx context.Context, tokenHash []byt
 	return nil
 }
 
+func (s *Store) RevokeWebSessionByID(ctx context.Context, id, actorUserID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin revoke web session: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var targetUserIDStr string
+	var revokedAt *time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT user_id, revoked_at
+		FROM web_sessions
+		WHERE id = $1
+		FOR UPDATE`, id).Scan(&targetUserIDStr, &revokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("get web session for revocation: %w", err)
+	}
+	targetUserID, err := uuid.Parse(targetUserIDStr)
+	if err != nil {
+		return fmt.Errorf("parse web session user id: %w", err)
+	}
+	if revokedAt != nil {
+		return nil
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE web_sessions
+		SET revoked_at = now()
+		WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("revoke web session by id: %w", err)
+	}
+	if err := insertOperatorAction(ctx, tx, actorUserID, store.OperatorActionWebSessionRevoke, id, targetUserID, ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit web session revocation: %w", err)
+	}
+	return nil
+}
+
 // GetPersonalOrgByUserID returns the personal org for the given user.
 // Returns ErrNotFound if the user has no personal org.
 func (s *Store) GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*store.Org, error) {
@@ -768,6 +811,74 @@ func (s *Store) DeleteGrant(ctx context.Context, jti string, retired *store.Reti
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *Store) RevokeOAuthGrantByID(ctx context.Context, id, actorUserID uuid.UUID, retiredUntil time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin revoke OAuth grant: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var jti, refreshToken, clientID string
+	var targetUserIDStr string
+	var jwtExpiry time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT jti, user_id, our_refresh_token, COALESCE(client_id, ''), jwt_expiry
+		FROM grants
+		WHERE id = $1
+		FOR UPDATE`, id).Scan(&jti, &targetUserIDStr, &refreshToken, &clientID, &jwtExpiry)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("get OAuth grant for revocation: %w", err)
+	}
+	targetUserID, err := uuid.Parse(targetUserIDStr)
+	if err != nil {
+		return fmt.Errorf("parse OAuth grant user id: %w", err)
+	}
+
+	if jwtExpiry.After(time.Now()) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO revoked_tokens (jti, expires_at)
+			VALUES ($1, $2)
+			ON CONFLICT (jti) DO NOTHING`, jti, jwtExpiry); err != nil {
+			return fmt.Errorf("revoke OAuth grant access token: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM grants WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete OAuth grant: %w", err)
+	}
+	if err := s.insertRetiredRefreshTokenTx(ctx, tx, &store.RetiredRefreshToken{
+		TokenHash:     store.HashRefreshToken(refreshToken),
+		Reason:        store.RetiredRefreshTokenReasonOperatorRevoked,
+		UserID:        targetUserID,
+		ClientID:      clientID,
+		OldJTI:        jti,
+		RetainedUntil: retiredUntil,
+	}); err != nil {
+		return err
+	}
+	if err := insertOperatorAction(ctx, tx, actorUserID, store.OperatorActionOAuthGrantRevoke, id, targetUserID, clientID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit OAuth grant revocation: %w", err)
+	}
+	return nil
+}
+
+func insertOperatorAction(ctx context.Context, tx pgx.Tx, actorUserID uuid.UUID, action string, targetID, targetUserID uuid.UUID, targetClientID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO operator_actions
+		    (actor_user_id, action, target_id, target_user_id, target_client_id)
+		VALUES ($1, $2, $3, $4, $5)`,
+		actorUserID, action, targetID, targetUserID, targetClientID)
+	if err != nil {
+		return fmt.Errorf("record operator action: %w", err)
+	}
+	return nil
 }
 
 // StorePendingAuth persists an authorization state with a 10-minute TTL.
@@ -1828,7 +1939,7 @@ func (s *Store) GetOperationsOverview(ctx context.Context, limit int) (*store.Op
 	rows.Close()
 
 	rows, err = s.pool.Query(ctx, `
-		SELECT g.user_id, u.login, u.display_name, COALESCE(g.client_id, ''),
+		SELECT g.id, g.user_id, u.login, u.display_name, COALESCE(g.client_id, ''),
 		       COALESCE(c.client_name, ''), g.scope, g.jwt_expiry, g.refresh_token_expiry,
 		       g.updated_at,
 		       g.refresh_token_expiry > now()
@@ -1843,13 +1954,16 @@ func (s *Store) GetOperationsOverview(ctx context.Context, limit int) (*store.Op
 	defer rows.Close()
 	for rows.Next() {
 		summary := &store.OAuthGrantSummary{}
-		var userIDStr string
+		var idStr, userIDStr string
 		if err := rows.Scan(
-			&userIDStr, &summary.Login, &summary.DisplayName, &summary.ClientID,
+			&idStr, &userIDStr, &summary.Login, &summary.DisplayName, &summary.ClientID,
 			&summary.ClientName, &summary.Scope, &summary.JWTExpiresAt,
 			&summary.RefreshTokenExpires, &summary.UpdatedAt, &summary.Active,
 		); err != nil {
 			return nil, fmt.Errorf("scan OAuth grant summary: %w", err)
+		}
+		if summary.ID, err = uuid.Parse(idStr); err != nil {
+			return nil, fmt.Errorf("parse OAuth grant summary id: %w", err)
 		}
 		if summary.UserID, err = uuid.Parse(userIDStr); err != nil {
 			return nil, fmt.Errorf("parse OAuth grant summary user id: %w", err)
@@ -1858,6 +1972,50 @@ func (s *Store) GetOperationsOverview(ctx context.Context, limit int) (*store.Op
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list recent OAuth grants: %w", err)
+	}
+	rows.Close()
+
+	rows, err = s.pool.Query(ctx, `
+		SELECT oa.id, oa.actor_user_id, COALESCE(actor.login, ''), COALESCE(actor.display_name, ''),
+		       oa.action, oa.target_id, oa.target_user_id,
+		       COALESCE(target.login, ''), COALESCE(target.display_name, ''),
+		       oa.target_client_id, oa.created_at
+		FROM operator_actions oa
+		LEFT JOIN users actor ON actor.id = oa.actor_user_id
+		LEFT JOIN users target ON target.id = oa.target_user_id
+		ORDER BY oa.created_at DESC, oa.id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent operator actions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		summary := &store.OperatorActionSummary{}
+		var idStr, actorUserIDStr, targetIDStr, targetUserIDStr string
+		if err := rows.Scan(
+			&idStr, &actorUserIDStr, &summary.ActorLogin, &summary.ActorDisplayName,
+			&summary.Action, &targetIDStr, &targetUserIDStr,
+			&summary.TargetLogin, &summary.TargetDisplayName,
+			&summary.TargetClientID, &summary.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan operator action summary: %w", err)
+		}
+		if summary.ID, err = uuid.Parse(idStr); err != nil {
+			return nil, fmt.Errorf("parse operator action id: %w", err)
+		}
+		if summary.ActorUserID, err = uuid.Parse(actorUserIDStr); err != nil {
+			return nil, fmt.Errorf("parse operator action actor user id: %w", err)
+		}
+		if summary.TargetID, err = uuid.Parse(targetIDStr); err != nil {
+			return nil, fmt.Errorf("parse operator action target id: %w", err)
+		}
+		if summary.TargetUserID, err = uuid.Parse(targetUserIDStr); err != nil {
+			return nil, fmt.Errorf("parse operator action target user id: %w", err)
+		}
+		out.RecentActions = append(out.RecentActions, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recent operator actions: %w", err)
 	}
 	return out, nil
 }

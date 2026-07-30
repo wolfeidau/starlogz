@@ -2,6 +2,7 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { max } from "d3-array";
 import { scaleLinear, scaleUtc } from "d3-scale";
 import { area, line } from "d3-shape";
+import { useState } from "react";
 import type {
   GetOperationsOverviewResponse,
   GetOperationsTelemetryResponse,
@@ -35,6 +36,18 @@ function flowName(eventName: string): string {
     .replace(".completed", "")
     .replaceAll("_", " ");
 }
+
+function operatorActionName(action: string): string {
+  if (action === "web_session.revoke") return "Revoked dashboard session";
+  if (action === "oauth_grant.revoke") return "Revoked OAuth grant";
+  return action;
+}
+
+type PendingAction = {
+  kind: "web-session" | "oauth-grant";
+  id: string;
+  subject: string;
+};
 
 function chartHour(date: Date): string {
   return date
@@ -408,6 +421,9 @@ export function OperationsView({
   telemetry,
   telemetryLoading,
   telemetryError,
+  currentWebSessionId,
+  onRevokeWebSession,
+  onRevokeOAuthGrant,
 }: {
   overview?: GetOperationsOverviewResponse;
   loading: boolean;
@@ -415,7 +431,34 @@ export function OperationsView({
   telemetry?: GetOperationsTelemetryResponse;
   telemetryLoading: boolean;
   telemetryError: Error | null;
+  currentWebSessionId?: string;
+  onRevokeWebSession?: (id: string) => Promise<void>;
+  onRevokeOAuthGrant?: (id: string) => Promise<void>;
 }) {
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
+  const [submittingAction, setSubmittingAction] = useState(false);
+  const [actionError, setActionError] = useState("");
+
+  const confirmAction = async () => {
+    if (!pendingAction) return;
+    setSubmittingAction(true);
+    setActionError("");
+    try {
+      if (pendingAction.kind === "web-session") {
+        await onRevokeWebSession?.(pendingAction.id);
+      } else {
+        await onRevokeOAuthGrant?.(pendingAction.id);
+      }
+      setPendingAction(null);
+    } catch {
+      setActionError("Revocation failed. Refresh the page and try again.");
+    } finally {
+      setSubmittingAction(false);
+    }
+  };
+
   if (loading) {
     return <div className="center-state">Loading operations</div>;
   }
@@ -452,6 +495,52 @@ export function OperationsView({
         error={telemetryError}
       />
 
+      {pendingAction && (
+        <section
+          className="panel operations-confirmation"
+          aria-labelledby="operations-confirmation-title"
+          aria-live="polite"
+        >
+          <div>
+            <p className="eyebrow">Confirm operator action</p>
+            <h2 id="operations-confirmation-title">
+              {pendingAction.kind === "web-session"
+                ? "Revoke dashboard session?"
+                : "Revoke OAuth grant?"}
+            </h2>
+            <p>
+              {pendingAction.kind === "web-session"
+                ? `This immediately signs out ${pendingAction.subject}.`
+                : `This revokes Starlogz access for ${pendingAction.subject}. The client must authorize again.`}
+            </p>
+            {actionError && (
+              <p className="operations-action-error">{actionError}</p>
+            )}
+          </div>
+          <div className="operations-confirmation-actions">
+            <button
+              className="operations-secondary-button"
+              type="button"
+              disabled={submittingAction}
+              onClick={() => {
+                setPendingAction(null);
+                setActionError("");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="operations-danger-button"
+              type="button"
+              disabled={submittingAction}
+              onClick={confirmAction}
+            >
+              {submittingAction ? "Revoking" : "Confirm revocation"}
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="panel operations-panel">
         <div className="panel-heading">
           <div>
@@ -470,6 +559,7 @@ export function OperationsView({
                 <th>Last seen</th>
                 <th>Idle expiry</th>
                 <th>Absolute expiry</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -493,6 +583,31 @@ export function OperationsView({
                   </td>
                   <td className="nowrap">
                     {formatTimestamp(session.expiresAt)}
+                  </td>
+                  <td>
+                    {session.id === currentWebSessionId ? (
+                      <span className="muted">Current</span>
+                    ) : session.active && onRevokeWebSession ? (
+                      <button
+                        className="operations-row-action"
+                        type="button"
+                        aria-label={`Revoke dashboard session for ${
+                          session.displayName || session.login
+                        }`}
+                        onClick={() => {
+                          setActionError("");
+                          setPendingAction({
+                            kind: "web-session",
+                            id: session.id,
+                            subject: session.displayName || session.login,
+                          });
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    ) : (
+                      <span className="muted">None</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -522,13 +637,12 @@ export function OperationsView({
                 <th>Scope</th>
                 <th>Updated</th>
                 <th>Refresh expiry</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {(overview?.recentOauthGrants ?? []).map((grant) => (
-                <tr
-                  key={`${grant.userId}:${grant.clientId}:${grant.updatedAt?.seconds}`}
-                >
+                <tr key={grant.id}>
                   <td>
                     <strong>{grant.displayName || grant.login}</strong>
                     <span className="table-secondary">{grant.login}</span>
@@ -549,6 +663,31 @@ export function OperationsView({
                   <td className="nowrap">
                     {formatTimestamp(grant.refreshTokenExpiresAt)}
                   </td>
+                  <td>
+                    {grant.active && onRevokeOAuthGrant ? (
+                      <button
+                        className="operations-row-action"
+                        type="button"
+                        aria-label={`Revoke OAuth grant for ${
+                          grant.clientName || grant.clientId
+                        }`}
+                        onClick={() => {
+                          setActionError("");
+                          setPendingAction({
+                            kind: "oauth-grant",
+                            id: grant.id,
+                            subject: `${grant.clientName || grant.clientId} for ${
+                              grant.displayName || grant.login
+                            }`,
+                          });
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    ) : (
+                      <span className="muted">None</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -556,6 +695,59 @@ export function OperationsView({
         </div>
         {(overview?.recentOauthGrants.length ?? 0) === 0 && (
           <p className="muted">No OAuth grants recorded.</p>
+        )}
+      </section>
+
+      <section className="panel operations-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Operator controls</p>
+            <h2>Recent operator actions</h2>
+          </div>
+          <span>Credential-free audit records</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Operator</th>
+                <th>Action</th>
+                <th>Target user</th>
+                <th>Client</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(overview?.recentActions ?? []).map((action) => (
+                <tr key={action.id}>
+                  <td>
+                    <strong>
+                      {action.actorDisplayName || action.actorLogin}
+                    </strong>
+                    <span className="table-secondary">{action.actorLogin}</span>
+                  </td>
+                  <td>{operatorActionName(action.action)}</td>
+                  <td>
+                    <strong>
+                      {action.targetDisplayName || action.targetLogin}
+                    </strong>
+                    <span className="table-secondary">
+                      {action.targetLogin}
+                    </span>
+                  </td>
+                  <td className="client-id">
+                    {action.targetClientId || "Dashboard"}
+                  </td>
+                  <td className="nowrap">
+                    {formatTimestamp(action.createdAt)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {(overview?.recentActions.length ?? 0) === 0 && (
+          <p className="muted">No operator actions recorded.</p>
         )}
       </section>
     </>

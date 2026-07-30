@@ -130,8 +130,15 @@ func New(cfg Config) (*Server, error) {
 	metadata := oidcServer.ProtectedResourceMeta()
 
 	mux := http.NewServeMux()
+	retiredRefreshTokenRetention := oidc.DefaultRetiredRefreshTokenRetention
+	if cfg.RetiredRefreshTokenRetention != nil {
+		retiredRefreshTokenRetention = *cfg.RetiredRefreshTokenRetention
+	}
 	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(
-		newUIService(cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs), cfg.OperationsTelemetry),
+		newUIService(
+			cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs), cfg.OperationsTelemetry,
+			eventEmitter, retiredRefreshTokenRetention,
+		),
 	)
 	mux.Handle(uiPath, srv.uiAuthMiddleware(uiHandler))
 	mux.Handle("/public/", publicHandler())

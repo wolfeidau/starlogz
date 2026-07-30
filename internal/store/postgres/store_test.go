@@ -2198,6 +2198,105 @@ func TestGetOperationsOverview(t *testing.T) {
 	require.True(t, grant.Active)
 }
 
+func TestOperatorRevocations(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	actor, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 7601, Login: "service-operator", DisplayName: "Service Operator",
+	})
+	require.NoError(t, err)
+	target, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 7602, Login: "target-user", DisplayName: "Target User",
+	})
+	require.NoError(t, err)
+	now := time.Now()
+
+	sessionToken := "operator-control-session"
+	session, err := st.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(sessionToken), UserID: target.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	clientID := "operator-control-client"
+	require.NoError(t, st.SaveClient(ctx, store.OAuthClient{
+		ClientID: clientID, ClientName: "Operator Control Client",
+		RedirectURIs:  []string{"https://client.example/callback"},
+		GrantTypes:    []string{"authorization_code", "refresh_token"},
+		ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: "none",
+		Scope: "insights:read", IssuedAt: now,
+	}))
+	refreshToken := "operator-control-refresh"
+	jti := "operator-control-jti"
+	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
+		JTI: jti, UserID: target.ID, OurRefreshToken: refreshToken,
+		ClientID: clientID, Scope: "insights:read", AccessToken: "github-access",
+		RefreshToken: "github-refresh", AccessTokenExpiry: now.Add(time.Hour),
+		RefreshTokenExpiry: now.Add(24 * time.Hour), JWTExpiry: now.Add(15 * time.Minute),
+	}))
+
+	overview, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, overview.RecentOAuthGrants, 1)
+	grantID := overview.RecentOAuthGrants[0].ID
+	require.NotEqual(t, uuid.Nil, grantID)
+
+	require.NoError(t, st.RevokeWebSessionByID(ctx, session.ID, actor.ID))
+	require.NoError(t, st.RevokeWebSessionByID(ctx, session.ID, actor.ID))
+	require.NoError(t, st.RevokeOAuthGrantByID(ctx, grantID, actor.ID, now.Add(24*time.Hour)))
+
+	_, err = st.GetWebSessionByTokenHash(ctx, store.HashSessionToken(sessionToken))
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.GetGrantByRefreshToken(ctx, refreshToken)
+	require.ErrorIs(t, err, store.ErrNotFound)
+	revoked, err := st.IsTokenRevoked(ctx, jti)
+	require.NoError(t, err)
+	require.True(t, revoked)
+	retired, err := st.GetRetiredRefreshToken(ctx, store.HashRefreshToken(refreshToken))
+	require.NoError(t, err)
+	require.Equal(t, store.RetiredRefreshTokenReasonOperatorRevoked, retired.Reason)
+	require.Equal(t, target.ID, retired.UserID)
+	require.Equal(t, clientID, retired.ClientID)
+	grantAudit, err := st.ListAuditLog(ctx, store.AuditLogFilter{TableName: "grants"})
+	require.NoError(t, err)
+	require.NotEmpty(t, grantAudit)
+	for _, entry := range grantAudit {
+		for _, data := range [][]byte{entry.OldData, entry.NewData} {
+			if len(data) == 0 {
+				continue
+			}
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(data, &fields))
+			require.NotContains(t, fields, "our_refresh_token")
+			require.NotContains(t, fields, "access_token")
+			require.NotContains(t, fields, "refresh_token")
+			require.NotContains(t, string(data), refreshToken)
+		}
+	}
+
+	overview, err = st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Zero(t, overview.ActiveWebSessions)
+	require.Zero(t, overview.ActiveOAuthGrants)
+	require.Empty(t, overview.RecentOAuthGrants)
+	require.Len(t, overview.RecentActions, 2)
+
+	actions := map[string]*store.OperatorActionSummary{}
+	for _, action := range overview.RecentActions {
+		actions[action.Action] = action
+		require.Equal(t, actor.ID, action.ActorUserID)
+		require.Equal(t, "service-operator", action.ActorLogin)
+		require.Equal(t, target.ID, action.TargetUserID)
+		require.Equal(t, "target-user", action.TargetLogin)
+	}
+	require.Equal(t, session.ID, actions[store.OperatorActionWebSessionRevoke].TargetID)
+	require.Equal(t, grantID, actions[store.OperatorActionOAuthGrantRevoke].TargetID)
+	require.Equal(t, clientID, actions[store.OperatorActionOAuthGrantRevoke].TargetClientID)
+
+	err = st.RevokeOAuthGrantByID(ctx, grantID, actor.ID, now.Add(24*time.Hour))
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
 func TestUpdateInsight(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
@@ -2393,6 +2492,10 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", seeded.Scope)
 	require.Equal(t, "client-A", seeded.ClientID)
+	beforeRotation, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, beforeRotation.RecentOAuthGrants, 1)
+	stableGrantID := beforeRotation.RecentOAuthGrants[0].ID
 
 	rotated := store.Grant{
 		JTI:                "rotate-jti-new",
@@ -2429,6 +2532,10 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "rotate-jti-new", fetched.JTI)
 	require.Equal(t, "insights:read insights:write", fetched.Scope)
+	afterRotation, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, afterRotation.RecentOAuthGrants, 1)
+	require.Equal(t, stableGrantID, afterRotation.RecentOAuthGrants[0].ID)
 
 	// Old jti row no longer exists (UPDATE replaced the primary key).
 	_, err = st.GetGrant(ctx, "rotate-jti-old")

@@ -64,6 +64,8 @@ security decision.
 | `ui.session.created` | The UI callback completed and created a dashboard session. Use this event to count successful dashboard logins. |
 | `ui.session.revoked` | The UI logout handler completed. |
 | `mcp.tool_call.completed` | A registered MCP tool handler completed. |
+| `operator.web_session_revoke.completed` | An operator dashboard session-revocation RPC completed. |
+| `operator.oauth_grant_revoke.completed` | An operator OAuth-grant-revocation RPC completed. |
 
 Malformed token endpoint requests are intentionally access-log-only. Wrong methods, unparseable or oversized forms, and unsupported `grant_type` values cannot be assigned truthfully to either the authorization-code or refresh flow, so the server does not guess an event name. Their HTTP status remains visible in the `http_request` access event.
 
@@ -85,6 +87,10 @@ HTTP events derive the reason from the response status. MCP tool errors use `fai
 ## Attributes
 
 `mcp.tool_call.completed` always includes `tool`, selected from the registered tool names. No other event, including authorization confirmation, currently includes attributes.
+
+Operator revocation events contain no attributes or identity fields. Durable,
+credential-free actor and target references are stored in the same database
+transaction as the revocation.
 
 Successful `insight_history`, `insight_search`, and `insight_list` calls also
 include `result_count_bucket`. The approved buckets are `0`, `1-10`, `11-50`,

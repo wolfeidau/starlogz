@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 	"github.com/wolfeidau/starlogz/internal/insightlinks"
 	"github.com/wolfeidau/starlogz/internal/operations"
 	"github.com/wolfeidau/starlogz/internal/store"
+	"github.com/wolfeidau/starlogz/internal/wideevent"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -30,25 +32,34 @@ type uiService struct {
 	store     store.Store
 	operators operatorAuthorizer
 	telemetry operations.Provider
+	events    *wideevent.Emitter
+	retention time.Duration
 }
 
-func newUIService(st store.Store, operators operatorAuthorizer, telemetry operations.Provider) *uiService {
-	return &uiService{store: st, operators: operators, telemetry: telemetry}
+func newUIService(st store.Store, operators operatorAuthorizer, telemetry operations.Provider, events *wideevent.Emitter, retention time.Duration) *uiService {
+	if events == nil {
+		events = wideevent.NewNoopEmitter()
+	}
+	if retention <= 0 {
+		retention = 24 * time.Hour
+	}
+	return &uiService{store: st, operators: operators, telemetry: telemetry, events: events, retention: retention}
 }
 
 func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv1.GetSessionRequest]) (*connect.Response[starlogzv1.GetSessionResponse], error) {
-	_, user, _, err := s.resolve(ctx)
+	session, user, _, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&starlogzv1.GetSessionResponse{
-		UserId:      user.ID.String(),
-		Login:       user.Login,
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-		AvatarUrl:   user.AvatarURL,
-		ProfileUrl:  user.ProfileURL,
-		IsOperator:  s.operators.Allows(user),
+		UserId:       user.ID.String(),
+		Login:        user.Login,
+		Email:        user.Email,
+		DisplayName:  user.DisplayName,
+		AvatarUrl:    user.AvatarURL,
+		ProfileUrl:   user.ProfileURL,
+		IsOperator:   s.operators.Allows(user),
+		WebSessionId: session.ID.String(),
 	}), nil
 }
 
@@ -73,6 +84,7 @@ func (s *uiService) GetOperationsOverview(ctx context.Context, req *connect.Requ
 		ActiveOauthGrants: int32Count(overview.ActiveOAuthGrants),
 		RecentWebSessions: toProtoWebSessionSummaries(overview.RecentWebSessions),
 		RecentOauthGrants: toProtoOAuthGrantSummaries(overview.RecentOAuthGrants),
+		RecentActions:     toProtoOperatorActionSummaries(overview.RecentActions),
 	}), nil
 }
 
@@ -95,6 +107,83 @@ func (s *uiService) GetOperationsTelemetry(ctx context.Context, _ *connect.Reque
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get operations telemetry: %w", err))
 	}
 	return connect.NewResponse(toProtoOperationsTelemetry(snapshot)), nil
+}
+
+func (s *uiService) RevokeOperationsWebSession(ctx context.Context, req *connect.Request[starlogzv1.RevokeOperationsWebSessionRequest]) (_ *connect.Response[starlogzv1.RevokeOperationsWebSessionResponse], retErr error) {
+	started := time.Now()
+	defer func() {
+		s.emitOperatorAction(ctx, wideevent.OperatorWebSessionRevokeCompleted, started, retErr)
+	}()
+
+	session, user, _, err := s.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !s.operators.Allows(user) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+	}
+	id, err := uuid.Parse(req.Msg.GetId())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("valid web session ID required"))
+	}
+	if id == session.ID {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("current web session cannot be revoked"))
+	}
+	if err := s.store.RevokeWebSessionByID(ctx, id, user.ID); err != nil {
+		return nil, operatorMutationError("revoke web session", err)
+	}
+	return connect.NewResponse(&starlogzv1.RevokeOperationsWebSessionResponse{}), nil
+}
+
+func (s *uiService) RevokeOperationsOAuthGrant(ctx context.Context, req *connect.Request[starlogzv1.RevokeOperationsOAuthGrantRequest]) (_ *connect.Response[starlogzv1.RevokeOperationsOAuthGrantResponse], retErr error) {
+	started := time.Now()
+	defer func() {
+		s.emitOperatorAction(ctx, wideevent.OperatorOAuthGrantRevokeCompleted, started, retErr)
+	}()
+
+	_, user, _, err := s.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !s.operators.Allows(user) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+	}
+	id, err := uuid.Parse(req.Msg.GetId())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("valid OAuth grant ID required"))
+	}
+	if err := s.store.RevokeOAuthGrantByID(ctx, id, user.ID, time.Now().Add(s.retention)); err != nil {
+		return nil, operatorMutationError("revoke OAuth grant", err)
+	}
+	return connect.NewResponse(&starlogzv1.RevokeOperationsOAuthGrantResponse{}), nil
+}
+
+func operatorMutationError(action string, err error) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return connect.NewError(connect.CodeNotFound, fmt.Errorf("%s: %w", action, err))
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", action, err))
+}
+
+func (s *uiService) emitOperatorAction(ctx context.Context, name wideevent.Name, started time.Time, err error) {
+	if err == nil {
+		s.events.Completion(ctx, name, wideevent.OutcomeSuccess, wideevent.ReasonCompleted, started, nil)
+		return
+	}
+	reason := wideevent.ReasonServerError
+	switch connect.CodeOf(err) {
+	case connect.CodeUnauthenticated, connect.CodePermissionDenied:
+		reason = wideevent.ReasonUnauthorized
+	case connect.CodeInvalidArgument, connect.CodeFailedPrecondition:
+		reason = wideevent.ReasonInvalidRequest
+	case connect.CodeNotFound:
+		reason = wideevent.ReasonNotFound
+	case connect.CodeResourceExhausted:
+		reason = wideevent.ReasonThrottled
+	case connect.CodeUnavailable:
+		reason = wideevent.ReasonUpstreamError
+	}
+	s.events.Completion(ctx, name, wideevent.OutcomeFailure, reason, started, nil)
 }
 
 func (s *uiService) ListProjects(ctx context.Context, _ *connect.Request[starlogzv1.ListProjectsRequest]) (*connect.Response[starlogzv1.ListProjectsResponse], error) {
@@ -501,11 +590,26 @@ func toProtoOAuthGrantSummaries(summaries []*store.OAuthGrantSummary) []*starlog
 	out := make([]*starlogzv1.OAuthGrantSummary, len(summaries))
 	for i, summary := range summaries {
 		out[i] = &starlogzv1.OAuthGrantSummary{
-			UserId: summary.UserID.String(), Login: summary.Login, DisplayName: summary.DisplayName,
+			Id: summary.ID.String(), UserId: summary.UserID.String(), Login: summary.Login, DisplayName: summary.DisplayName,
 			ClientId: summary.ClientID, ClientName: summary.ClientName, Scope: summary.Scope,
 			JwtExpiresAt:          timestamppb.New(summary.JWTExpiresAt),
 			RefreshTokenExpiresAt: timestamppb.New(summary.RefreshTokenExpires),
 			UpdatedAt:             timestamppb.New(summary.UpdatedAt), Active: summary.Active,
+		}
+	}
+	return out
+}
+
+func toProtoOperatorActionSummaries(summaries []*store.OperatorActionSummary) []*starlogzv1.OperatorActionSummary {
+	out := make([]*starlogzv1.OperatorActionSummary, len(summaries))
+	for i, summary := range summaries {
+		out[i] = &starlogzv1.OperatorActionSummary{
+			Id: summary.ID.String(), ActorUserId: summary.ActorUserID.String(),
+			ActorLogin: summary.ActorLogin, ActorDisplayName: summary.ActorDisplayName,
+			Action: summary.Action, TargetId: summary.TargetID.String(),
+			TargetUserId: summary.TargetUserID.String(), TargetLogin: summary.TargetLogin,
+			TargetDisplayName: summary.TargetDisplayName, TargetClientId: summary.TargetClientID,
+			CreatedAt: timestamppb.New(summary.CreatedAt),
 		}
 	}
 	return out

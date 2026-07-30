@@ -57,6 +57,11 @@ and redirects to `/`. SameSite cookies and POST-only state changes provide the
 current CSRF boundary; future cross-site deployments must add explicit Origin
 checking or CSRF tokens.
 
+A service operator may revoke another dashboard session by its stable UUID.
+The dashboard does not offer the current operator session as a revocation
+target. Operator revocation uses the same `revoked_at` validity boundary as
+logout.
+
 ## Auditing
 
 Session creation, revocation, and deletion are written to `audit_log` without
