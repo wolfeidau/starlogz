@@ -58,6 +58,12 @@ const (
 	// UIServiceGetOperationsTelemetryProcedure is the fully-qualified name of the UIService's
 	// GetOperationsTelemetry RPC.
 	UIServiceGetOperationsTelemetryProcedure = "/starlogz.v1.UIService/GetOperationsTelemetry"
+	// UIServiceRevokeOperationsWebSessionProcedure is the fully-qualified name of the UIService's
+	// RevokeOperationsWebSession RPC.
+	UIServiceRevokeOperationsWebSessionProcedure = "/starlogz.v1.UIService/RevokeOperationsWebSession"
+	// UIServiceRevokeOperationsOAuthGrantProcedure is the fully-qualified name of the UIService's
+	// RevokeOperationsOAuthGrant RPC.
+	UIServiceRevokeOperationsOAuthGrantProcedure = "/starlogz.v1.UIService/RevokeOperationsOAuthGrant"
 )
 
 // UIServiceClient is a client for the starlogz.v1.UIService service.
@@ -72,6 +78,8 @@ type UIServiceClient interface {
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
 	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
 	GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error)
+	RevokeOperationsWebSession(context.Context, *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error)
+	RevokeOperationsOAuthGrant(context.Context, *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error)
 }
 
 // NewUIServiceClient constructs a client for the starlogz.v1.UIService service. By default, it uses
@@ -155,21 +163,37 @@ func NewUIServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		revokeOperationsWebSession: connect.NewClient[v1.RevokeOperationsWebSessionRequest, v1.RevokeOperationsWebSessionResponse](
+			httpClient,
+			baseURL+UIServiceRevokeOperationsWebSessionProcedure,
+			connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsWebSession")),
+			connect.WithIdempotency(connect.IdempotencyIdempotent),
+			connect.WithClientOptions(opts...),
+		),
+		revokeOperationsOAuthGrant: connect.NewClient[v1.RevokeOperationsOAuthGrantRequest, v1.RevokeOperationsOAuthGrantResponse](
+			httpClient,
+			baseURL+UIServiceRevokeOperationsOAuthGrantProcedure,
+			connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsOAuthGrant")),
+			connect.WithIdempotency(connect.IdempotencyIdempotent),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // uIServiceClient implements UIServiceClient.
 type uIServiceClient struct {
-	getSession             *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listProjects           *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
-	getProjectDashboard    *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
-	listInsights           *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
-	searchInsights         *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
-	getInsight             *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
-	listInsightHistory     *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
-	listTags               *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
-	getOperationsOverview  *connect.Client[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse]
-	getOperationsTelemetry *connect.Client[v1.GetOperationsTelemetryRequest, v1.GetOperationsTelemetryResponse]
+	getSession                 *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listProjects               *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
+	getProjectDashboard        *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
+	listInsights               *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
+	searchInsights             *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
+	getInsight                 *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
+	listInsightHistory         *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
+	listTags                   *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
+	getOperationsOverview      *connect.Client[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse]
+	getOperationsTelemetry     *connect.Client[v1.GetOperationsTelemetryRequest, v1.GetOperationsTelemetryResponse]
+	revokeOperationsWebSession *connect.Client[v1.RevokeOperationsWebSessionRequest, v1.RevokeOperationsWebSessionResponse]
+	revokeOperationsOAuthGrant *connect.Client[v1.RevokeOperationsOAuthGrantRequest, v1.RevokeOperationsOAuthGrantResponse]
 }
 
 // GetSession calls starlogz.v1.UIService.GetSession.
@@ -222,6 +246,16 @@ func (c *uIServiceClient) GetOperationsTelemetry(ctx context.Context, req *conne
 	return c.getOperationsTelemetry.CallUnary(ctx, req)
 }
 
+// RevokeOperationsWebSession calls starlogz.v1.UIService.RevokeOperationsWebSession.
+func (c *uIServiceClient) RevokeOperationsWebSession(ctx context.Context, req *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error) {
+	return c.revokeOperationsWebSession.CallUnary(ctx, req)
+}
+
+// RevokeOperationsOAuthGrant calls starlogz.v1.UIService.RevokeOperationsOAuthGrant.
+func (c *uIServiceClient) RevokeOperationsOAuthGrant(ctx context.Context, req *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error) {
+	return c.revokeOperationsOAuthGrant.CallUnary(ctx, req)
+}
+
 // UIServiceHandler is an implementation of the starlogz.v1.UIService service.
 type UIServiceHandler interface {
 	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
@@ -234,6 +268,8 @@ type UIServiceHandler interface {
 	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
 	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
 	GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error)
+	RevokeOperationsWebSession(context.Context, *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error)
+	RevokeOperationsOAuthGrant(context.Context, *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error)
 }
 
 // NewUIServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -313,6 +349,20 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	uIServiceRevokeOperationsWebSessionHandler := connect.NewUnaryHandler(
+		UIServiceRevokeOperationsWebSessionProcedure,
+		svc.RevokeOperationsWebSession,
+		connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsWebSession")),
+		connect.WithIdempotency(connect.IdempotencyIdempotent),
+		connect.WithHandlerOptions(opts...),
+	)
+	uIServiceRevokeOperationsOAuthGrantHandler := connect.NewUnaryHandler(
+		UIServiceRevokeOperationsOAuthGrantProcedure,
+		svc.RevokeOperationsOAuthGrant,
+		connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsOAuthGrant")),
+		connect.WithIdempotency(connect.IdempotencyIdempotent),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/starlogz.v1.UIService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UIServiceGetSessionProcedure:
@@ -335,6 +385,10 @@ func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (s
 			uIServiceGetOperationsOverviewHandler.ServeHTTP(w, r)
 		case UIServiceGetOperationsTelemetryProcedure:
 			uIServiceGetOperationsTelemetryHandler.ServeHTTP(w, r)
+		case UIServiceRevokeOperationsWebSessionProcedure:
+			uIServiceRevokeOperationsWebSessionHandler.ServeHTTP(w, r)
+		case UIServiceRevokeOperationsOAuthGrantProcedure:
+			uIServiceRevokeOperationsOAuthGrantHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -382,4 +436,12 @@ func (UnimplementedUIServiceHandler) GetOperationsOverview(context.Context, *con
 
 func (UnimplementedUIServiceHandler) GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetOperationsTelemetry is not implemented"))
+}
+
+func (UnimplementedUIServiceHandler) RevokeOperationsWebSession(context.Context, *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.RevokeOperationsWebSession is not implemented"))
+}
+
+func (UnimplementedUIServiceHandler) RevokeOperationsOAuthGrant(context.Context, *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.RevokeOperationsOAuthGrant is not implemented"))
 }

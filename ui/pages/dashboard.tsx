@@ -1,4 +1,8 @@
-import { TransportProvider, useQuery } from "@connectrpc/connect-query";
+import {
+  TransportProvider,
+  useMutation,
+  useQuery,
+} from "@connectrpc/connect-query";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -17,6 +21,8 @@ import {
   getSession,
   listProjects,
   listTags,
+  revokeOperationsOAuthGrant,
+  revokeOperationsWebSession,
 } from "../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
 import { useDashboardNavigation } from "./dashboard_navigation";
 import {
@@ -242,6 +248,17 @@ function DashboardView() {
         isAuthenticated && operationsRoute && Boolean(session.data?.isOperator),
     },
   );
+  const revokeWebSession = useMutation(revokeOperationsWebSession);
+  const revokeOAuthGrant = useMutation(revokeOperationsOAuthGrant);
+
+  const onRevokeWebSession = async (id: string) => {
+    await revokeWebSession.mutateAsync({ id });
+    await operations.refetch();
+  };
+  const onRevokeOAuthGrant = async (id: string) => {
+    await revokeOAuthGrant.mutateAsync({ id });
+    await operations.refetch();
+  };
 
   if (session.error) {
     return <LoginView />;
@@ -282,6 +299,9 @@ function DashboardView() {
           telemetry={operationsTelemetry.data}
           telemetryLoading={operationsTelemetry.isLoading}
           telemetryError={operationsTelemetry.error}
+          currentWebSessionId={session.data.webSessionId}
+          onRevokeWebSession={onRevokeWebSession}
+          onRevokeOAuthGrant={onRevokeOAuthGrant}
         />
       </main>
     );

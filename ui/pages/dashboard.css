@@ -323,9 +323,75 @@ select {
 
 .operations-summary,
 .operations-panel,
+.operations-confirmation,
 .operations-telemetry-grid {
   width: min(1440px, 100%);
   margin: 0 auto;
+}
+
+.operations-confirmation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  border-color: #fecaca;
+  background: #fffafa;
+}
+
+.operations-confirmation h2,
+.operations-confirmation p {
+  margin: 0;
+}
+
+.operations-confirmation p:not(.eyebrow) {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.operations-confirmation-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.operations-secondary-button,
+.operations-danger-button,
+.operations-row-action {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.operations-secondary-button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.operations-danger-button {
+  border: 1px solid var(--failure);
+  background: var(--failure);
+  color: #ffffff;
+}
+
+.operations-row-action {
+  border: 1px solid #fca5a5;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+
+.operations-secondary-button:disabled,
+.operations-danger-button:disabled,
+.operations-row-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.operations-confirmation p.operations-action-error {
+  color: var(--failure);
+  font-weight: 650;
 }
 
 .operations-telemetry-grid {
@@ -1063,6 +1129,11 @@ code {
   .dashboard-grid,
   .operations-telemetry-grid {
     grid-template-columns: 1fr;
+  }
+
+  .operations-confirmation {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .detail-panel {

@@ -158,9 +158,7 @@ describe("dashboard infinite-query integration", () => {
     );
 
     await waitFor(() => expect(screen.getByText("alpha first")).toBeTruthy());
-    expect(requests).toEqual([
-      { cursor: "", query: "alpha", tags: ["go"] },
-    ]);
+    expect(requests).toEqual([{ cursor: "", query: "alpha", tags: ["go"] }]);
 
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => expect(screen.getByText("alpha second")).toBeTruthy());

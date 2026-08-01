@@ -111,6 +111,7 @@ A refresh token stops being usable when:
 - GitHub fails to return a replacement refresh token;
 - it lacks an authoritative client binding, including when discovered as the
   replacement grant during a retry grace request;
+- a service operator revokes the grant;
 - its grant is deleted; or
 - the stored grant or replacement grant no longer exists.
 
@@ -142,8 +143,9 @@ Public errors intentionally avoid disclosing detailed grant history. Bounded
 operator telemetry distinguishes successful rotation and grace retry from
 unknown, expired, removed, mismatched, upstream-invalid, missing-client-binding,
 and server-error outcomes. Retained refresh-token diagnostics record
-`client_binding_missing` separately from generic grant deletion. Clients must
-not depend on those internal reason labels.
+`client_binding_missing` separately from generic grant deletion and
+`operator_revoked` for an operator action. Clients must not depend on those
+internal reason labels.
 
 ## Discovery and constraints
 

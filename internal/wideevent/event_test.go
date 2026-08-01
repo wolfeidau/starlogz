@@ -163,7 +163,7 @@ func TestAllEventNamesValidate(t *testing.T) {
 		OAuthAuthorizationCompleted, OAuthAuthorizationConfirmationCompleted, OAuthGitHubCallbackCompleted,
 		OAuthTokenExchangeCompleted, OAuthRefreshCompleted,
 		UILoginCompleted, UISessionCreated, UISessionRevoked,
-		MCPToolCallCompleted,
+		MCPToolCallCompleted, OperatorWebSessionRevokeCompleted, OperatorOAuthGrantRevokeCompleted,
 	}
 	for _, name := range names {
 		t.Run(string(name), func(t *testing.T) {

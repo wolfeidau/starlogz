@@ -44,6 +44,14 @@ service UIService {
   rpc GetOperationsTelemetry(GetOperationsTelemetryRequest) returns (GetOperationsTelemetryResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  rpc RevokeOperationsWebSession(RevokeOperationsWebSessionRequest) returns (RevokeOperationsWebSessionResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  rpc RevokeOperationsOAuthGrant(RevokeOperationsOAuthGrantRequest) returns (RevokeOperationsOAuthGrantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
 }
 
 message GetSessionRequest {}
@@ -57,6 +65,7 @@ message GetSessionResponse {
   string avatar_url = 6;
   string profile_url = 7;
   bool is_operator = 8;
+  string web_session_id = 9;
 }
 
 message ListProjectsRequest {}
@@ -231,6 +240,21 @@ message OAuthGrantSummary {
   google.protobuf.Timestamp refresh_token_expires_at = 8;
   google.protobuf.Timestamp updated_at = 9;
   bool active = 10;
+  string id = 11;
+}
+
+message OperatorActionSummary {
+  string id = 1;
+  string actor_user_id = 2;
+  string actor_login = 3;
+  string actor_display_name = 4;
+  string action = 5;
+  string target_id = 6;
+  string target_user_id = 7;
+  string target_login = 8;
+  string target_display_name = 9;
+  string target_client_id = 10;
+  google.protobuf.Timestamp created_at = 11;
 }
 
 message GetOperationsOverviewResponse {
@@ -238,7 +262,20 @@ message GetOperationsOverviewResponse {
   int32 active_oauth_grants = 2;
   repeated WebSessionSummary recent_web_sessions = 3;
   repeated OAuthGrantSummary recent_oauth_grants = 4;
+  repeated OperatorActionSummary recent_actions = 5;
 }
+
+message RevokeOperationsWebSessionRequest {
+  string id = 1;
+}
+
+message RevokeOperationsWebSessionResponse {}
+
+message RevokeOperationsOAuthGrantRequest {
+  string id = 1;
+}
+
+message RevokeOperationsOAuthGrantResponse {}
 
 message OperationsTimeBucket {
   google.protobuf.Timestamp started_at = 1;

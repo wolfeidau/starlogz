@@ -51,6 +51,7 @@ type Store interface {
 	GetWebSessionByTokenHash(ctx context.Context, tokenHash []byte) (*WebSession, error)
 	TouchWebSession(ctx context.Context, id uuid.UUID, lastSeenAt, idleExpiresAt time.Time) error
 	RevokeWebSessionByTokenHash(ctx context.Context, tokenHash []byte) error
+	RevokeWebSessionByID(ctx context.Context, id, actorUserID uuid.UUID) error
 
 	GetPersonalOrgByUserID(ctx context.Context, userID uuid.UUID) (*Org, error)
 	ListOrgs(ctx context.Context) ([]*Org, error)
@@ -65,6 +66,7 @@ type Store interface {
 	GetRetiredRefreshToken(ctx context.Context, tokenHash []byte) (*RetiredRefreshToken, error)
 	RotateGrant(ctx context.Context, oldToken, oldJTI string, oldJWTExpiry time.Time, g Grant, retired *RetiredRefreshToken) (*Grant, error)
 	DeleteGrant(ctx context.Context, jti string, retired *RetiredRefreshToken) error
+	RevokeOAuthGrantByID(ctx context.Context, id, actorUserID uuid.UUID, retiredUntil time.Time) error
 
 	StorePendingAuth(ctx context.Context, state string, p PendingAuth) error
 	ConsumePendingAuth(ctx context.Context, state string) (*PendingAuth, error)
@@ -389,6 +391,7 @@ type OperationsOverview struct {
 	ActiveOAuthGrants int
 	RecentWebSessions []*WebSessionSummary
 	RecentOAuthGrants []*OAuthGrantSummary
+	RecentActions     []*OperatorActionSummary
 }
 
 type WebSessionSummary struct {
@@ -405,6 +408,7 @@ type WebSessionSummary struct {
 }
 
 type OAuthGrantSummary struct {
+	ID                  uuid.UUID
 	UserID              uuid.UUID
 	Login               string
 	DisplayName         string
@@ -416,6 +420,25 @@ type OAuthGrantSummary struct {
 	UpdatedAt           time.Time
 	Active              bool
 }
+
+type OperatorActionSummary struct {
+	ID                uuid.UUID
+	ActorUserID       uuid.UUID
+	ActorLogin        string
+	ActorDisplayName  string
+	Action            string
+	TargetID          uuid.UUID
+	TargetUserID      uuid.UUID
+	TargetLogin       string
+	TargetDisplayName string
+	TargetClientID    string
+	CreatedAt         time.Time
+}
+
+const (
+	OperatorActionWebSessionRevoke = "web_session.revoke"
+	OperatorActionOAuthGrantRevoke = "oauth_grant.revoke"
+)
 
 // Grant holds a single authorization grant with the associated GitHub App tokens.
 // Tokens are stored encrypted at rest; this struct carries plaintext values.
@@ -440,6 +463,7 @@ const (
 	RetiredRefreshTokenReasonGitHubMissingRefresh = "github_missing_refresh" //nolint:gosec // reason label, not a credential
 	RetiredRefreshTokenReasonGrantDeleted         = "grant_deleted"
 	RetiredRefreshTokenReasonClientBindingMissing = "client_binding_missing"
+	RetiredRefreshTokenReasonOperatorRevoked      = "operator_revoked"
 )
 
 // RetiredRefreshToken records hashed refresh tokens after rotation or teardown.

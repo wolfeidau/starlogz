@@ -384,6 +384,143 @@ func TestMigrateRemovesNonRefreshGrants(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestMigrateRedactsLegacyGrantAuditSnapshots(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 5, Email: "legacy-audit@example.com", Login: "legacy-audit",
+	})
+	require.NoError(t, err)
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `
+		DROP TRIGGER audit_grants ON grants;
+		DROP FUNCTION audit_grants_trigger_func();
+		CREATE TRIGGER audit_grants
+		AFTER INSERT OR UPDATE OR DELETE ON grants
+		FOR EACH ROW EXECUTE FUNCTION audit_trigger_func();
+		DROP TABLE operator_actions;
+		ALTER TABLE grants DROP COLUMN id;
+		ALTER TABLE retired_refresh_tokens
+			DROP CONSTRAINT retired_refresh_tokens_reason_check;
+		ALTER TABLE retired_refresh_tokens
+			ADD CONSTRAINT retired_refresh_tokens_reason_check
+			CHECK (reason IN (
+				'rotated',
+				'github_expired',
+				'github_invalid',
+				'github_missing_refresh',
+				'grant_deleted',
+				'client_binding_missing'
+			));
+		DELETE FROM audit_log WHERE table_name = 'grants';
+		DELETE FROM schema_migrations WHERE version BETWEEN 27 AND 31`)
+	require.NoError(t, err)
+
+	const refreshToken = "legacy-starlogz-refresh"
+	_, err = pool.Exec(ctx, `
+		INSERT INTO grants (
+			jti, user_id, our_refresh_token, scope, access_token, refresh_token,
+			access_token_expiry, refresh_token_expiry, jwt_expiry
+		) VALUES (
+			'legacy-audit-jti', $1, $2, 'insights:read', $3, $4,
+			now() + interval '1 hour', now() + interval '1 day', now() + interval '15 minutes'
+		)`, user.ID, refreshToken, []byte("legacy-access-token"), []byte("legacy-github-refresh-token"))
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		UPDATE grants
+		SET scope = 'insights:read insights:write'
+		WHERE jti = 'legacy-audit-jti'`)
+	require.NoError(t, err)
+
+	var auditID int64
+	var oldSnapshot, newSnapshot []byte
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT id, old_data, new_data
+		FROM audit_log
+		WHERE table_name = 'grants'
+		  AND operation = 'UPDATE'
+		  AND new_data->>'jti' = 'legacy-audit-jti'`,
+	).Scan(&auditID, &oldSnapshot, &newSnapshot))
+	for _, snapshot := range [][]byte{oldSnapshot, newSnapshot} {
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(snapshot, &fields))
+		require.Equal(t, refreshToken, fields["our_refresh_token"])
+		require.Contains(t, fields, "access_token")
+		require.Contains(t, fields, "refresh_token")
+	}
+
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT old_data, new_data FROM audit_log WHERE id = $1`, auditID,
+	).Scan(&oldSnapshot, &newSnapshot))
+	for _, snapshot := range [][]byte{oldSnapshot, newSnapshot} {
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(snapshot, &fields))
+		require.NotContains(t, fields, "our_refresh_token")
+		require.NotContains(t, fields, "access_token")
+		require.NotContains(t, fields, "refresh_token")
+		require.NotContains(t, string(snapshot), refreshToken)
+	}
+
+	var grantID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id FROM grants WHERE jti = 'legacy-audit-jti'`).Scan(&grantID))
+	require.NotEqual(t, uuid.Nil, grantID)
+
+	var nullable string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'grants' AND column_name = 'id'`,
+	).Scan(&nullable))
+	require.Equal(t, "NO", nullable)
+
+	var indexValid bool
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT indisvalid
+		FROM pg_catalog.pg_index
+		WHERE indexrelid = to_regclass('grants_id_idx')`,
+	).Scan(&indexValid))
+	require.True(t, indexValid)
+}
+
+func TestMigrateCompletesInitialOperatorControlsMigration(t *testing.T) {
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	user, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 6, Login: "early-operator-controls"})
+	require.NoError(t, err)
+	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
+		JTI: "early-operator-controls-jti", UserID: user.ID,
+		OurRefreshToken: "early-operator-controls-refresh", Scope: "insights:read",
+		AccessToken: "github-access", RefreshToken: "github-refresh",
+		AccessTokenExpiry: time.Now().Add(time.Hour), RefreshTokenExpiry: time.Now().Add(24 * time.Hour),
+		JWTExpiry: time.Now().Add(15 * time.Minute),
+	}))
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version BETWEEN 28 AND 31`)
+	require.NoError(t, err)
+
+	require.NoError(t, st.Migrate(ctx, slog.New(slog.DiscardHandler)))
+
+	var applied int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM schema_migrations WHERE version BETWEEN 28 AND 31`,
+	).Scan(&applied))
+	require.Equal(t, 4, applied)
+
+	var grantID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT id FROM grants WHERE jti = 'early-operator-controls-jti'`,
+	).Scan(&grantID))
+	require.NotEqual(t, uuid.Nil, grantID)
+}
+
 func TestUpsertUser_NewAndUpdate(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
@@ -2198,6 +2335,105 @@ func TestGetOperationsOverview(t *testing.T) {
 	require.True(t, grant.Active)
 }
 
+func TestOperatorRevocations(t *testing.T) {
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	ctx := t.Context()
+	actor, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 7601, Login: "service-operator", DisplayName: "Service Operator",
+	})
+	require.NoError(t, err)
+	target, err := st.UpsertUser(ctx, store.GitHubProfile{
+		GitHubID: 7602, Login: "target-user", DisplayName: "Target User",
+	})
+	require.NoError(t, err)
+	now := time.Now()
+
+	sessionToken := "operator-control-session"
+	session, err := st.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(sessionToken), UserID: target.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	clientID := "operator-control-client"
+	require.NoError(t, st.SaveClient(ctx, store.OAuthClient{
+		ClientID: clientID, ClientName: "Operator Control Client",
+		RedirectURIs:  []string{"https://client.example/callback"},
+		GrantTypes:    []string{"authorization_code", "refresh_token"},
+		ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: "none",
+		Scope: "insights:read", IssuedAt: now,
+	}))
+	refreshToken := "operator-control-refresh"
+	jti := "operator-control-jti"
+	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
+		JTI: jti, UserID: target.ID, OurRefreshToken: refreshToken,
+		ClientID: clientID, Scope: "insights:read", AccessToken: "github-access",
+		RefreshToken: "github-refresh", AccessTokenExpiry: now.Add(time.Hour),
+		RefreshTokenExpiry: now.Add(24 * time.Hour), JWTExpiry: now.Add(15 * time.Minute),
+	}))
+
+	overview, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, overview.RecentOAuthGrants, 1)
+	grantID := overview.RecentOAuthGrants[0].ID
+	require.NotEqual(t, uuid.Nil, grantID)
+
+	require.NoError(t, st.RevokeWebSessionByID(ctx, session.ID, actor.ID))
+	require.NoError(t, st.RevokeWebSessionByID(ctx, session.ID, actor.ID))
+	require.NoError(t, st.RevokeOAuthGrantByID(ctx, grantID, actor.ID, now.Add(24*time.Hour)))
+
+	_, err = st.GetWebSessionByTokenHash(ctx, store.HashSessionToken(sessionToken))
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = st.GetGrantByRefreshToken(ctx, refreshToken)
+	require.ErrorIs(t, err, store.ErrNotFound)
+	revoked, err := st.IsTokenRevoked(ctx, jti)
+	require.NoError(t, err)
+	require.True(t, revoked)
+	retired, err := st.GetRetiredRefreshToken(ctx, store.HashRefreshToken(refreshToken))
+	require.NoError(t, err)
+	require.Equal(t, store.RetiredRefreshTokenReasonOperatorRevoked, retired.Reason)
+	require.Equal(t, target.ID, retired.UserID)
+	require.Equal(t, clientID, retired.ClientID)
+	grantAudit, err := st.ListAuditLog(ctx, store.AuditLogFilter{TableName: "grants"})
+	require.NoError(t, err)
+	require.NotEmpty(t, grantAudit)
+	for _, entry := range grantAudit {
+		for _, data := range [][]byte{entry.OldData, entry.NewData} {
+			if len(data) == 0 {
+				continue
+			}
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(data, &fields))
+			require.NotContains(t, fields, "our_refresh_token")
+			require.NotContains(t, fields, "access_token")
+			require.NotContains(t, fields, "refresh_token")
+			require.NotContains(t, string(data), refreshToken)
+		}
+	}
+
+	overview, err = st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Zero(t, overview.ActiveWebSessions)
+	require.Zero(t, overview.ActiveOAuthGrants)
+	require.Empty(t, overview.RecentOAuthGrants)
+	require.Len(t, overview.RecentActions, 2)
+
+	actions := map[string]*store.OperatorActionSummary{}
+	for _, action := range overview.RecentActions {
+		actions[action.Action] = action
+		require.Equal(t, actor.ID, action.ActorUserID)
+		require.Equal(t, "service-operator", action.ActorLogin)
+		require.Equal(t, target.ID, action.TargetUserID)
+		require.Equal(t, "target-user", action.TargetLogin)
+	}
+	require.Equal(t, session.ID, actions[store.OperatorActionWebSessionRevoke].TargetID)
+	require.Equal(t, grantID, actions[store.OperatorActionOAuthGrantRevoke].TargetID)
+	require.Equal(t, clientID, actions[store.OperatorActionOAuthGrantRevoke].TargetClientID)
+
+	err = st.RevokeOAuthGrantByID(ctx, grantID, actor.ID, now.Add(24*time.Hour))
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
 func TestUpdateInsight(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
@@ -2393,6 +2629,10 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "insights:read insights:write", seeded.Scope)
 	require.Equal(t, "client-A", seeded.ClientID)
+	beforeRotation, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, beforeRotation.RecentOAuthGrants, 1)
+	stableGrantID := beforeRotation.RecentOAuthGrants[0].ID
 
 	rotated := store.Grant{
 		JTI:                "rotate-jti-new",
@@ -2429,6 +2669,10 @@ func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "rotate-jti-new", fetched.JTI)
 	require.Equal(t, "insights:read insights:write", fetched.Scope)
+	afterRotation, err := st.GetOperationsOverview(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, afterRotation.RecentOAuthGrants, 1)
+	require.Equal(t, stableGrantID, afterRotation.RecentOAuthGrants[0].ID)
 
 	// Old jti row no longer exists (UPDATE replaced the primary key).
 	_, err = st.GetGrant(ctx, "rotate-jti-old")

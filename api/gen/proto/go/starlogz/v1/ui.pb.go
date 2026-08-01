@@ -67,6 +67,7 @@ type GetSessionResponse struct {
 	AvatarUrl     string                 `protobuf:"bytes,6,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
 	ProfileUrl    string                 `protobuf:"bytes,7,opt,name=profile_url,json=profileUrl,proto3" json:"profile_url,omitempty"`
 	IsOperator    bool                   `protobuf:"varint,8,opt,name=is_operator,json=isOperator,proto3" json:"is_operator,omitempty"`
+	WebSessionId  string                 `protobuf:"bytes,9,opt,name=web_session_id,json=webSessionId,proto3" json:"web_session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -148,6 +149,13 @@ func (x *GetSessionResponse) GetIsOperator() bool {
 		return x.IsOperator
 	}
 	return false
+}
+
+func (x *GetSessionResponse) GetWebSessionId() string {
+	if x != nil {
+		return x.WebSessionId
+	}
+	return ""
 }
 
 type ListProjectsRequest struct {
@@ -1756,6 +1764,7 @@ type OAuthGrantSummary struct {
 	RefreshTokenExpiresAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=refresh_token_expires_at,json=refreshTokenExpiresAt,proto3" json:"refresh_token_expires_at,omitempty"`
 	UpdatedAt             *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	Active                bool                   `protobuf:"varint,10,opt,name=active,proto3" json:"active,omitempty"`
+	Id                    string                 `protobuf:"bytes,11,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1860,19 +1869,151 @@ func (x *OAuthGrantSummary) GetActive() bool {
 	return false
 }
 
-type GetOperationsOverviewResponse struct {
+func (x *OAuthGrantSummary) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type OperatorActionSummary struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	ActiveWebSessions int32                  `protobuf:"varint,1,opt,name=active_web_sessions,json=activeWebSessions,proto3" json:"active_web_sessions,omitempty"`
-	ActiveOauthGrants int32                  `protobuf:"varint,2,opt,name=active_oauth_grants,json=activeOauthGrants,proto3" json:"active_oauth_grants,omitempty"`
-	RecentWebSessions []*WebSessionSummary   `protobuf:"bytes,3,rep,name=recent_web_sessions,json=recentWebSessions,proto3" json:"recent_web_sessions,omitempty"`
-	RecentOauthGrants []*OAuthGrantSummary   `protobuf:"bytes,4,rep,name=recent_oauth_grants,json=recentOauthGrants,proto3" json:"recent_oauth_grants,omitempty"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ActorUserId       string                 `protobuf:"bytes,2,opt,name=actor_user_id,json=actorUserId,proto3" json:"actor_user_id,omitempty"`
+	ActorLogin        string                 `protobuf:"bytes,3,opt,name=actor_login,json=actorLogin,proto3" json:"actor_login,omitempty"`
+	ActorDisplayName  string                 `protobuf:"bytes,4,opt,name=actor_display_name,json=actorDisplayName,proto3" json:"actor_display_name,omitempty"`
+	Action            string                 `protobuf:"bytes,5,opt,name=action,proto3" json:"action,omitempty"`
+	TargetId          string                 `protobuf:"bytes,6,opt,name=target_id,json=targetId,proto3" json:"target_id,omitempty"`
+	TargetUserId      string                 `protobuf:"bytes,7,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	TargetLogin       string                 `protobuf:"bytes,8,opt,name=target_login,json=targetLogin,proto3" json:"target_login,omitempty"`
+	TargetDisplayName string                 `protobuf:"bytes,9,opt,name=target_display_name,json=targetDisplayName,proto3" json:"target_display_name,omitempty"`
+	TargetClientId    string                 `protobuf:"bytes,10,opt,name=target_client_id,json=targetClientId,proto3" json:"target_client_id,omitempty"`
+	CreatedAt         *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *OperatorActionSummary) Reset() {
+	*x = OperatorActionSummary{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OperatorActionSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OperatorActionSummary) ProtoMessage() {}
+
+func (x *OperatorActionSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OperatorActionSummary.ProtoReflect.Descriptor instead.
+func (*OperatorActionSummary) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *OperatorActionSummary) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetActorUserId() string {
+	if x != nil {
+		return x.ActorUserId
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetActorLogin() string {
+	if x != nil {
+		return x.ActorLogin
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetActorDisplayName() string {
+	if x != nil {
+		return x.ActorDisplayName
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetTargetId() string {
+	if x != nil {
+		return x.TargetId
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetTargetLogin() string {
+	if x != nil {
+		return x.TargetLogin
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetTargetDisplayName() string {
+	if x != nil {
+		return x.TargetDisplayName
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetTargetClientId() string {
+	if x != nil {
+		return x.TargetClientId
+	}
+	return ""
+}
+
+func (x *OperatorActionSummary) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type GetOperationsOverviewResponse struct {
+	state             protoimpl.MessageState   `protogen:"open.v1"`
+	ActiveWebSessions int32                    `protobuf:"varint,1,opt,name=active_web_sessions,json=activeWebSessions,proto3" json:"active_web_sessions,omitempty"`
+	ActiveOauthGrants int32                    `protobuf:"varint,2,opt,name=active_oauth_grants,json=activeOauthGrants,proto3" json:"active_oauth_grants,omitempty"`
+	RecentWebSessions []*WebSessionSummary     `protobuf:"bytes,3,rep,name=recent_web_sessions,json=recentWebSessions,proto3" json:"recent_web_sessions,omitempty"`
+	RecentOauthGrants []*OAuthGrantSummary     `protobuf:"bytes,4,rep,name=recent_oauth_grants,json=recentOauthGrants,proto3" json:"recent_oauth_grants,omitempty"`
+	RecentActions     []*OperatorActionSummary `protobuf:"bytes,5,rep,name=recent_actions,json=recentActions,proto3" json:"recent_actions,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetOperationsOverviewResponse) Reset() {
 	*x = GetOperationsOverviewResponse{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[26]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1884,7 +2025,7 @@ func (x *GetOperationsOverviewResponse) String() string {
 func (*GetOperationsOverviewResponse) ProtoMessage() {}
 
 func (x *GetOperationsOverviewResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[26]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1897,7 +2038,7 @@ func (x *GetOperationsOverviewResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOperationsOverviewResponse.ProtoReflect.Descriptor instead.
 func (*GetOperationsOverviewResponse) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{26}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetOperationsOverviewResponse) GetActiveWebSessions() int32 {
@@ -1928,6 +2069,173 @@ func (x *GetOperationsOverviewResponse) GetRecentOauthGrants() []*OAuthGrantSumm
 	return nil
 }
 
+func (x *GetOperationsOverviewResponse) GetRecentActions() []*OperatorActionSummary {
+	if x != nil {
+		return x.RecentActions
+	}
+	return nil
+}
+
+type RevokeOperationsWebSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeOperationsWebSessionRequest) Reset() {
+	*x = RevokeOperationsWebSessionRequest{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeOperationsWebSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeOperationsWebSessionRequest) ProtoMessage() {}
+
+func (x *RevokeOperationsWebSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeOperationsWebSessionRequest.ProtoReflect.Descriptor instead.
+func (*RevokeOperationsWebSessionRequest) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *RevokeOperationsWebSessionRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type RevokeOperationsWebSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeOperationsWebSessionResponse) Reset() {
+	*x = RevokeOperationsWebSessionResponse{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeOperationsWebSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeOperationsWebSessionResponse) ProtoMessage() {}
+
+func (x *RevokeOperationsWebSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeOperationsWebSessionResponse.ProtoReflect.Descriptor instead.
+func (*RevokeOperationsWebSessionResponse) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{29}
+}
+
+type RevokeOperationsOAuthGrantRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeOperationsOAuthGrantRequest) Reset() {
+	*x = RevokeOperationsOAuthGrantRequest{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeOperationsOAuthGrantRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeOperationsOAuthGrantRequest) ProtoMessage() {}
+
+func (x *RevokeOperationsOAuthGrantRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeOperationsOAuthGrantRequest.ProtoReflect.Descriptor instead.
+func (*RevokeOperationsOAuthGrantRequest) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *RevokeOperationsOAuthGrantRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type RevokeOperationsOAuthGrantResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeOperationsOAuthGrantResponse) Reset() {
+	*x = RevokeOperationsOAuthGrantResponse{}
+	mi := &file_starlogz_v1_ui_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeOperationsOAuthGrantResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeOperationsOAuthGrantResponse) ProtoMessage() {}
+
+func (x *RevokeOperationsOAuthGrantResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_starlogz_v1_ui_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeOperationsOAuthGrantResponse.ProtoReflect.Descriptor instead.
+func (*RevokeOperationsOAuthGrantResponse) Descriptor() ([]byte, []int) {
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{31}
+}
+
 type OperationsTimeBucket struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
@@ -1939,7 +2247,7 @@ type OperationsTimeBucket struct {
 
 func (x *OperationsTimeBucket) Reset() {
 	*x = OperationsTimeBucket{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[27]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1951,7 +2259,7 @@ func (x *OperationsTimeBucket) String() string {
 func (*OperationsTimeBucket) ProtoMessage() {}
 
 func (x *OperationsTimeBucket) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[27]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1964,7 +2272,7 @@ func (x *OperationsTimeBucket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationsTimeBucket.ProtoReflect.Descriptor instead.
 func (*OperationsTimeBucket) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{27}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *OperationsTimeBucket) GetStartedAt() *timestamppb.Timestamp {
@@ -1999,7 +2307,7 @@ type OperationsToolAggregate struct {
 
 func (x *OperationsToolAggregate) Reset() {
 	*x = OperationsToolAggregate{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[28]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2011,7 +2319,7 @@ func (x *OperationsToolAggregate) String() string {
 func (*OperationsToolAggregate) ProtoMessage() {}
 
 func (x *OperationsToolAggregate) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[28]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2024,7 +2332,7 @@ func (x *OperationsToolAggregate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationsToolAggregate.ProtoReflect.Descriptor instead.
 func (*OperationsToolAggregate) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{28}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *OperationsToolAggregate) GetTool() string {
@@ -2059,7 +2367,7 @@ type OperationsFlowAggregate struct {
 
 func (x *OperationsFlowAggregate) Reset() {
 	*x = OperationsFlowAggregate{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[29]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2071,7 +2379,7 @@ func (x *OperationsFlowAggregate) String() string {
 func (*OperationsFlowAggregate) ProtoMessage() {}
 
 func (x *OperationsFlowAggregate) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[29]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2084,7 +2392,7 @@ func (x *OperationsFlowAggregate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationsFlowAggregate.ProtoReflect.Descriptor instead.
 func (*OperationsFlowAggregate) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{29}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *OperationsFlowAggregate) GetEventName() string {
@@ -2119,7 +2427,7 @@ type OperationsFailureAggregate struct {
 
 func (x *OperationsFailureAggregate) Reset() {
 	*x = OperationsFailureAggregate{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[30]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2131,7 +2439,7 @@ func (x *OperationsFailureAggregate) String() string {
 func (*OperationsFailureAggregate) ProtoMessage() {}
 
 func (x *OperationsFailureAggregate) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[30]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2144,7 +2452,7 @@ func (x *OperationsFailureAggregate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationsFailureAggregate.ProtoReflect.Descriptor instead.
 func (*OperationsFailureAggregate) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{30}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *OperationsFailureAggregate) GetEventName() string {
@@ -2188,7 +2496,7 @@ type GetOperationsTelemetryResponse struct {
 
 func (x *GetOperationsTelemetryResponse) Reset() {
 	*x = GetOperationsTelemetryResponse{}
-	mi := &file_starlogz_v1_ui_proto_msgTypes[31]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2200,7 +2508,7 @@ func (x *GetOperationsTelemetryResponse) String() string {
 func (*GetOperationsTelemetryResponse) ProtoMessage() {}
 
 func (x *GetOperationsTelemetryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_starlogz_v1_ui_proto_msgTypes[31]
+	mi := &file_starlogz_v1_ui_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2213,7 +2521,7 @@ func (x *GetOperationsTelemetryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOperationsTelemetryResponse.ProtoReflect.Descriptor instead.
 func (*GetOperationsTelemetryResponse) Descriptor() ([]byte, []int) {
-	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{31}
+	return file_starlogz_v1_ui_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetOperationsTelemetryResponse) GetAvailable() bool {
@@ -2305,7 +2613,7 @@ var File_starlogz_v1_ui_proto protoreflect.FileDescriptor
 const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\n" +
 	"\x14starlogz/v1/ui.proto\x12\vstarlogz.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
-	"\x11GetSessionRequest\"\xe3\x01\n" +
+	"\x11GetSessionRequest\"\x89\x02\n" +
 	"\x12GetSessionResponse\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05login\x18\x02 \x01(\tR\x05login\x12\x14\n" +
@@ -2316,7 +2624,8 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\vprofile_url\x18\a \x01(\tR\n" +
 	"profileUrl\x12\x1f\n" +
 	"\vis_operator\x18\b \x01(\bR\n" +
-	"isOperatorJ\x04\b\x04\x10\x05\"\x15\n" +
+	"isOperator\x12$\n" +
+	"\x0eweb_session_id\x18\t \x01(\tR\fwebSessionIdJ\x04\b\x04\x10\x05\"\x15\n" +
 	"\x13ListProjectsRequest\"|\n" +
 	"\aProject\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -2454,7 +2763,7 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\n" +
 	"revoked_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\x12\x16\n" +
 	"\x06active\x18\n" +
-	" \x01(\bR\x06active\"\xa3\x03\n" +
+	" \x01(\bR\x06active\"\xb3\x03\n" +
 	"\x11OAuthGrantSummary\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05login\x18\x02 \x01(\tR\x05login\x12!\n" +
@@ -2468,12 +2777,35 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x16\n" +
 	"\x06active\x18\n" +
-	" \x01(\bR\x06active\"\x9f\x02\n" +
+	" \x01(\bR\x06active\x12\x0e\n" +
+	"\x02id\x18\v \x01(\tR\x02id\"\xad\x03\n" +
+	"\x15OperatorActionSummary\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\"\n" +
+	"\ractor_user_id\x18\x02 \x01(\tR\vactorUserId\x12\x1f\n" +
+	"\vactor_login\x18\x03 \x01(\tR\n" +
+	"actorLogin\x12,\n" +
+	"\x12actor_display_name\x18\x04 \x01(\tR\x10actorDisplayName\x12\x16\n" +
+	"\x06action\x18\x05 \x01(\tR\x06action\x12\x1b\n" +
+	"\ttarget_id\x18\x06 \x01(\tR\btargetId\x12$\n" +
+	"\x0etarget_user_id\x18\a \x01(\tR\ftargetUserId\x12!\n" +
+	"\ftarget_login\x18\b \x01(\tR\vtargetLogin\x12.\n" +
+	"\x13target_display_name\x18\t \x01(\tR\x11targetDisplayName\x12(\n" +
+	"\x10target_client_id\x18\n" +
+	" \x01(\tR\x0etargetClientId\x129\n" +
+	"\n" +
+	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xea\x02\n" +
 	"\x1dGetOperationsOverviewResponse\x12.\n" +
 	"\x13active_web_sessions\x18\x01 \x01(\x05R\x11activeWebSessions\x12.\n" +
 	"\x13active_oauth_grants\x18\x02 \x01(\x05R\x11activeOauthGrants\x12N\n" +
 	"\x13recent_web_sessions\x18\x03 \x03(\v2\x1e.starlogz.v1.WebSessionSummaryR\x11recentWebSessions\x12N\n" +
-	"\x13recent_oauth_grants\x18\x04 \x03(\v2\x1e.starlogz.v1.OAuthGrantSummaryR\x11recentOauthGrants\"\x85\x01\n" +
+	"\x13recent_oauth_grants\x18\x04 \x03(\v2\x1e.starlogz.v1.OAuthGrantSummaryR\x11recentOauthGrants\x12I\n" +
+	"\x0erecent_actions\x18\x05 \x03(\v2\".starlogz.v1.OperatorActionSummaryR\rrecentActions\"3\n" +
+	"!RevokeOperationsWebSessionRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"$\n" +
+	"\"RevokeOperationsWebSessionResponse\"3\n" +
+	"!RevokeOperationsOAuthGrantRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"$\n" +
+	"\"RevokeOperationsOAuthGrantResponse\"\x85\x01\n" +
 	"\x14OperationsTimeBucket\x129\n" +
 	"\n" +
 	"started_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x18\n" +
@@ -2508,7 +2840,7 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	" \x03(\v2$.starlogz.v1.OperationsToolAggregateR\x05tools\x12E\n" +
 	"\voauth_flows\x18\v \x03(\v2$.starlogz.v1.OperationsFlowAggregateR\n" +
 	"oauthFlows\x12N\n" +
-	"\x0eoauth_failures\x18\f \x03(\v2'.starlogz.v1.OperationsFailureAggregateR\roauthFailures2\xdd\a\n" +
+	"\x0eoauth_failures\x18\f \x03(\v2'.starlogz.v1.OperationsFailureAggregateR\roauthFailures2\xe7\t\n" +
 	"\tUIService\x12R\n" +
 	"\n" +
 	"GetSession\x12\x1e.starlogz.v1.GetSessionRequest\x1a\x1f.starlogz.v1.GetSessionResponse\"\x03\x90\x02\x01\x12X\n" +
@@ -2521,7 +2853,9 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\x12ListInsightHistory\x12&.starlogz.v1.ListInsightHistoryRequest\x1a'.starlogz.v1.ListInsightHistoryResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\bListTags\x12\x1c.starlogz.v1.ListTagsRequest\x1a\x1d.starlogz.v1.ListTagsResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x15GetOperationsOverview\x12).starlogz.v1.GetOperationsOverviewRequest\x1a*.starlogz.v1.GetOperationsOverviewResponse\"\x03\x90\x02\x01\x12v\n" +
-	"\x16GetOperationsTelemetry\x12*.starlogz.v1.GetOperationsTelemetryRequest\x1a+.starlogz.v1.GetOperationsTelemetryResponse\"\x03\x90\x02\x01B\xae\x01\n" +
+	"\x16GetOperationsTelemetry\x12*.starlogz.v1.GetOperationsTelemetryRequest\x1a+.starlogz.v1.GetOperationsTelemetryResponse\"\x03\x90\x02\x01\x12\x82\x01\n" +
+	"\x1aRevokeOperationsWebSession\x12..starlogz.v1.RevokeOperationsWebSessionRequest\x1a/.starlogz.v1.RevokeOperationsWebSessionResponse\"\x03\x90\x02\x02\x12\x82\x01\n" +
+	"\x1aRevokeOperationsOAuthGrant\x12..starlogz.v1.RevokeOperationsOAuthGrantRequest\x1a/.starlogz.v1.RevokeOperationsOAuthGrantResponse\"\x03\x90\x02\x02B\xae\x01\n" +
 	"\x0fcom.starlogz.v1B\aUiProtoP\x01ZEgithub.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1;starlogzv1\xa2\x02\x03SXX\xaa\x02\vStarlogz.V1\xca\x02\vStarlogz\\V1\xe2\x02\x17Starlogz\\V1\\GPBMetadata\xea\x02\fStarlogz::V1b\x06proto3"
 
 var (
@@ -2536,44 +2870,49 @@ func file_starlogz_v1_ui_proto_rawDescGZIP() []byte {
 	return file_starlogz_v1_ui_proto_rawDescData
 }
 
-var file_starlogz_v1_ui_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_starlogz_v1_ui_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_starlogz_v1_ui_proto_goTypes = []any{
-	(*GetSessionRequest)(nil),              // 0: starlogz.v1.GetSessionRequest
-	(*GetSessionResponse)(nil),             // 1: starlogz.v1.GetSessionResponse
-	(*ListProjectsRequest)(nil),            // 2: starlogz.v1.ListProjectsRequest
-	(*Project)(nil),                        // 3: starlogz.v1.Project
-	(*ListProjectsResponse)(nil),           // 4: starlogz.v1.ListProjectsResponse
-	(*GetProjectDashboardRequest)(nil),     // 5: starlogz.v1.GetProjectDashboardRequest
-	(*CountBucket)(nil),                    // 6: starlogz.v1.CountBucket
-	(*ActivityBucket)(nil),                 // 7: starlogz.v1.ActivityBucket
-	(*GetProjectDashboardResponse)(nil),    // 8: starlogz.v1.GetProjectDashboardResponse
-	(*Insight)(nil),                        // 9: starlogz.v1.Insight
-	(*GetInsightRequest)(nil),              // 10: starlogz.v1.GetInsightRequest
-	(*InsightReference)(nil),               // 11: starlogz.v1.InsightReference
-	(*GetInsightResponse)(nil),             // 12: starlogz.v1.GetInsightResponse
-	(*ListInsightHistoryRequest)(nil),      // 13: starlogz.v1.ListInsightHistoryRequest
-	(*InsightRevision)(nil),                // 14: starlogz.v1.InsightRevision
-	(*ListInsightHistoryResponse)(nil),     // 15: starlogz.v1.ListInsightHistoryResponse
-	(*ListInsightsRequest)(nil),            // 16: starlogz.v1.ListInsightsRequest
-	(*ListInsightsResponse)(nil),           // 17: starlogz.v1.ListInsightsResponse
-	(*SearchInsightsRequest)(nil),          // 18: starlogz.v1.SearchInsightsRequest
-	(*SearchInsightsResponse)(nil),         // 19: starlogz.v1.SearchInsightsResponse
-	(*ListTagsRequest)(nil),                // 20: starlogz.v1.ListTagsRequest
-	(*ListTagsResponse)(nil),               // 21: starlogz.v1.ListTagsResponse
-	(*GetOperationsOverviewRequest)(nil),   // 22: starlogz.v1.GetOperationsOverviewRequest
-	(*GetOperationsTelemetryRequest)(nil),  // 23: starlogz.v1.GetOperationsTelemetryRequest
-	(*WebSessionSummary)(nil),              // 24: starlogz.v1.WebSessionSummary
-	(*OAuthGrantSummary)(nil),              // 25: starlogz.v1.OAuthGrantSummary
-	(*GetOperationsOverviewResponse)(nil),  // 26: starlogz.v1.GetOperationsOverviewResponse
-	(*OperationsTimeBucket)(nil),           // 27: starlogz.v1.OperationsTimeBucket
-	(*OperationsToolAggregate)(nil),        // 28: starlogz.v1.OperationsToolAggregate
-	(*OperationsFlowAggregate)(nil),        // 29: starlogz.v1.OperationsFlowAggregate
-	(*OperationsFailureAggregate)(nil),     // 30: starlogz.v1.OperationsFailureAggregate
-	(*GetOperationsTelemetryResponse)(nil), // 31: starlogz.v1.GetOperationsTelemetryResponse
-	(*timestamppb.Timestamp)(nil),          // 32: google.protobuf.Timestamp
+	(*GetSessionRequest)(nil),                  // 0: starlogz.v1.GetSessionRequest
+	(*GetSessionResponse)(nil),                 // 1: starlogz.v1.GetSessionResponse
+	(*ListProjectsRequest)(nil),                // 2: starlogz.v1.ListProjectsRequest
+	(*Project)(nil),                            // 3: starlogz.v1.Project
+	(*ListProjectsResponse)(nil),               // 4: starlogz.v1.ListProjectsResponse
+	(*GetProjectDashboardRequest)(nil),         // 5: starlogz.v1.GetProjectDashboardRequest
+	(*CountBucket)(nil),                        // 6: starlogz.v1.CountBucket
+	(*ActivityBucket)(nil),                     // 7: starlogz.v1.ActivityBucket
+	(*GetProjectDashboardResponse)(nil),        // 8: starlogz.v1.GetProjectDashboardResponse
+	(*Insight)(nil),                            // 9: starlogz.v1.Insight
+	(*GetInsightRequest)(nil),                  // 10: starlogz.v1.GetInsightRequest
+	(*InsightReference)(nil),                   // 11: starlogz.v1.InsightReference
+	(*GetInsightResponse)(nil),                 // 12: starlogz.v1.GetInsightResponse
+	(*ListInsightHistoryRequest)(nil),          // 13: starlogz.v1.ListInsightHistoryRequest
+	(*InsightRevision)(nil),                    // 14: starlogz.v1.InsightRevision
+	(*ListInsightHistoryResponse)(nil),         // 15: starlogz.v1.ListInsightHistoryResponse
+	(*ListInsightsRequest)(nil),                // 16: starlogz.v1.ListInsightsRequest
+	(*ListInsightsResponse)(nil),               // 17: starlogz.v1.ListInsightsResponse
+	(*SearchInsightsRequest)(nil),              // 18: starlogz.v1.SearchInsightsRequest
+	(*SearchInsightsResponse)(nil),             // 19: starlogz.v1.SearchInsightsResponse
+	(*ListTagsRequest)(nil),                    // 20: starlogz.v1.ListTagsRequest
+	(*ListTagsResponse)(nil),                   // 21: starlogz.v1.ListTagsResponse
+	(*GetOperationsOverviewRequest)(nil),       // 22: starlogz.v1.GetOperationsOverviewRequest
+	(*GetOperationsTelemetryRequest)(nil),      // 23: starlogz.v1.GetOperationsTelemetryRequest
+	(*WebSessionSummary)(nil),                  // 24: starlogz.v1.WebSessionSummary
+	(*OAuthGrantSummary)(nil),                  // 25: starlogz.v1.OAuthGrantSummary
+	(*OperatorActionSummary)(nil),              // 26: starlogz.v1.OperatorActionSummary
+	(*GetOperationsOverviewResponse)(nil),      // 27: starlogz.v1.GetOperationsOverviewResponse
+	(*RevokeOperationsWebSessionRequest)(nil),  // 28: starlogz.v1.RevokeOperationsWebSessionRequest
+	(*RevokeOperationsWebSessionResponse)(nil), // 29: starlogz.v1.RevokeOperationsWebSessionResponse
+	(*RevokeOperationsOAuthGrantRequest)(nil),  // 30: starlogz.v1.RevokeOperationsOAuthGrantRequest
+	(*RevokeOperationsOAuthGrantResponse)(nil), // 31: starlogz.v1.RevokeOperationsOAuthGrantResponse
+	(*OperationsTimeBucket)(nil),               // 32: starlogz.v1.OperationsTimeBucket
+	(*OperationsToolAggregate)(nil),            // 33: starlogz.v1.OperationsToolAggregate
+	(*OperationsFlowAggregate)(nil),            // 34: starlogz.v1.OperationsFlowAggregate
+	(*OperationsFailureAggregate)(nil),         // 35: starlogz.v1.OperationsFailureAggregate
+	(*GetOperationsTelemetryResponse)(nil),     // 36: starlogz.v1.GetOperationsTelemetryResponse
+	(*timestamppb.Timestamp)(nil),              // 37: google.protobuf.Timestamp
 }
 var file_starlogz_v1_ui_proto_depIdxs = []int32{
-	32, // 0: starlogz.v1.Project.created_at:type_name -> google.protobuf.Timestamp
+	37, // 0: starlogz.v1.Project.created_at:type_name -> google.protobuf.Timestamp
 	3,  // 1: starlogz.v1.ListProjectsResponse.projects:type_name -> starlogz.v1.Project
 	3,  // 2: starlogz.v1.GetProjectDashboardResponse.project:type_name -> starlogz.v1.Project
 	6,  // 3: starlogz.v1.GetProjectDashboardResponse.category_counts:type_name -> starlogz.v1.CountBucket
@@ -2581,61 +2920,67 @@ var file_starlogz_v1_ui_proto_depIdxs = []int32{
 	6,  // 5: starlogz.v1.GetProjectDashboardResponse.top_tags:type_name -> starlogz.v1.CountBucket
 	7,  // 6: starlogz.v1.GetProjectDashboardResponse.recent_activity:type_name -> starlogz.v1.ActivityBucket
 	9,  // 7: starlogz.v1.GetProjectDashboardResponse.recent_insights:type_name -> starlogz.v1.Insight
-	32, // 8: starlogz.v1.Insight.created_at:type_name -> google.protobuf.Timestamp
-	32, // 9: starlogz.v1.Insight.updated_at:type_name -> google.protobuf.Timestamp
-	32, // 10: starlogz.v1.InsightReference.updated_at:type_name -> google.protobuf.Timestamp
+	37, // 8: starlogz.v1.Insight.created_at:type_name -> google.protobuf.Timestamp
+	37, // 9: starlogz.v1.Insight.updated_at:type_name -> google.protobuf.Timestamp
+	37, // 10: starlogz.v1.InsightReference.updated_at:type_name -> google.protobuf.Timestamp
 	9,  // 11: starlogz.v1.GetInsightResponse.insight:type_name -> starlogz.v1.Insight
 	11, // 12: starlogz.v1.GetInsightResponse.links:type_name -> starlogz.v1.InsightReference
 	11, // 13: starlogz.v1.GetInsightResponse.backlinks:type_name -> starlogz.v1.InsightReference
-	32, // 14: starlogz.v1.InsightRevision.deleted_at:type_name -> google.protobuf.Timestamp
-	32, // 15: starlogz.v1.InsightRevision.changed_at:type_name -> google.protobuf.Timestamp
+	37, // 14: starlogz.v1.InsightRevision.deleted_at:type_name -> google.protobuf.Timestamp
+	37, // 15: starlogz.v1.InsightRevision.changed_at:type_name -> google.protobuf.Timestamp
 	14, // 16: starlogz.v1.ListInsightHistoryResponse.revisions:type_name -> starlogz.v1.InsightRevision
 	9,  // 17: starlogz.v1.ListInsightsResponse.insights:type_name -> starlogz.v1.Insight
 	9,  // 18: starlogz.v1.SearchInsightsResponse.insights:type_name -> starlogz.v1.Insight
 	6,  // 19: starlogz.v1.ListTagsResponse.tags:type_name -> starlogz.v1.CountBucket
-	32, // 20: starlogz.v1.WebSessionSummary.created_at:type_name -> google.protobuf.Timestamp
-	32, // 21: starlogz.v1.WebSessionSummary.last_seen_at:type_name -> google.protobuf.Timestamp
-	32, // 22: starlogz.v1.WebSessionSummary.idle_expires_at:type_name -> google.protobuf.Timestamp
-	32, // 23: starlogz.v1.WebSessionSummary.expires_at:type_name -> google.protobuf.Timestamp
-	32, // 24: starlogz.v1.WebSessionSummary.revoked_at:type_name -> google.protobuf.Timestamp
-	32, // 25: starlogz.v1.OAuthGrantSummary.jwt_expires_at:type_name -> google.protobuf.Timestamp
-	32, // 26: starlogz.v1.OAuthGrantSummary.refresh_token_expires_at:type_name -> google.protobuf.Timestamp
-	32, // 27: starlogz.v1.OAuthGrantSummary.updated_at:type_name -> google.protobuf.Timestamp
-	24, // 28: starlogz.v1.GetOperationsOverviewResponse.recent_web_sessions:type_name -> starlogz.v1.WebSessionSummary
-	25, // 29: starlogz.v1.GetOperationsOverviewResponse.recent_oauth_grants:type_name -> starlogz.v1.OAuthGrantSummary
-	32, // 30: starlogz.v1.OperationsTimeBucket.started_at:type_name -> google.protobuf.Timestamp
-	32, // 31: starlogz.v1.GetOperationsTelemetryResponse.generated_at:type_name -> google.protobuf.Timestamp
-	32, // 32: starlogz.v1.GetOperationsTelemetryResponse.window_started_at:type_name -> google.protobuf.Timestamp
-	32, // 33: starlogz.v1.GetOperationsTelemetryResponse.window_ended_at:type_name -> google.protobuf.Timestamp
-	27, // 34: starlogz.v1.GetOperationsTelemetryResponse.tool_series:type_name -> starlogz.v1.OperationsTimeBucket
-	28, // 35: starlogz.v1.GetOperationsTelemetryResponse.tools:type_name -> starlogz.v1.OperationsToolAggregate
-	29, // 36: starlogz.v1.GetOperationsTelemetryResponse.oauth_flows:type_name -> starlogz.v1.OperationsFlowAggregate
-	30, // 37: starlogz.v1.GetOperationsTelemetryResponse.oauth_failures:type_name -> starlogz.v1.OperationsFailureAggregate
-	0,  // 38: starlogz.v1.UIService.GetSession:input_type -> starlogz.v1.GetSessionRequest
-	2,  // 39: starlogz.v1.UIService.ListProjects:input_type -> starlogz.v1.ListProjectsRequest
-	5,  // 40: starlogz.v1.UIService.GetProjectDashboard:input_type -> starlogz.v1.GetProjectDashboardRequest
-	16, // 41: starlogz.v1.UIService.ListInsights:input_type -> starlogz.v1.ListInsightsRequest
-	18, // 42: starlogz.v1.UIService.SearchInsights:input_type -> starlogz.v1.SearchInsightsRequest
-	10, // 43: starlogz.v1.UIService.GetInsight:input_type -> starlogz.v1.GetInsightRequest
-	13, // 44: starlogz.v1.UIService.ListInsightHistory:input_type -> starlogz.v1.ListInsightHistoryRequest
-	20, // 45: starlogz.v1.UIService.ListTags:input_type -> starlogz.v1.ListTagsRequest
-	22, // 46: starlogz.v1.UIService.GetOperationsOverview:input_type -> starlogz.v1.GetOperationsOverviewRequest
-	23, // 47: starlogz.v1.UIService.GetOperationsTelemetry:input_type -> starlogz.v1.GetOperationsTelemetryRequest
-	1,  // 48: starlogz.v1.UIService.GetSession:output_type -> starlogz.v1.GetSessionResponse
-	4,  // 49: starlogz.v1.UIService.ListProjects:output_type -> starlogz.v1.ListProjectsResponse
-	8,  // 50: starlogz.v1.UIService.GetProjectDashboard:output_type -> starlogz.v1.GetProjectDashboardResponse
-	17, // 51: starlogz.v1.UIService.ListInsights:output_type -> starlogz.v1.ListInsightsResponse
-	19, // 52: starlogz.v1.UIService.SearchInsights:output_type -> starlogz.v1.SearchInsightsResponse
-	12, // 53: starlogz.v1.UIService.GetInsight:output_type -> starlogz.v1.GetInsightResponse
-	15, // 54: starlogz.v1.UIService.ListInsightHistory:output_type -> starlogz.v1.ListInsightHistoryResponse
-	21, // 55: starlogz.v1.UIService.ListTags:output_type -> starlogz.v1.ListTagsResponse
-	26, // 56: starlogz.v1.UIService.GetOperationsOverview:output_type -> starlogz.v1.GetOperationsOverviewResponse
-	31, // 57: starlogz.v1.UIService.GetOperationsTelemetry:output_type -> starlogz.v1.GetOperationsTelemetryResponse
-	48, // [48:58] is the sub-list for method output_type
-	38, // [38:48] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	37, // 20: starlogz.v1.WebSessionSummary.created_at:type_name -> google.protobuf.Timestamp
+	37, // 21: starlogz.v1.WebSessionSummary.last_seen_at:type_name -> google.protobuf.Timestamp
+	37, // 22: starlogz.v1.WebSessionSummary.idle_expires_at:type_name -> google.protobuf.Timestamp
+	37, // 23: starlogz.v1.WebSessionSummary.expires_at:type_name -> google.protobuf.Timestamp
+	37, // 24: starlogz.v1.WebSessionSummary.revoked_at:type_name -> google.protobuf.Timestamp
+	37, // 25: starlogz.v1.OAuthGrantSummary.jwt_expires_at:type_name -> google.protobuf.Timestamp
+	37, // 26: starlogz.v1.OAuthGrantSummary.refresh_token_expires_at:type_name -> google.protobuf.Timestamp
+	37, // 27: starlogz.v1.OAuthGrantSummary.updated_at:type_name -> google.protobuf.Timestamp
+	37, // 28: starlogz.v1.OperatorActionSummary.created_at:type_name -> google.protobuf.Timestamp
+	24, // 29: starlogz.v1.GetOperationsOverviewResponse.recent_web_sessions:type_name -> starlogz.v1.WebSessionSummary
+	25, // 30: starlogz.v1.GetOperationsOverviewResponse.recent_oauth_grants:type_name -> starlogz.v1.OAuthGrantSummary
+	26, // 31: starlogz.v1.GetOperationsOverviewResponse.recent_actions:type_name -> starlogz.v1.OperatorActionSummary
+	37, // 32: starlogz.v1.OperationsTimeBucket.started_at:type_name -> google.protobuf.Timestamp
+	37, // 33: starlogz.v1.GetOperationsTelemetryResponse.generated_at:type_name -> google.protobuf.Timestamp
+	37, // 34: starlogz.v1.GetOperationsTelemetryResponse.window_started_at:type_name -> google.protobuf.Timestamp
+	37, // 35: starlogz.v1.GetOperationsTelemetryResponse.window_ended_at:type_name -> google.protobuf.Timestamp
+	32, // 36: starlogz.v1.GetOperationsTelemetryResponse.tool_series:type_name -> starlogz.v1.OperationsTimeBucket
+	33, // 37: starlogz.v1.GetOperationsTelemetryResponse.tools:type_name -> starlogz.v1.OperationsToolAggregate
+	34, // 38: starlogz.v1.GetOperationsTelemetryResponse.oauth_flows:type_name -> starlogz.v1.OperationsFlowAggregate
+	35, // 39: starlogz.v1.GetOperationsTelemetryResponse.oauth_failures:type_name -> starlogz.v1.OperationsFailureAggregate
+	0,  // 40: starlogz.v1.UIService.GetSession:input_type -> starlogz.v1.GetSessionRequest
+	2,  // 41: starlogz.v1.UIService.ListProjects:input_type -> starlogz.v1.ListProjectsRequest
+	5,  // 42: starlogz.v1.UIService.GetProjectDashboard:input_type -> starlogz.v1.GetProjectDashboardRequest
+	16, // 43: starlogz.v1.UIService.ListInsights:input_type -> starlogz.v1.ListInsightsRequest
+	18, // 44: starlogz.v1.UIService.SearchInsights:input_type -> starlogz.v1.SearchInsightsRequest
+	10, // 45: starlogz.v1.UIService.GetInsight:input_type -> starlogz.v1.GetInsightRequest
+	13, // 46: starlogz.v1.UIService.ListInsightHistory:input_type -> starlogz.v1.ListInsightHistoryRequest
+	20, // 47: starlogz.v1.UIService.ListTags:input_type -> starlogz.v1.ListTagsRequest
+	22, // 48: starlogz.v1.UIService.GetOperationsOverview:input_type -> starlogz.v1.GetOperationsOverviewRequest
+	23, // 49: starlogz.v1.UIService.GetOperationsTelemetry:input_type -> starlogz.v1.GetOperationsTelemetryRequest
+	28, // 50: starlogz.v1.UIService.RevokeOperationsWebSession:input_type -> starlogz.v1.RevokeOperationsWebSessionRequest
+	30, // 51: starlogz.v1.UIService.RevokeOperationsOAuthGrant:input_type -> starlogz.v1.RevokeOperationsOAuthGrantRequest
+	1,  // 52: starlogz.v1.UIService.GetSession:output_type -> starlogz.v1.GetSessionResponse
+	4,  // 53: starlogz.v1.UIService.ListProjects:output_type -> starlogz.v1.ListProjectsResponse
+	8,  // 54: starlogz.v1.UIService.GetProjectDashboard:output_type -> starlogz.v1.GetProjectDashboardResponse
+	17, // 55: starlogz.v1.UIService.ListInsights:output_type -> starlogz.v1.ListInsightsResponse
+	19, // 56: starlogz.v1.UIService.SearchInsights:output_type -> starlogz.v1.SearchInsightsResponse
+	12, // 57: starlogz.v1.UIService.GetInsight:output_type -> starlogz.v1.GetInsightResponse
+	15, // 58: starlogz.v1.UIService.ListInsightHistory:output_type -> starlogz.v1.ListInsightHistoryResponse
+	21, // 59: starlogz.v1.UIService.ListTags:output_type -> starlogz.v1.ListTagsResponse
+	27, // 60: starlogz.v1.UIService.GetOperationsOverview:output_type -> starlogz.v1.GetOperationsOverviewResponse
+	36, // 61: starlogz.v1.UIService.GetOperationsTelemetry:output_type -> starlogz.v1.GetOperationsTelemetryResponse
+	29, // 62: starlogz.v1.UIService.RevokeOperationsWebSession:output_type -> starlogz.v1.RevokeOperationsWebSessionResponse
+	31, // 63: starlogz.v1.UIService.RevokeOperationsOAuthGrant:output_type -> starlogz.v1.RevokeOperationsOAuthGrantResponse
+	52, // [52:64] is the sub-list for method output_type
+	40, // [40:52] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_starlogz_v1_ui_proto_init() }
@@ -2653,7 +2998,7 @@ func file_starlogz_v1_ui_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_starlogz_v1_ui_proto_rawDesc), len(file_starlogz_v1_ui_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

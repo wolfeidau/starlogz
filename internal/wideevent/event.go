@@ -34,6 +34,8 @@ const (
 	UISessionCreated                        Name = "ui.session.created"
 	UISessionRevoked                        Name = "ui.session.revoked"
 	MCPToolCallCompleted                    Name = "mcp.tool_call.completed"
+	OperatorWebSessionRevokeCompleted       Name = "operator.web_session_revoke.completed"
+	OperatorOAuthGrantRevokeCompleted       Name = "operator.oauth_grant_revoke.completed"
 )
 
 const (
@@ -260,7 +262,8 @@ var (
 		OAuthAuthorizationConfirmationCompleted: {},
 		OAuthTokenExchangeCompleted:             {}, OAuthRefreshCompleted: {},
 		UILoginCompleted: {}, UISessionCreated: {}, UISessionRevoked: {},
-		MCPToolCallCompleted: {},
+		MCPToolCallCompleted:              {},
+		OperatorWebSessionRevokeCompleted: {}, OperatorOAuthGrantRevokeCompleted: {},
 	}
 	allowedReasons = map[string]struct{}{
 		ReasonCompleted: {}, ReasonInvalidRequest: {}, ReasonUnauthorized: {},
