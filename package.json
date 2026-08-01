@@ -6,9 +6,10 @@
   "scripts": {
     "build": "bun build ./ui/pages/dashboard.tsx --outdir ./internal/server/public --target browser --format esm --production",
     "test": "bun test ui",
-    "lint": "biome lint ui api/gen/proto/es",
-    "format": "biome format --write ui api/gen/proto/es",
-    "proto:generate": "cd api && go tool buf generate"
+    "lint": "biome lint ui",
+    "format": "biome format --write ui",
+    "proto:generate": "cd api && go tool buf generate",
+    "proto:check": "bun run proto:generate && git diff --exit-code -- api/gen/proto && test -z \"$(git ls-files --others --exclude-standard -- api/gen/proto)\""
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.10.2",

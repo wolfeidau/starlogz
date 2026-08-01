@@ -129,6 +129,13 @@ Docker must be running for store integration tests.
 
 Deploy Lambda changes with `mise exec -- bin/deploy`; Terraform consumes the artifact uploaded by that script and does not build or upload application code itself.
 
+Generated protobuf clients under `api/gen/proto/` are checked in as exact
+generator output. Do not format or lint them. After changing a proto or generator
+dependency, run `mise exec -- bun run proto:generate` and commit the result.
+`mise exec -- bun run proto:check` regenerates the clients and fails if tracked or
+untracked output differs from the index. Deploys require a clean working tree and
+run this check before packaging.
+
 Key env vars:
 
 | Var | Default | Description |
