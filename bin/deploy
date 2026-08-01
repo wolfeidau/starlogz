@@ -7,6 +7,12 @@ ENV=${1:-dev}
 BUCKET="starlogz-deploy-${ENV}"
 TF_DIR="infra/terraform"
 
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "error: deployment requires a clean working tree"
+  git status --short
+  exit 1
+fi
+
 confirm() {
   local msg=$1
   echo ""
@@ -18,7 +24,10 @@ confirm() {
 # Build
 echo "==> building"
 bun install --frozen-lockfile
-bun run proto:generate
+if ! bun run proto:check; then
+  echo "error: generated protobuf clients are not current"
+  exit 1
+fi
 bun run build
 goreleaser build --clean --snapshot
 VERSION=$(jq -r .version dist/metadata.json)
