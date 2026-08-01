@@ -1,9 +1,13 @@
--- Migration 27: Stable grant identifiers and durable operator-action records.
+-- Migration 27: Operator-control schema and credential-free grant auditing.
 
 ALTER TABLE grants
-    ADD COLUMN id UUID NOT NULL DEFAULT uuidv7();
+    ADD COLUMN id UUID;
 
-CREATE UNIQUE INDEX grants_id_idx ON grants (id);
+ALTER TABLE grants
+    ALTER COLUMN id SET DEFAULT uuidv7();
+
+ALTER TABLE grants
+    ADD CONSTRAINT grants_id_not_null CHECK (id IS NOT NULL) NOT VALID;
 
 CREATE TABLE operator_actions (
     id               UUID        PRIMARY KEY DEFAULT uuidv7(),
@@ -61,16 +65,5 @@ DROP TRIGGER IF EXISTS audit_grants ON grants;
 CREATE TRIGGER audit_grants
     AFTER INSERT OR UPDATE OR DELETE ON grants
     FOR EACH ROW EXECUTE FUNCTION audit_grants_trigger_func();
-
-UPDATE audit_log
-SET old_data = CASE
-        WHEN old_data IS NULL THEN NULL
-        ELSE old_data - 'our_refresh_token' - 'access_token' - 'refresh_token'
-    END,
-    new_data = CASE
-        WHEN new_data IS NULL THEN NULL
-        ELSE new_data - 'our_refresh_token' - 'access_token' - 'refresh_token'
-    END
-WHERE table_name = 'grants';
 
 INSERT INTO schema_migrations (version) VALUES (27) ON CONFLICT DO NOTHING;
