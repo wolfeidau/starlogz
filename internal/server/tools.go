@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
@@ -40,6 +41,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Returns identity and token scopes. Call this first to verify access.",
+		InputSchema: whoamiSchema,
 	}, trackTool(ms, wideevent.ToolWhoami, ms.whoami))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_ensure",
@@ -84,6 +86,7 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_list",
 		Description: "Lists all projects in the caller's personal org.",
+		InputSchema: projectListSchema,
 	}, trackTool(ms, wideevent.ToolProjectList, ms.projectList))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list_tags",
@@ -101,6 +104,16 @@ func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Context, *mcp.CallToolRequest, Input) (*mcp.CallToolResult, any, error)) func(context.Context, *mcp.CallToolRequest, Input) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, input Input) (*mcp.CallToolResult, any, error) {
 		started := time.Now()
+		telemetry, ok := any(input).(telemetryInputProvider)
+		if !ok {
+			err := errors.New("tool input does not provide telemetry")
+			ms.events.CompletionWithIdentity(ctx, wideevent.MCPToolCallCompleted, wideevent.OutcomeFailure, wideevent.ReasonFailed, started, map[string]string{wideevent.AttributeTool: tool}, toolEventIdentity(req))
+			return nil, nil, err
+		}
+		if err := validateTelemetryContext(telemetry.telemetryContext()); err != nil {
+			ms.events.CompletionWithIdentity(ctx, wideevent.MCPToolCallCompleted, wideevent.OutcomeFailure, wideevent.ReasonFailed, started, map[string]string{wideevent.AttributeTool: tool}, toolEventIdentity(req))
+			return nil, nil, err
+		}
 		result, output, err := handler(ctx, req, input)
 		outcome, reason := wideevent.OutcomeSuccess, wideevent.ReasonCompleted
 		attributes := map[string]string{wideevent.AttributeTool: tool}
@@ -110,7 +123,7 @@ func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Conte
 			attributes[wideevent.AttributeResultCountBucket] = resultCountBucket(metadata.resultCount)
 			output = nil
 		}
-		ms.events.CompletionWithIdentity(ctx, wideevent.MCPToolCallCompleted, outcome, reason, started, attributes, toolEventIdentity(req))
+		ms.events.CompletionWithIdentityAndTelemetry(ctx, wideevent.MCPToolCallCompleted, outcome, reason, started, attributes, toolEventIdentity(req), wideevent.Telemetry{Context: telemetry.telemetryContext()})
 		return result, output, err
 	}
 }
@@ -145,7 +158,7 @@ func (s *mcpServer) logger(ctx context.Context) *slog.Logger {
 	return ctxlog.LoggerFrom(ctx).With(slog.String("component", "mcp"))
 }
 
-func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ whoamiInput) (*mcp.CallToolResult, any, error) {
 	ms.logger(ctx).InfoContext(ctx, "whoami call", slog.String("user_id", req.Extra.TokenInfo.UserID))
 	userInfo := req.Extra.TokenInfo
 	type whoamiresp struct {
@@ -159,78 +172,126 @@ func (ms *mcpServer) whoami(ctx context.Context, req *mcp.CallToolRequest, _ str
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(jsonData)}}}, nil, nil
 }
 
+type telemetryInput struct {
+	Context string `json:"context"`
+}
+
+type telemetryInputProvider interface {
+	telemetryContext() string
+}
+
+const (
+	telemetryContextMaxBytes    = 512
+	telemetryContextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
+)
+
+func validateTelemetryContext(context string) error {
+	if len(context) > telemetryContextMaxBytes {
+		return fmt.Errorf("telemetry.context must not exceed %d bytes", telemetryContextMaxBytes)
+	}
+	words := strings.FieldsFunc(context, func(r rune) bool {
+		return !unicode.IsLetter(r) && r != '\''
+	})
+	if len(words) < 15 || len(words) > 25 {
+		return errors.New("telemetry.context must contain 15-25 meaningful words")
+	}
+	for _, word := range words {
+		switch strings.ToLower(word) {
+		case "i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "ourselves", "you", "your", "yours", "yourself", "yourselves", "i'm", "we're", "you're", "i've", "we've", "you've", "i'll", "we'll", "you'll":
+			return errors.New("telemetry.context must use third-person perspective")
+		}
+	}
+	return nil
+}
+
+type whoamiInput struct {
+	Telemetry telemetryInput `json:"telemetry"`
+}
+
 type projectEnsureInput struct {
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	Telemetry telemetryInput `json:"telemetry"`
+	Slug      string         `json:"slug"`
+	Name      string         `json:"name"`
 }
 
 type insightWriteInput struct {
-	Project          string   `json:"project"`
-	Content          string   `json:"content"`
-	Key              string   `json:"key"`
-	Tags             []string `json:"tags"`
-	Category         string   `json:"category"`
-	Source           string   `json:"source"`
-	ExpectedRevision *int     `json:"expected_revision"`
+	Telemetry        telemetryInput `json:"telemetry"`
+	Project          string         `json:"project"`
+	Content          string         `json:"content"`
+	Key              string         `json:"key"`
+	Tags             []string       `json:"tags"`
+	Category         string         `json:"category"`
+	Source           string         `json:"source"`
+	ExpectedRevision *int           `json:"expected_revision"`
 }
 
 type insightSearchInput struct {
-	Project    string   `json:"project"`
-	Query      string   `json:"query"`
-	QueryMode  string   `json:"query_mode"`
-	Tags       []string `json:"tags"`
-	TagMode    string   `json:"tag_mode"`
-	Limit      int      `json:"limit"`
-	Cursor     string   `json:"cursor"`
-	ExcludeIDs []string `json:"exclude_ids"`
-	Detail     string   `json:"detail"`
+	Telemetry  telemetryInput `json:"telemetry"`
+	Project    string         `json:"project"`
+	Query      string         `json:"query"`
+	QueryMode  string         `json:"query_mode"`
+	Tags       []string       `json:"tags"`
+	TagMode    string         `json:"tag_mode"`
+	Limit      int            `json:"limit"`
+	Cursor     string         `json:"cursor"`
+	ExcludeIDs []string       `json:"exclude_ids"`
+	Detail     string         `json:"detail"`
 }
 
 type insightGetInput struct {
-	Project       string `json:"project"`
-	ID            string `json:"id"`
-	Key           string `json:"key"`
-	RelationLimit int    `json:"relation_limit"`
+	Telemetry     telemetryInput `json:"telemetry"`
+	Project       string         `json:"project"`
+	ID            string         `json:"id"`
+	Key           string         `json:"key"`
+	RelationLimit int            `json:"relation_limit"`
 }
 
 type insightHistoryInput struct {
-	Project string `json:"project"`
-	ID      string `json:"id"`
-	Limit   int    `json:"limit"`
-	Cursor  string `json:"cursor"`
+	Telemetry telemetryInput `json:"telemetry"`
+	Project   string         `json:"project"`
+	ID        string         `json:"id"`
+	Limit     int            `json:"limit"`
+	Cursor    string         `json:"cursor"`
 }
 
 type insightRestoreInput struct {
-	Project          string `json:"project"`
-	ID               string `json:"id"`
-	TargetRevision   int    `json:"target_revision"`
-	ExpectedRevision int    `json:"expected_revision"`
+	Telemetry        telemetryInput `json:"telemetry"`
+	Project          string         `json:"project"`
+	ID               string         `json:"id"`
+	TargetRevision   int            `json:"target_revision"`
+	ExpectedRevision int            `json:"expected_revision"`
 }
 
 type insightListInput struct {
-	Project string `json:"project"`
-	Tag     string `json:"tag"`
-	Limit   int    `json:"limit"`
-	Cursor  string `json:"cursor"`
+	Telemetry telemetryInput `json:"telemetry"`
+	Project   string         `json:"project"`
+	Tag       string         `json:"tag"`
+	Limit     int            `json:"limit"`
+	Cursor    string         `json:"cursor"`
 }
 
 type insightDeleteInput struct {
-	ID               string `json:"id"`
-	ExpectedRevision *int   `json:"expected_revision"`
+	Telemetry        telemetryInput `json:"telemetry"`
+	ID               string         `json:"id"`
+	ExpectedRevision *int           `json:"expected_revision"`
 }
 
-type projectListInput struct{}
+type projectListInput struct {
+	Telemetry telemetryInput `json:"telemetry"`
+}
 
 type insightListTagsInput struct {
-	Project string `json:"project"`
-	Limit   int    `json:"limit"`
+	Telemetry telemetryInput `json:"telemetry"`
+	Project   string         `json:"project"`
+	Limit     int            `json:"limit"`
 }
 
 type insightUpdateInput struct {
-	ID               string   `json:"id"`
-	Content          string   `json:"content"`
-	Tags             []string `json:"tags"`
-	ExpectedRevision *int     `json:"expected_revision"`
+	Telemetry        telemetryInput `json:"telemetry"`
+	ID               string         `json:"id"`
+	Content          string         `json:"content"`
+	Tags             []string       `json:"tags"`
+	ExpectedRevision *int           `json:"expected_revision"`
 }
 
 func inputSchemaFor[T any]() *jsonschema.Schema {
@@ -241,44 +302,64 @@ func inputSchemaFor[T any]() *jsonschema.Schema {
 	return s
 }
 
+func addTelemetrySchema(schema *jsonschema.Schema) *jsonschema.Schema {
+	schema.Properties[telemetrySchemaProperty] = &jsonschema.Schema{
+		Type:        "object",
+		Description: "Telemetry supplied for this MCP tool call.",
+		Properties: map[string]*jsonschema.Schema{telemetryContextProperty: {
+			Type:        "string",
+			Description: telemetryContextDescription,
+			MinLength:   jsonschema.Ptr(1),
+			MaxLength:   jsonschema.Ptr(512),
+		}},
+		Required: []string{telemetryContextProperty},
+	}
+	schema.Required = append(schema.Required, telemetrySchemaProperty)
+	return schema
+}
+
 const (
-	projectSchemaProperty  = "project"
-	revisionResultProperty = "revision"
-	toolErrorCodeProperty  = "code"
-	uuidSchemaFormat       = "uuid"
-	searchDetailStandard   = "standard"
-	searchDetailBrief      = "brief"
+	projectSchemaProperty    = "project"
+	telemetrySchemaProperty  = "telemetry"
+	telemetryContextProperty = "context"
+	revisionResultProperty   = "revision"
+	toolErrorCodeProperty    = "code"
+	uuidSchemaFormat         = "uuid"
+	searchDetailStandard     = "standard"
+	searchDetailBrief        = "brief"
 )
 
 var (
+	whoamiSchema        = addTelemetrySchema(inputSchemaFor[whoamiInput]())
+	projectListSchema   = addTelemetrySchema(inputSchemaFor[projectListInput]())
 	projectEnsureSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[projectEnsureInput]()
+		s := addTelemetrySchema(inputSchemaFor[projectEnsureInput]())
 		s.Properties["slug"].MinLength = jsonschema.Ptr(1)
-		s.Required = []string{"slug"}
+		s.Required = []string{"slug", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightWriteSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightWriteInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightWriteInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["content"].MinLength = jsonschema.Ptr(1)
 		s.Properties["category"].Enum = []any{"fact", "decision", "insight", "preference", "context", "general"}
 		s.Properties["source"].Enum = []any{"user", "repo", "agent", "command"}
 		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
-		s.Required = []string{projectSchemaProperty, "content", "category", "source"}
+		s.Required = []string{projectSchemaProperty, "content", "category", "source", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightGetSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightGetInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightGetInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
 		s.Properties["key"].MinLength = jsonschema.Ptr(1)
 		s.Properties["relation_limit"].Minimum = jsonschema.Ptr(1.0)
 		s.Properties["relation_limit"].Maximum = jsonschema.Ptr(100.0)
-		s.Required = []string{projectSchemaProperty}
+		s.Required = []string{projectSchemaProperty, telemetrySchemaProperty}
 		s.OneOf = []*jsonschema.Schema{
 			{Required: []string{"id"}, Not: &jsonschema.Schema{Required: []string{"key"}}},
 			{Required: []string{"key"}, Not: &jsonschema.Schema{Required: []string{"id"}}},
@@ -287,18 +368,18 @@ var (
 	}()
 
 	insightHistorySchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightHistoryInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightHistoryInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
-		s.Required = []string{projectSchemaProperty, "id"}
+		s.Required = []string{projectSchemaProperty, "id", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightRestoreSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightRestoreInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightRestoreInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
@@ -306,13 +387,13 @@ var (
 		s.Properties["target_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
-		s.Required = []string{projectSchemaProperty, "id", "target_revision", "expected_revision"}
+		s.Required = []string{projectSchemaProperty, "id", "target_revision", "expected_revision", telemetrySchemaProperty}
 		return s
 	}()
 
 	// Cursor bounds remain in the decoder so MCP reports the stable invalid_cursor code.
 	insightSearchSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightSearchInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightSearchInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["query"].MinLength = jsonschema.Ptr(1)
 		s.Properties["query_mode"].Enum = []any{"all", "web"}
@@ -322,48 +403,61 @@ var (
 		s.Properties["exclude_ids"].MaxItems = jsonschema.Ptr(store.MaxInsightSearchExcludeIDs)
 		s.Properties["exclude_ids"].Items.Format = uuidSchemaFormat
 		s.Properties["detail"].Enum = []any{searchDetailStandard, searchDetailBrief}
-		s.Required = []string{projectSchemaProperty, "query"}
+		s.Required = []string{projectSchemaProperty, "query", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightListSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightListInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightListInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
-		s.Required = []string{projectSchemaProperty}
+		s.Required = []string{projectSchemaProperty, telemetrySchemaProperty}
 		return s
 	}()
 
 	insightDeleteSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightDeleteInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightDeleteInput]())
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
 		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
-		s.Required = []string{"id"}
+		s.Required = []string{"id", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightListTagsSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightListTagsInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightListTagsInput]())
 		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
 		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
 		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
-		s.Required = []string{projectSchemaProperty}
+		s.Required = []string{projectSchemaProperty, telemetrySchemaProperty}
 		return s
 	}()
 
 	insightUpdateSchema = func() *jsonschema.Schema {
-		s := inputSchemaFor[insightUpdateInput]()
+		s := addTelemetrySchema(inputSchemaFor[insightUpdateInput]())
 		s.Properties["id"].MinLength = jsonschema.Ptr(1)
 		s.Properties["id"].Format = uuidSchemaFormat
 		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
-		s.Required = []string{"id"}
+		s.Required = []string{"id", telemetrySchemaProperty}
 		return s
 	}()
 )
+
+func (input whoamiInput) telemetryContext() string          { return input.Telemetry.Context }
+func (input projectEnsureInput) telemetryContext() string   { return input.Telemetry.Context }
+func (input insightWriteInput) telemetryContext() string    { return input.Telemetry.Context }
+func (input insightSearchInput) telemetryContext() string   { return input.Telemetry.Context }
+func (input insightGetInput) telemetryContext() string      { return input.Telemetry.Context }
+func (input insightHistoryInput) telemetryContext() string  { return input.Telemetry.Context }
+func (input insightRestoreInput) telemetryContext() string  { return input.Telemetry.Context }
+func (input insightListInput) telemetryContext() string     { return input.Telemetry.Context }
+func (input insightDeleteInput) telemetryContext() string   { return input.Telemetry.Context }
+func (input projectListInput) telemetryContext() string     { return input.Telemetry.Context }
+func (input insightListTagsInput) telemetryContext() string { return input.Telemetry.Context }
+func (input insightUpdateInput) telemetryContext() string   { return input.Telemetry.Context }
 
 func normaliseTags(tags []string) []string {
 	out := make([]string, len(tags))

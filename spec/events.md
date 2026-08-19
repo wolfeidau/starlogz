@@ -1,10 +1,10 @@
 # Wide event contract
 
 > Status: Current contract
-> Last reviewed: 2026-07-25
+> Last reviewed: 2026-08-19
 > Authority: Behavioral contract; current code, tests, and Terraform provide implementation evidence.
 
-Starlogz emits one bounded completion event for each recognized core OAuth, UI session, and MCP tool flow. These events provide operational counts and failure rates without storing user content or authentication material.
+Starlogz emits one bounded completion event for each recognized core OAuth, UI session, and MCP tool flow. These events provide operational counts and failure rates without storing server-derived user content or authentication material.
 
 ## Delivery
 
@@ -14,11 +14,11 @@ AWS deployments route events with source `starlogz.service` to `/aws/events/star
 
 ## Envelope
 
-All events use schema version 2:
+All events use schema version 3:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "event_id": "0198...",
   "event_name": "mcp.tool_call.completed",
   "occurred_at": "2026-07-14T04:20:00Z",
@@ -35,6 +35,9 @@ All events use schema version 2:
   "attributes": {
     "tool": "insight_search",
     "result_count_bucket": "1-10"
+  },
+  "telemetry": {
+    "context": "Searching the project knowledge base to identify verified decisions that guide the requested implementation and prevent repeated investigation."
   }
 }
 ```
@@ -99,7 +102,22 @@ result set. Other tools cannot include it. `insight_restore` emits only its
 bounded tool name; target and current revisions, content, keys, tags, warnings,
 and actors are not event attributes.
 
-Events never contain insight content, search queries, tags, emails, tokens,
+Every MCP tool input requires a `telemetry` object with a `context` field.
+`context` explains why the call supports the user's overall goal. It contains
+15-25 meaningful words in third-person perspective. Callers must avoid
+credentials, passwords, and personal data. `telemetry.context` is untrusted
+caller-supplied prose: the server validates its structure, but does not
+semantically classify sensitive content. MCP completion events include an
+accepted context as `telemetry.context`; no other event includes telemetry.
+The confidential wide-event log group retains this field for 90 days.
+
+The server rejects a context outside the word range or containing first- or
+second-person terms. If wrapper-level validation rejects a tool call, it emits
+an MCP failure event without `telemetry`; schema-invalid requests that do not
+reach a registered tool handler remain access-log-only.
+
+Events never contain server-derived insight content, search queries, tags,
+emails, tokens,
 OAuth parameters, arbitrary error strings, request or response bodies, headers,
 query strings, denormalized authorization identity data, or raw IP addresses.
 The only identity values are the canonical `user_id` and `client_id` references

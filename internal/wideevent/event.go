@@ -2,6 +2,7 @@ package wideevent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,9 +17,10 @@ import (
 )
 
 const (
-	SchemaVersion         = 2
+	SchemaVersion         = 3
 	maxClientIDBytes      = 2048
 	maxEdgeRequestIDBytes = 128
+	maxTelemetryBytes     = 512
 	publishTimeout        = 400 * time.Millisecond
 )
 
@@ -98,6 +100,11 @@ type Event struct {
 	Reason         string            `json:"reason"`
 	DurationMS     int64             `json:"duration_ms"`
 	Attributes     map[string]string `json:"attributes,omitempty"`
+	Telemetry      *Telemetry        `json:"telemetry,omitempty"`
+}
+
+type Telemetry struct {
+	Context string `json:"context"`
 }
 
 type Identity struct {
@@ -147,14 +154,18 @@ func NewNoopEmitter() *Emitter {
 }
 
 func (e *Emitter) Completion(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string) {
-	e.completion(ctx, name, outcome, reason, started, attributes, Identity{})
+	e.completion(ctx, name, outcome, reason, started, attributes, Identity{}, nil)
 }
 
 func (e *Emitter) CompletionWithIdentity(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string, identity Identity) {
-	e.completion(ctx, name, outcome, reason, started, attributes, identity)
+	e.completion(ctx, name, outcome, reason, started, attributes, identity, nil)
 }
 
-func (e *Emitter) completion(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string, identity Identity) {
+func (e *Emitter) CompletionWithIdentityAndTelemetry(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string, identity Identity, telemetry Telemetry) {
+	e.completion(ctx, name, outcome, reason, started, attributes, identity, &telemetry)
+}
+
+func (e *Emitter) completion(ctx context.Context, name Name, outcome Outcome, reason string, started time.Time, attributes map[string]string, identity Identity, telemetry *Telemetry) {
 	event := Event{
 		SchemaVersion:  SchemaVersion,
 		EventID:        uuid.New().String(),
@@ -170,6 +181,7 @@ func (e *Emitter) completion(ctx context.Context, name Name, outcome Outcome, re
 		Reason:         reason,
 		DurationMS:     max(time.Since(started).Milliseconds(), 0),
 		Attributes:     attributes,
+		Telemetry:      telemetry,
 	}
 	if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() {
 		event.TraceID = spanContext.TraceID().String()
@@ -328,7 +340,29 @@ func (e Event) Validate() error {
 	if e.DurationMS < 0 {
 		return fmt.Errorf("duration_ms must not be negative")
 	}
+	if err := validateTelemetry(e); err != nil {
+		return err
+	}
 	return validateAttributes(e.EventName, e.Outcome, e.Attributes)
+}
+
+func validateTelemetry(e Event) error {
+	if e.Telemetry == nil {
+		if e.EventName == MCPToolCallCompleted && e.Outcome == OutcomeSuccess {
+			return errors.New("telemetry is required for successful MCP tool events")
+		}
+		return nil
+	}
+	if e.EventName != MCPToolCallCompleted {
+		return fmt.Errorf("telemetry is not allowed for %q", e.EventName)
+	}
+	if e.Telemetry.Context == "" {
+		return errors.New("telemetry.context is required")
+	}
+	if err := validateOpaqueValue(e.Telemetry.Context, maxTelemetryBytes); err != nil {
+		return fmt.Errorf("telemetry.context %w", err)
+	}
+	return nil
 }
 
 func validateEdgeRequestID(requestID string) error {

@@ -27,6 +27,10 @@ type deadlinePublisher struct {
 	remaining time.Duration
 }
 
+func validTelemetry() *Telemetry {
+	return &Telemetry{Context: "Recording the tool purpose to understand progress toward the caller's stated project goal and improve service analytics safely."}
+}
+
 func (p *deadlinePublisher) Publish(ctx context.Context, _ Event) error {
 	deadline, ok := ctx.Deadline()
 	if ok {
@@ -54,10 +58,10 @@ func TestEmitterBuildsBoundedCorrelatedEvent(t *testing.T) {
 	ctx = ctxlog.WithEdgeRequestID(ctx, "edge-request_123")
 	ctx = trace.ContextWithSpanContext(ctx, spanContext)
 	userID := uuid.New().String()
-	emitter.CompletionWithIdentity(ctx, MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{
+	emitter.CompletionWithIdentityAndTelemetry(ctx, MCPToolCallCompleted, OutcomeSuccess, ReasonCompleted, time.Now(), map[string]string{
 		AttributeTool:              ToolInsightSearch,
 		AttributeResultCountBucket: ResultCountOneToTen,
-	}, Identity{UserID: userID, ClientID: "test-client"})
+	}, Identity{UserID: userID, ClientID: "test-client"}, *validTelemetry())
 
 	require.Len(t, publisher.events, 1)
 	event := publisher.events[0]
@@ -180,6 +184,7 @@ func TestAllEventNamesValidate(t *testing.T) {
 			if name == MCPToolCallCompleted {
 				event.UserID = uuid.New().String()
 				event.ClientID = "test-client"
+				event.Telemetry = validTelemetry()
 			}
 			require.NoError(t, event.Validate())
 		})
@@ -263,6 +268,7 @@ func TestResultCountBucketValidation(t *testing.T) {
 				OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
 				ServiceVersion: "devel", Outcome: test.outcome, Reason: reason,
 				UserID: uuid.New().String(), Attributes: test.attributes,
+				Telemetry: validTelemetry(),
 			}
 			err := event.Validate()
 			if test.wantError == "" {
@@ -281,6 +287,7 @@ func TestIdentityAndEdgeValidation(t *testing.T) {
 		ServiceVersion: "devel", Outcome: OutcomeSuccess, Reason: ReasonCompleted,
 		UserID: uuid.New().String(), ClientID: "test-client",
 		Attributes: map[string]string{AttributeTool: ToolWhoami},
+		Telemetry:  validTelemetry(),
 	}
 
 	tests := map[string]struct {
@@ -324,6 +331,44 @@ func TestIdentityAndEdgeValidation(t *testing.T) {
 				return
 			}
 			require.ErrorContains(t, err, test.wantError)
+		})
+	}
+}
+
+func TestTelemetryValidation(t *testing.T) {
+	base := Event{
+		SchemaVersion: SchemaVersion, EventID: uuid.New().String(), EventName: MCPToolCallCompleted,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Environment: "test",
+		ServiceVersion: "devel", Outcome: OutcomeSuccess, Reason: ReasonCompleted,
+		UserID: uuid.New().String(), Attributes: map[string]string{AttributeTool: ToolWhoami},
+		Telemetry: validTelemetry(),
+	}
+	tests := map[string]struct {
+		change    func(*Event)
+		wantError string
+	}{
+		"successful MCP event requires telemetry": {
+			change:    func(event *Event) { event.Telemetry = nil },
+			wantError: "telemetry is required",
+		},
+		"non MCP event cannot include telemetry": {
+			change: func(event *Event) {
+				event.EventName = OAuthRefreshCompleted
+				event.UserID = ""
+				event.Attributes = nil
+			},
+			wantError: "telemetry is not allowed",
+		},
+		"telemetry context is bounded": {
+			change:    func(event *Event) { event.Telemetry = &Telemetry{Context: strings.Repeat("x", maxTelemetryBytes+1)} },
+			wantError: "telemetry.context must not exceed",
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			event := base
+			test.change(&event)
+			require.ErrorContains(t, event.Validate(), test.wantError)
 		})
 	}
 }
