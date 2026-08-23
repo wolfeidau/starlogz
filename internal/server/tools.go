@@ -309,8 +309,8 @@ func addTelemetrySchema(schema *jsonschema.Schema) *jsonschema.Schema {
 		Properties: map[string]*jsonschema.Schema{telemetryContextProperty: {
 			Type:        "string",
 			Description: telemetryContextDescription,
-			MinLength:   jsonschema.Ptr(1),
-			MaxLength:   jsonschema.Ptr(512),
+			MinLength:   new(1),
+			MaxLength:   new(512),
 		}},
 		Required: []string{telemetryContextProperty},
 	}
@@ -334,18 +334,18 @@ var (
 	projectListSchema   = addTelemetrySchema(inputSchemaFor[projectListInput]())
 	projectEnsureSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[projectEnsureInput]())
-		s.Properties["slug"].MinLength = jsonschema.Ptr(1)
+		s.Properties["slug"].MinLength = new(1)
 		s.Required = []string{"slug", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightWriteSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightWriteInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["content"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["content"].MinLength = new(1)
 		s.Properties["category"].Enum = []any{"fact", "decision", "insight", "preference", "context", "general"}
 		s.Properties["source"].Enum = []any{"user", "repo", "agent", "command"}
-		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(0.0)
+		s.Properties["expected_revision"].Minimum = new(0.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{projectSchemaProperty, "content", "category", "source", telemetrySchemaProperty}
 		return s
@@ -353,12 +353,12 @@ var (
 
 	insightGetSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightGetInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["id"].MinLength = new(1)
 		s.Properties["id"].Format = uuidSchemaFormat
-		s.Properties["key"].MinLength = jsonschema.Ptr(1)
-		s.Properties["relation_limit"].Minimum = jsonschema.Ptr(1.0)
-		s.Properties["relation_limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Properties["key"].MinLength = new(1)
+		s.Properties["relation_limit"].Minimum = new(1.0)
+		s.Properties["relation_limit"].Maximum = new(100.0)
 		s.Required = []string{projectSchemaProperty, telemetrySchemaProperty}
 		s.OneOf = []*jsonschema.Schema{
 			{Required: []string{"id"}, Not: &jsonschema.Schema{Required: []string{"key"}}},
@@ -369,23 +369,23 @@ var (
 
 	insightHistorySchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightHistoryInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["id"].MinLength = new(1)
 		s.Properties["id"].Format = uuidSchemaFormat
-		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
-		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Properties["limit"].Minimum = new(0.0)
+		s.Properties["limit"].Maximum = new(100.0)
 		s.Required = []string{projectSchemaProperty, "id", telemetrySchemaProperty}
 		return s
 	}()
 
 	insightRestoreSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightRestoreInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["id"].MinLength = new(1)
 		s.Properties["id"].Format = uuidSchemaFormat
-		s.Properties["target_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["target_revision"].Minimum = new(1.0)
 		s.Properties["target_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
-		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["expected_revision"].Minimum = new(1.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{projectSchemaProperty, "id", "target_revision", "expected_revision", telemetrySchemaProperty}
 		return s
@@ -394,12 +394,12 @@ var (
 	// Cursor bounds remain in the decoder so MCP reports the stable invalid_cursor code.
 	insightSearchSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightSearchInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["query"].MinLength = jsonschema.Ptr(1)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["query"].MinLength = new(1)
 		s.Properties["query_mode"].Enum = []any{"all", "web"}
 		s.Properties["tag_mode"].Enum = []any{"all", "any"}
-		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
-		s.Properties["limit"].Maximum = jsonschema.Ptr(100.0)
+		s.Properties["limit"].Minimum = new(0.0)
+		s.Properties["limit"].Maximum = new(100.0)
 		s.Properties["exclude_ids"].MaxItems = jsonschema.Ptr(store.MaxInsightSearchExcludeIDs)
 		s.Properties["exclude_ids"].Items.Format = uuidSchemaFormat
 		s.Properties["detail"].Enum = []any{searchDetailStandard, searchDetailBrief}
@@ -409,18 +409,18 @@ var (
 
 	insightListSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightListInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
-		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["limit"].Minimum = new(0.0)
+		s.Properties["limit"].Maximum = new(200.0)
 		s.Required = []string{projectSchemaProperty, telemetrySchemaProperty}
 		return s
 	}()
 
 	insightDeleteSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightDeleteInput]())
-		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].MinLength = new(1)
 		s.Properties["id"].Format = uuidSchemaFormat
-		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["expected_revision"].Minimum = new(1.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{"id", telemetrySchemaProperty}
 		return s
@@ -428,18 +428,18 @@ var (
 
 	insightListTagsSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightListTagsInput]())
-		s.Properties[projectSchemaProperty].MinLength = jsonschema.Ptr(1)
-		s.Properties["limit"].Minimum = jsonschema.Ptr(0.0)
-		s.Properties["limit"].Maximum = jsonschema.Ptr(200.0)
+		s.Properties[projectSchemaProperty].MinLength = new(1)
+		s.Properties["limit"].Minimum = new(0.0)
+		s.Properties["limit"].Maximum = new(200.0)
 		s.Required = []string{projectSchemaProperty, telemetrySchemaProperty}
 		return s
 	}()
 
 	insightUpdateSchema = func() *jsonschema.Schema {
 		s := addTelemetrySchema(inputSchemaFor[insightUpdateInput]())
-		s.Properties["id"].MinLength = jsonschema.Ptr(1)
+		s.Properties["id"].MinLength = new(1)
 		s.Properties["id"].Format = uuidSchemaFormat
-		s.Properties["expected_revision"].Minimum = jsonschema.Ptr(1.0)
+		s.Properties["expected_revision"].Minimum = new(1.0)
 		s.Properties["expected_revision"].Maximum = jsonschema.Ptr(float64(store.MaxInsightRevision))
 		s.Required = []string{"id", telemetrySchemaProperty}
 		return s

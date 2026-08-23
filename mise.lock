@@ -49,74 +49,121 @@ checksum = "sha256:538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b4
 url = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64-baseline.zip"
 
 [[tools.go]]
-version = "1.26.3"
+version = "1.27.0"
 backend = "core:go"
 
 [tools.go."platforms.linux-arm64"]
-checksum = "sha256:9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565"
-url = "https://dl.google.com/go/go1.26.3.linux-arm64.tar.gz"
+checksum = "sha256:51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda"
+url = "https://dl.google.com/go/go1.27.0.linux-arm64.tar.gz"
 
 [tools.go."platforms.linux-arm64-musl"]
-checksum = "sha256:9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565"
-url = "https://dl.google.com/go/go1.26.3.linux-arm64.tar.gz"
+checksum = "sha256:51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda"
+url = "https://dl.google.com/go/go1.27.0.linux-arm64.tar.gz"
 
 [tools.go."platforms.linux-x64"]
-checksum = "sha256:2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
-url = "https://dl.google.com/go/go1.26.3.linux-amd64.tar.gz"
+checksum = "sha256:675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685"
+url = "https://dl.google.com/go/go1.27.0.linux-amd64.tar.gz"
+
+[tools.go."platforms.linux-x64-baseline"]
+checksum = "sha256:675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685"
+url = "https://dl.google.com/go/go1.27.0.linux-amd64.tar.gz"
 
 [tools.go."platforms.linux-x64-musl"]
-checksum = "sha256:2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556"
-url = "https://dl.google.com/go/go1.26.3.linux-amd64.tar.gz"
+checksum = "sha256:675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685"
+url = "https://dl.google.com/go/go1.27.0.linux-amd64.tar.gz"
+
+[tools.go."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685"
+url = "https://dl.google.com/go/go1.27.0.linux-amd64.tar.gz"
 
 [tools.go."platforms.macos-arm64"]
-checksum = "sha256:875cf54a15311eee2c99b9dd67c68c4a49351d489ab622bf2cfd28c8f2078d3c"
-url = "https://dl.google.com/go/go1.26.3.darwin-arm64.tar.gz"
+checksum = "sha256:90493b3bbd5e10f91d12153198bf1994fd756399b4fec93b49b0c6e2acdeeb3e"
+url = "https://dl.google.com/go/go1.27.0.darwin-arm64.tar.gz"
 
 [tools.go."platforms.macos-x64"]
-checksum = "sha256:278d580b32e299fe4a9c990fcf2d02acfe538c7e551a6ee18f9c7164573d2c63"
-url = "https://dl.google.com/go/go1.26.3.darwin-amd64.tar.gz"
+checksum = "sha256:d3314e25496e4381d71a5c51d2907e7af655d199f6780b549f015bd85fef4986"
+url = "https://dl.google.com/go/go1.27.0.darwin-amd64.tar.gz"
+
+[tools.go."platforms.macos-x64-baseline"]
+checksum = "sha256:d3314e25496e4381d71a5c51d2907e7af655d199f6780b549f015bd85fef4986"
+url = "https://dl.google.com/go/go1.27.0.darwin-amd64.tar.gz"
 
 [tools.go."platforms.windows-x64"]
-checksum = "sha256:20d2ceafb4ed41b96b879010927b28bc92a5be57a7c1801ce365a9ca51d3224a"
-url = "https://dl.google.com/go/go1.26.3.windows-amd64.zip"
+checksum = "sha256:f0c0a0d33ba94f4d2c5dbc887334ce678b21813504ddb3aafcb06e60a5a667c4"
+url = "https://dl.google.com/go/go1.27.0.windows-amd64.zip"
+
+[tools.go."platforms.windows-x64-baseline"]
+checksum = "sha256:f0c0a0d33ba94f4d2c5dbc887334ce678b21813504ddb3aafcb06e60a5a667c4"
+url = "https://dl.google.com/go/go1.27.0.windows-amd64.zip"
 
 [[tools.golangci-lint]]
-version = "2.12.2"
+version = "v2.13.1"
 backend = "aqua:golangci/golangci-lint"
 
 [tools.golangci-lint."platforms.linux-arm64"]
-checksum = "sha256:44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-arm64.tar.gz"
+checksum = "sha256:908317c23db18448f924e853b3d8a659fd919614cd438f224810a4053daa2607"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396912"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-arm64-musl"]
-checksum = "sha256:44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-arm64.tar.gz"
+checksum = "sha256:908317c23db18448f924e853b3d8a659fd919614cd438f224810a4053daa2607"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396912"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-x64"]
-checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
+checksum = "sha256:b17bfbc9d4aaa48be7f4f1ce3240bc3d8200c870c072bacf15c26219e2cfb9cc"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396872"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.linux-x64-baseline"]
+checksum = "sha256:b17bfbc9d4aaa48be7f4f1ce3240bc3d8200c870c072bacf15c26219e2cfb9cc"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396872"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-x64-musl"]
-checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
+checksum = "sha256:b17bfbc9d4aaa48be7f4f1ce3240bc3d8200c870c072bacf15c26219e2cfb9cc"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396872"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:b17bfbc9d4aaa48be7f4f1ce3240bc3d8200c870c072bacf15c26219e2cfb9cc"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396872"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.macos-arm64"]
-checksum = "sha256:a9c54498731b3128f79e090be6110f3e5fffccc617b08142ed244d4126c73f29"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-arm64.tar.gz"
+checksum = "sha256:0c9818baf6fb8ad26c6d2ef51b68d5a1e260ef07727036b1431647cc44637c7c"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396798"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.macos-x64"]
-checksum = "sha256:f6f06d94b6241521c53d15450c5209b028270bf966f842afb11c030c79f5bc16"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-amd64.tar.gz"
+checksum = "sha256:2c373363953e4e0bee2a03b7fe864a5eb6a3822927cb077d9ca33f2ae3cb2da2"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396867"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.macos-x64-baseline"]
+checksum = "sha256:2c373363953e4e0bee2a03b7fe864a5eb6a3822927cb077d9ca33f2ae3cb2da2"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396867"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.windows-x64"]
-checksum = "sha256:bd42e3ebc8cb4ececb86941983baaf1dc221bbb04d838e94ce63b49cc91e02bb"
-url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-windows-amd64.zip"
+checksum = "sha256:cc119bdd57d2b35ce36fbc174b54949e1a1e45f2cadaf64372cc799cabaf88a9"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-windows-amd64.zip"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396821"
+provenance = "github-attestations"
+
+[tools.golangci-lint."platforms.windows-x64-baseline"]
+checksum = "sha256:cc119bdd57d2b35ce36fbc174b54949e1a1e45f2cadaf64372cc799cabaf88a9"
+url = "https://github.com/golangci/golangci-lint/releases/download/v2.13.1/golangci-lint-2.13.1-windows-amd64.zip"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/522396821"
 provenance = "github-attestations"
 
 [[tools.goreleaser]]
@@ -141,7 +188,19 @@ url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/gorele
 url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565870"
 provenance = "github-attestations"
 
+[tools.goreleaser."platforms.linux-x64-baseline"]
+checksum = "sha256:a99bbc7ae0d8d897b07c4c497a9b62f222558804715ef219d1af05a7e417bc80"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/goreleaser_Linux_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565870"
+provenance = "github-attestations"
+
 [tools.goreleaser."platforms.linux-x64-musl"]
+checksum = "sha256:a99bbc7ae0d8d897b07c4c497a9b62f222558804715ef219d1af05a7e417bc80"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/goreleaser_Linux_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565870"
+provenance = "github-attestations"
+
+[tools.goreleaser."platforms.linux-x64-musl-baseline"]
 checksum = "sha256:a99bbc7ae0d8d897b07c4c497a9b62f222558804715ef219d1af05a7e417bc80"
 url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/goreleaser_Linux_x86_64.tar.gz"
 url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565870"
@@ -159,7 +218,19 @@ url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/gorele
 url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565848"
 provenance = "github-attestations"
 
+[tools.goreleaser."platforms.macos-x64-baseline"]
+checksum = "sha256:f49d4fe67d283b5b5130c380c983087dca0a4d4ec15b6637b18fe1ab096780d8"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/goreleaser_Darwin_all.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565848"
+provenance = "github-attestations"
+
 [tools.goreleaser."platforms.windows-x64"]
+checksum = "sha256:53314ce7cc16c3229f2d3b98a932c1618c427964eb2170a1efafbdfa862a556f"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/goreleaser_Windows_x86_64.zip"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565847"
+provenance = "github-attestations"
+
+[tools.goreleaser."platforms.windows-x64-baseline"]
 checksum = "sha256:53314ce7cc16c3229f2d3b98a932c1618c427964eb2170a1efafbdfa862a556f"
 url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.1/goreleaser_Windows_x86_64.zip"
 url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/490565847"
@@ -181,9 +252,21 @@ url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tfl
 checksum = "sha256:8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8"
 url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_linux_amd64.zip"
 
+[tools.tflint."platforms.linux-x64-baseline"]
+checksum = "sha256:8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8"
+url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_linux_amd64.zip"
+url_api = "https://api.github.com/repos/terraform-linters/tflint/releases/assets/437446150"
+provenance = "github-attestations"
+
 [tools.tflint."platforms.linux-x64-musl"]
 checksum = "sha256:8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8"
 url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_linux_amd64.zip"
+
+[tools.tflint."platforms.linux-x64-musl-baseline"]
+checksum = "sha256:8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8"
+url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_linux_amd64.zip"
+url_api = "https://api.github.com/repos/terraform-linters/tflint/releases/assets/437446150"
+provenance = "github-attestations"
 
 [tools.tflint."platforms.macos-arm64"]
 checksum = "sha256:6aab157b22367dcab1635b370e98d6e791d9b40b021d4f9baef010d88f53e16b"
@@ -193,6 +276,18 @@ url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tfl
 checksum = "sha256:1a22782473e4a01f0dd23edc649bed4420655a9e3459ffc06951e698eed7ad01"
 url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_darwin_amd64.zip"
 
+[tools.tflint."platforms.macos-x64-baseline"]
+checksum = "sha256:1a22782473e4a01f0dd23edc649bed4420655a9e3459ffc06951e698eed7ad01"
+url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_darwin_amd64.zip"
+url_api = "https://api.github.com/repos/terraform-linters/tflint/releases/assets/437446152"
+provenance = "github-attestations"
+
 [tools.tflint."platforms.windows-x64"]
 checksum = "sha256:5fbfb643b83c4ad489bde15a0e0d46e53dc9aa8dfa76d25da3c4bd2698a41a19"
 url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_windows_amd64.zip"
+
+[tools.tflint."platforms.windows-x64-baseline"]
+checksum = "sha256:5fbfb643b83c4ad489bde15a0e0d46e53dc9aa8dfa76d25da3c4bd2698a41a19"
+url = "https://github.com/terraform-linters/tflint/releases/download/v0.63.1/tflint_windows_amd64.zip"
+url_api = "https://api.github.com/repos/terraform-linters/tflint/releases/assets/437446181"
+provenance = "github-attestations"

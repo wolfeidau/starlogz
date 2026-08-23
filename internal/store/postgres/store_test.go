@@ -3143,12 +3143,10 @@ func TestAuthorizationConfirmationApprovalIsAtomicAndEncrypted(t *testing.T) {
 	tokenHash := store.HashSessionToken("confirmation-token")
 	now := time.Now().UTC().Truncate(time.Second)
 	c := store.AuthorizationConfirmation{
-		AuthCode: store.AuthCode{
-			Sub: "user-uuid", GitHubID: 1004, Email: "user@example.com", Scope: "insights:read",
-			CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
-			ClientID: "client", RefreshAllowed: true, AccessToken: "gha_confirmation_secret", RefreshToken: "ghr_confirmation_secret",
-			AccessTokenExpiry: now.Add(time.Hour), RefreshTokenExpiry: now.Add(24 * time.Hour),
-		},
+		Sub: "user-uuid", GitHubID: 1004, Email: "user@example.com", Scope: "insights:read",
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
+		ClientID: "client", RefreshAllowed: true, AccessToken: "gha_confirmation_secret", RefreshToken: "ghr_confirmation_secret",
+		AccessTokenExpiry: now.Add(time.Hour), RefreshTokenExpiry: now.Add(24 * time.Hour),
 		ClientName: "Example", ClientState: "state-value",
 	}
 	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, c))
@@ -3182,10 +3180,9 @@ func TestAuthorizationConfirmationDenialAndExpiryCreateNoCode(t *testing.T) {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	base := store.AuthorizationConfirmation{AuthCode: store.AuthCode{
+	base := store.AuthorizationConfirmation{
 		Sub: "user-uuid", GitHubID: 1005, Email: "user@example.com", Scope: "insights:read",
-		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
-	}}
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback"}
 
 	denyHash := store.HashSessionToken("deny-token")
 	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, denyHash, base))
@@ -3208,10 +3205,9 @@ func TestAuthorizationConfirmationConcurrentApprovalHasOneWinner(t *testing.T) {
 	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
 	ctx := t.Context()
 	tokenHash := store.HashSessionToken("concurrent-token")
-	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{AuthCode: store.AuthCode{
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{
 		Sub: "user-uuid", GitHubID: 1006, Email: "user@example.com", Scope: "insights:read",
-		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
-	}}))
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback"}))
 
 	errs := make(chan error, 2)
 	for i := range 2 {
@@ -3240,10 +3236,9 @@ func TestAuthorizationConfirmationApprovalFailurePreservesConfirmation(t *testin
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	tokenHash := store.HashSessionToken("rollback-token")
-	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{AuthCode: store.AuthCode{
+	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{
 		Sub: "user-uuid", GitHubID: 1007, Email: "user@example.com", Scope: "insights:read",
-		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback",
-	}}))
+		CodeChallenge: "challenge", RedirectURI: "https://client.example.com/callback"}))
 	_, err = pool.Exec(ctx, `DROP TABLE auth_codes`)
 	require.NoError(t, err)
 

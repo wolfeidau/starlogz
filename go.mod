@@ -1,6 +1,6 @@
 module github.com/wolfeidau/starlogz
 
-go 1.26.1
+go 1.27.0
 
 require (
 	connectrpc.com/connect v1.20.0
@@ -14,7 +14,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/lestrrat-go/jwx/v4 v4.2.0
+	github.com/lestrrat-go/jwx/v4 v4.3.0
 	github.com/lmittmann/tint v1.2.0
 	github.com/medama-io/go-useragent v1.2.4
 	github.com/microcosm-cc/bluemonday v1.0.27

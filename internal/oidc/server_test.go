@@ -171,8 +171,8 @@ func pkceChallenge(verifier string) string {
 func TestDurationOrDefault(t *testing.T) {
 	def := 30 * time.Second
 	require.Equal(t, def, durationOrDefault(nil, def))
-	require.Equal(t, time.Duration(0), durationOrDefault(durationPtr(0), def))
-	require.Equal(t, 2*time.Hour, durationOrDefault(durationPtr(2*time.Hour), def))
+	require.Equal(t, time.Duration(0), durationOrDefault(new(time.Duration(0)), def))
+	require.Equal(t, 2*time.Hour, durationOrDefault(new(2*time.Hour), def))
 }
 
 func TestNewServer_RefreshTokenDurationDefaults(t *testing.T) {
@@ -202,10 +202,10 @@ func TestNewServer_RefreshTokenDurationValidation(t *testing.T) {
 		grace     *time.Duration
 		retention *time.Duration
 	}{
-		{name: "negative grace", grace: durationPtr(-time.Second)},
-		{name: "grace too high", grace: durationPtr(61 * time.Second)},
-		{name: "zero retention", retention: durationPtr(0)},
-		{name: "retention less than grace", grace: durationPtr(10 * time.Second), retention: durationPtr(5 * time.Second)},
+		{name: "negative grace", grace: new(-time.Second)},
+		{name: "grace too high", grace: new(61 * time.Second)},
+		{name: "zero retention", retention: new(time.Duration(0))},
+		{name: "retention less than grace", grace: new(10 * time.Second), retention: new(5 * time.Second)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,10 +219,6 @@ func TestNewServer_RefreshTokenDurationValidation(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-}
-
-func durationPtr(d time.Duration) *time.Duration {
-	return &d
 }
 
 // --- Discovery ---
@@ -2442,7 +2438,7 @@ func TestAuthorizationConfirmationDenialRedirectsWithoutCode(t *testing.T) {
 	token, tokenHash, err := newConfirmationToken()
 	require.NoError(t, err)
 	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
-		AuthCode:    store.AuthCode{RedirectURI: "https://client.example.com/callback?keep=1&code=old&error_description=old"},
+		RedirectURI: "https://client.example.com/callback?keep=1&code=old&error_description=old",
 		ClientState: "original-state",
 	}))
 	form := url.Values{"token": {token}, "decision": {"deny"}}
@@ -2609,7 +2605,7 @@ func TestAuthorizationConfirmationCompletionFailureReturnsGenericError(t *testin
 	token, tokenHash, err := newConfirmationToken()
 	require.NoError(t, err)
 	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
-		AuthCode: store.AuthCode{RedirectURI: "https://client.example.com/callback"},
+		RedirectURI: "https://client.example.com/callback",
 	}))
 	authState.completeConfirmationErr = errors.New("database unavailable")
 	form := url.Values{"token": {token}, "decision": {confirmationDecisionApprove}}
@@ -2662,7 +2658,7 @@ func TestAuthorizationConfirmationConcurrentApprovalHasOneWinner(t *testing.T) {
 	token, tokenHash, err := newConfirmationToken()
 	require.NoError(t, err)
 	require.NoError(t, srv.authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
-		AuthCode: store.AuthCode{RedirectURI: "https://client.example.com/callback"},
+		RedirectURI: "https://client.example.com/callback",
 	}))
 	form := url.Values{"token": {token}, "decision": {"approve"}}.Encode()
 	statuses := make(chan int, 2)
@@ -2685,7 +2681,7 @@ func TestAuthorizationConfirmationConcurrentApproveAndDenyHaveOneWinner(t *testi
 	token, tokenHash, err := newConfirmationToken()
 	require.NoError(t, err)
 	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
-		AuthCode: store.AuthCode{RedirectURI: "https://client.example.com/callback"},
+		RedirectURI: "https://client.example.com/callback",
 	}))
 	type submissionResult struct {
 		decision string

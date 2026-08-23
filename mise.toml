@@ -2,12 +2,9 @@
 experimental = true
 lockfile = true
 
-[env]
-GOEXPERIMENT = "jsonv2"
-
 [tools]
-go = "latest"
-golangci-lint = "latest"
+go = "1.27.0"
+golangci-lint = "v2.13.1"
 goreleaser = "v2.17.1"
 tflint = "latest"
 bun = "latest"

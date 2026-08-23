@@ -7,9 +7,6 @@ cache:
     - "/gomodcache"
   size: "100g"
 
-env:
-  GOEXPERIMENT: jsonv2
-
 steps:
   - group: ":mag: QA"
     key: quality_checks

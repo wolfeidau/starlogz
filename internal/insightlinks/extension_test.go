@@ -97,9 +97,7 @@ func TestRenderConcurrentProjects(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)
 	for i := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			project := fmt.Sprintf("project-%d", i)
 			html, err := insightlinks.Render("[[insight:target]]", project)
 			if err != nil {
@@ -109,7 +107,7 @@ func TestRenderConcurrentProjects(t *testing.T) {
 			if !strings.Contains(html, "project="+project+"&amp;insight_key=target") {
 				errs <- fmt.Errorf("rendered wrong project: %s", html)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

@@ -172,7 +172,7 @@ func renderAuthorizationConfirmation(w http.ResponseWriter, pending *store.Pendi
 		clientIDHost = clientIDURL.Hostname()
 	}
 	scopes := make([]confirmationScope, 0, len(strings.Fields(pending.Scope)))
-	for _, name := range strings.Fields(pending.Scope) {
+	for name := range strings.FieldsSeq(pending.Scope) {
 		scopes = append(scopes, confirmationScope{Name: name, Description: scopeDescriptions[name]})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -233,8 +233,7 @@ func (s *Server) AuthorizationConfirmationHandler() http.Handler {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 		if err := r.ParseForm(); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 				writeConfirmationError(w, http.StatusRequestEntityTooLarge)
 				return
 			}
