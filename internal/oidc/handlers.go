@@ -45,10 +45,7 @@ func generateOpaqueToken() (string, error) {
 // writeTokenResponse writes an RFC 6749 token endpoint response with no-store caching.
 // refreshToken/refreshExpiry are added only when refreshToken is non-empty.
 func writeTokenResponse(ctx context.Context, w http.ResponseWriter, jwt, scope, refreshToken string, refreshExpiry, jwtExpiry time.Time) {
-	expiresIn := int(time.Until(jwtExpiry) / time.Second)
-	if expiresIn < 0 {
-		expiresIn = 0
-	}
+	expiresIn := max(int(time.Until(jwtExpiry)/time.Second), 0)
 	resp := map[string]any{
 		tokenResponseFieldAccess:    jwt,
 		tokenResponseFieldTokenType: "Bearer",

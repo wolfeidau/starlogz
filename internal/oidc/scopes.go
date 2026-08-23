@@ -42,7 +42,7 @@ func normalizeScope(scope, fallback string) string {
 }
 
 func validateSupportedScope(scope string) error {
-	for _, sc := range strings.Fields(scope) {
+	for sc := range strings.FieldsSeq(scope) {
 		if !supportedScopes[sc] {
 			return fmt.Errorf("unknown scope: %s", sc)
 		}
@@ -52,10 +52,10 @@ func validateSupportedScope(scope string) error {
 
 func firstDisallowedScope(scope, allowedScope string) (string, bool) {
 	allowed := make(map[string]bool)
-	for _, sc := range strings.Fields(allowedScope) {
+	for sc := range strings.FieldsSeq(allowedScope) {
 		allowed[sc] = true
 	}
-	for _, sc := range strings.Fields(scope) {
+	for sc := range strings.FieldsSeq(scope) {
 		if !allowed[sc] {
 			return sc, true
 		}

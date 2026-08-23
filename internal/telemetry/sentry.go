@@ -25,7 +25,6 @@ func InitSentry(_ context.Context, serviceName, version string) (func(context.Co
 		Release:          version,
 		AttachStacktrace: true,
 		EnableTracing:    false,
-		SendDefaultPII:   false,
 		// Traces go to the OTLP collector, so Sentry only needs to stamp issues with the trace IDs.
 		Integrations: func(i []sentry.Integration) []sentry.Integration {
 			return append(i, sentryotel.NewOtelIntegration())

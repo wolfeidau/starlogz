@@ -772,9 +772,7 @@ func insightWriteArgs(project, content string, extra map[string]any) map[string]
 		"category": "fact",
 		"source":   "agent",
 	}
-	for k, v := range extra {
-		args[k] = v
-	}
+	maps.Copy(args, extra)
 	return args
 }
 

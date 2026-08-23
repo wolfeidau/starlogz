@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -246,13 +247,7 @@ func (s *Server) VerifyJWT(ctx context.Context, tokenString string, _ *http.Requ
 		return nil, fmt.Errorf("%w: missing aud claim", auth.ErrInvalidToken)
 	}
 	resourceURL := s.baseURL.JoinPath("/mcp").String()
-	audValid := false
-	for _, a := range aud {
-		if a == resourceURL {
-			audValid = true
-			break
-		}
-	}
+	audValid := slices.Contains(aud, resourceURL)
 	if !audValid {
 		return nil, fmt.Errorf("%w: token audience does not include resource", auth.ErrInvalidToken)
 	}

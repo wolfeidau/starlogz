@@ -1,6 +1,6 @@
 module github.com/wolfeidau/starlogz
 
-go 1.26.1
+go 1.27.0
 
 require (
 	connectrpc.com/connect v1.20.0
