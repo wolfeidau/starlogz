@@ -3,7 +3,7 @@ experimental = true
 lockfile = true
 
 [tools]
-go = "1.27.0"
+go = "1.27.1"
 golangci-lint = "2.13.2"
 goreleaser = "v2.18.0"
 tflint = "latest"
