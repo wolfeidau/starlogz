@@ -3,18 +3,19 @@ package insightlinks
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/microcosm-cc/bluemonday"
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/renderer"
-	"github.com/yuin/goldmark/text"
-	"github.com/yuin/goldmark/util"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/parser"
+	"github.com/yuin/goldmark/v2/renderer"
+	"github.com/yuin/goldmark/v2/renderer/html"
+	"github.com/yuin/goldmark/v2/text"
+	"github.com/yuin/goldmark/v2/util"
 )
 
 const prefix = "[[insight:"
@@ -30,23 +31,12 @@ type InsightLink struct {
 	Project   string
 }
 
-func (n *InsightLink) Dump(_ []byte, level int) {
-	fmt.Printf("%sInsightLink: target=%q label=%q\n", strings.Repeat("    ", level), n.TargetKey, n.Label)
+func (n *InsightLink) Dump(_ []byte) *ast.NodeDump {
+	return ast.NewNodeDump(n, map[string]any{"TargetKey": n.TargetKey, "Label": n.Label})
 }
 
 func (n *InsightLink) Kind() ast.NodeKind {
 	return KindInsightLink
-}
-
-type extension struct{}
-
-func (extension) Extend(m goldmark.Markdown) {
-	m.Parser().AddOptions(parser.WithInlineParsers(
-		util.Prioritized(insightLinkParser{}, 100),
-	))
-	m.Renderer().AddOptions(renderer.WithNodeRenderers(
-		util.Prioritized(insightLinkRenderer{}, 100),
-	))
 }
 
 var projectContextKey = parser.NewContextKey()
@@ -78,13 +68,13 @@ func (insightLinkParser) Parse(_ ast.Node, block text.Reader, pc parser.Context)
 			}
 		}
 		block.Advance(length)
-		return ast.NewTextSegment(segment.WithStop(segment.Start + length))
+		return ast.NewText(text.NewSingleLineValueFromSegment(segment.WithStop(segment.Start+length), block.Decoder()))
 	}
 
 	if invalid := bytes.IndexByte(remainder[:closing], ']'); invalid >= 0 {
 		length := len(prefix) + invalid + 1
 		block.Advance(length)
-		return ast.NewTextSegment(segment.WithStop(segment.Start + length))
+		return ast.NewText(text.NewSingleLineValueFromSegment(segment.WithStop(segment.Start+length), block.Decoder()))
 	}
 
 	body := remainder[:closing]
@@ -94,7 +84,7 @@ func (insightLinkParser) Parse(_ ast.Node, block text.Reader, pc parser.Context)
 	if len(target) == 0 || bytes.ContainsAny(target, "\r\n") || bytes.ContainsAny(label, "\r\n") {
 		length := len(prefix) + closing + 2
 		block.Advance(length)
-		return ast.NewTextSegment(segment.WithStop(segment.Start + length))
+		return ast.NewText(text.NewSingleLineValueFromSegment(segment.WithStop(segment.Start+length), block.Decoder()))
 	}
 	if len(label) == 0 {
 		label = target
@@ -102,22 +92,26 @@ func (insightLinkParser) Parse(_ ast.Node, block text.Reader, pc parser.Context)
 
 	block.Advance(len(prefix) + closing + 2)
 	project, _ := pc.Get(projectContextKey).(string)
-	return &InsightLink{TargetKey: string(target), Label: string(label), Project: project}
+	node := &InsightLink{TargetKey: string(target), Label: string(label), Project: project}
+	node.Init(node)
+	node.SetPos(segment.Start)
+	return node
 }
 
 func trimHorizontalSpace(value []byte) []byte {
 	return bytes.Trim(value, " \t")
 }
 
-var markdown = goldmark.New(goldmark.WithExtensions(extension{}))
+var markdownParser = parser.New(parser.WithInlineParsers(
+	util.Prioritized[parser.InlineParser](insightLinkParser{}, 100),
+))
 
-type insightLinkRenderer struct{}
+var markdownRenderer = html.New(html.WithNodeRenderers(map[ast.NodeKind]html.NodeRenderer{
+	KindInsightLink: html.NodeRendererFunc(renderInsightLink),
+}))
 
-func (insightLinkRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
-	reg.Register(KindInsightLink, renderInsightLink)
-}
-
-func renderInsightLink(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+func renderInsightLink(writer io.Writer, _ []byte, node ast.Node, entering bool, _ renderer.Context) (ast.WalkStatus, error) {
+	w := writer.(util.BufWriter)
 	if !entering {
 		return ast.WalkContinue, nil
 	}
@@ -157,7 +151,7 @@ var htmlPolicy = func() *bluemonday.Policy {
 
 // Parse builds the Starlogz Goldmark AST for content.
 func Parse(source []byte) ast.Node {
-	return markdown.Parser().Parse(text.NewReader(source))
+	return markdownParser.Parse(source)
 }
 
 // Targets returns unique insight-link targets in C-collation order.
@@ -183,7 +177,9 @@ func Render(content, project string) (string, error) {
 	ctx := parser.NewContext()
 	ctx.Set(projectContextKey, project)
 	var rendered bytes.Buffer
-	if err := markdown.Convert([]byte(content), &rendered, parser.WithContext(ctx)); err != nil {
+	source := []byte(content)
+	doc := markdownParser.Parse(source, parser.WithContext(ctx))
+	if err := markdownRenderer.Render(&rendered, source, doc); err != nil {
 		return "", fmt.Errorf("render insight Markdown: %w", err)
 	}
 	return htmlPolicy.Sanitize(rendered.String()), nil
