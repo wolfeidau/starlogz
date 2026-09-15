@@ -29,8 +29,6 @@ func InitSentry(_ context.Context, serviceName, version string) (func(context.Co
 		Integrations: func(i []sentry.Integration) []sentry.Integration {
 			return append(i, sentryotel.NewOtelIntegration())
 		},
-		// Errors are reported as issues; Sentry Logs are unused.
-		DisableLogs: true,
 		Tags: map[string]string{
 			"service": serviceName,
 		},
