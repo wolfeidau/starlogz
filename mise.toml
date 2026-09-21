@@ -5,6 +5,6 @@ lockfile = true
 [tools]
 go = "1.27.1"
 golangci-lint = "2.13.2"
-goreleaser = "v2.18.1"
+goreleaser = "v2.18.2"
 tflint = "latest"
 bun = "latest"
