@@ -85,7 +85,7 @@ handled entirely by the updated server follow the confirmation requirement.
 |---|---|
 | `insights:read` | Required by the MCP transport and all MCP tools. |
 | `insights:write` | Additionally required by write, update, and delete tools. |
-| `org:admin` | Accepted and advertised by the authorization server for forward-compatible organization administration; no current MCP tool requires it, so protected-resource metadata omits it. |
+| `org:admin` | Accepted when a client explicitly registers it, for forward-compatible organization administration; no current MCP tool requires it, so neither metadata document advertises it. |
 
 Scopes are stored in the JWT as a space-delimited `scope` claim. An
 authorization request cannot exceed the resolved client's allowed scope set.
@@ -339,7 +339,7 @@ Authorization-server metadata advertises:
   "client_id_metadata_document_supported": true,
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token"],
-  "scopes_supported": ["insights:read", "insights:write", "org:admin"],
+  "scopes_supported": ["insights:read", "insights:write"],
   "code_challenge_methods_supported": ["S256"],
   "token_endpoint_auth_methods_supported": ["none"]
 }
@@ -351,7 +351,7 @@ enabled.
 Protected-resource metadata identifies `<server-url>/mcp`, names the server,
 points `authorization_servers` at the issuer URL, advertises only
 `insights:read` and `insights:write`, and allows bearer credentials only in the
-`Authorization` header. The protected resource omits unused `org:admin` so
+`Authorization` header. Both metadata documents omit unused `org:admin` so
 general-purpose clients do not request it during initial authorization, as
 recommended by the [MCP scope-minimization
 guidance](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#scope-selection-strategy).
