@@ -347,7 +347,7 @@ func TestDiscoveryHandler_RFC8414_SpecCompliance(t *testing.T) {
 	require.Equal(t, []string{"authorization_code", "refresh_token"}, meta.GrantTypesSupported)
 	require.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
 	require.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
-	require.ElementsMatch(t, []string{"insights:read", "insights:write", "org:admin"}, meta.ScopesSupported)
+	require.ElementsMatch(t, []string{"insights:read", "insights:write"}, meta.ScopesSupported)
 }
 
 // --- Spec compliance: RFC 9728 Protected Resource Metadata ---

@@ -30,7 +30,7 @@ func buildAuthServerMeta(base *url.URL, cimdSupported bool) *oauthex.AuthServerM
 		ClientIDMetadataDocumentSupported: cimdSupported,
 		ResponseTypesSupported:            []string{oauthCode},
 		GrantTypesSupported:               []string{oauthGrantAuthorizationCode, oauthGrantRefreshToken},
-		ScopesSupported:                   []string{scopeInsightsRead, scopeInsightsWrite, scopeOrgAdmin},
+		ScopesSupported:                   []string{scopeInsightsRead, scopeInsightsWrite},
 		CodeChallengeMethodsSupported:     []string{pkceMethodS256},
 		TokenEndpointAuthMethodsSupported: []string{tokenEndpointAuthMethodNone},
 	}
