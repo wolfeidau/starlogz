@@ -3,7 +3,8 @@ module github.com/wolfeidau/starlogz
 go 1.27.0
 
 require (
-	connectrpc.com/connect v1.21.0
+	connectrpc.com/connect v1.20.0
+	connectrpc.com/connect/v2 v2.0.0
 	github.com/alecthomas/kong v1.16.1
 	github.com/aws/aws-sdk-go-v2 v1.47.2
 	github.com/aws/aws-sdk-go-v2/config v1.33.8
