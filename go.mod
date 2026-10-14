@@ -111,7 +111,6 @@ require (
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
 	github.com/lestrrat-go/option/v3 v3.0.0-alpha1 // indirect
-	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
@@ -125,8 +124,6 @@ require (
 	github.com/moby/sys/user v0.4.1 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/nikolaydubina/go-cover-treemap v1.5.1 // indirect
-	github.com/nikolaydubina/treemap v1.2.5 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261 // indirect
@@ -167,7 +164,6 @@ require (
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/grpc v1.83.2 // indirect
@@ -179,6 +175,5 @@ require (
 tool (
 	connectrpc.com/connect/cmd/protoc-gen-connect-go
 	github.com/bufbuild/buf/cmd/buf
-	github.com/nikolaydubina/go-cover-treemap
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
