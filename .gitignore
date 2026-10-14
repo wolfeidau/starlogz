@@ -15,7 +15,7 @@ infra/terraform/terraform.tfstate.backup
 logs/
 /coverage.out
 /json.log
-/junit.xml
+/tests.json
 /starlogz-server
 /sarif-annotate
 /golangci-lint.sarif

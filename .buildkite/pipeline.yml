@@ -39,26 +39,19 @@ steps:
 
       - label: ":go: test"
         artifact_paths:
-          - cover-tree.svg
           - coverage.out
-          - junit.xml
+          - tests.json
         commands:
           - bun install --frozen-lockfile
           - bun run build
-          - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=coverage.out ./...
+          - go test -json -coverprofile=coverage.out ./... > tests.json
         env:
           GOCACHE: /gocache
           GOMODCACHE: /gomodcache
         plugins:
           - mise#v1.1.5: ~
-          - ./.buildkite/plugins/go-coverage:
-              coverprofile: coverage.out
-              treemap: true
-              treemap-output: cover-tree.svg
-          - ./.buildkite/plugins/junit-annotate:
-              file: junit.xml
-              context: go-tests
-              max-failures: 20
+          - wolfeidau/go-test-annotate#v1.0.0:
+              file: tests.json
 
       - label: ":bun: test and lint"
         commands:
