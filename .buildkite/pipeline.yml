@@ -1,12 +1,3 @@
-image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
-
-cache:
-  name: "build-cache"
-  paths:
-    - "/gocache"
-    - "/gomodcache"
-  size: "100g"
-
 steps:
   - group: ":mag: QA"
     key: quality_checks
@@ -18,9 +9,6 @@ steps:
           - golangci-lint run --output.sarif.path golangci-lint.sarif --verbose --timeout 3m
         artifact_paths:
           - golangci-lint.sarif
-        env:
-          GOCACHE: /gocache
-          GOMODCACHE: /gomodcache
         plugins:
           - mise#v1.1.5: ~
           - ./.buildkite/plugins/sarif-annotate:
@@ -45,9 +33,6 @@ steps:
           - bun install --frozen-lockfile
           - bun run build
           - go test -json -coverprofile=coverage.out ./... > tests.json
-        env:
-          GOCACHE: /gocache
-          GOMODCACHE: /gomodcache
         plugins:
           - mise#v1.1.5: ~
           - wolfeidau/go-test-annotate#v1.0.0:
