@@ -952,7 +952,7 @@ func TestToolMetadata_AnnotationsAndServerInfo(t *testing.T) {
 	require.Equal(t, "starlogz-mcp-server", init.ServerInfo.Name)
 	require.Equal(t, "Starlogz", init.ServerInfo.Title)
 	require.Equal(t, "devel", init.ServerInfo.Version)
-	require.NotEmpty(t, init.Instructions)
+	require.Contains(t, init.Instructions, "compounding project knowledge base")
 	require.NotNil(t, init.Capabilities.Tools)
 	require.False(t, init.Capabilities.Tools.ListChanged)
 
