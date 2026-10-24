@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { dayKey, formatDayLabel, formatTime } from "./time";
+import {
+  dayKey,
+  formatDayLabel,
+  formatSinceLabel,
+  formatTime,
+  formatTimestamp,
+} from "./time";
 
 describe("time helpers", () => {
   const now = new Date(2026, 9, 24, 15, 30);
@@ -31,5 +37,20 @@ describe("time helpers", () => {
     const date = new Date(2026, 9, 24, 7, 5);
     expect(formatTime(timestampFromDate(date))).toBe("07:05");
     expect(formatTime(undefined)).toBe("-");
+  });
+
+  test("formatTimestamp renders month, day and 24h local time", () => {
+    const date = new Date(2026, 5, 7, 17, 25);
+    expect(formatTimestamp(timestampFromDate(date))).toBe("Jun 7, 17:25");
+    expect(formatTimestamp(timestampFromDate(new Date(2026, 5, 7, 0, 5)))).toBe(
+      "Jun 7, 00:05",
+    );
+    expect(formatTimestamp(undefined)).toBe("-");
+  });
+
+  test("formatSinceLabel shares the 24h convention", () => {
+    expect(formatSinceLabel(new Date(2026, 5, 7, 17, 25))).toBe(
+      "New since Jun 7, 17:25",
+    );
   });
 });

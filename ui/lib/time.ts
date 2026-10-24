@@ -8,22 +8,34 @@ export function timestampToDate(ts?: Timestamp): Date | null {
 export function formatTimestamp(ts?: Timestamp): string {
   const date = timestampToDate(ts);
   if (!date) return "-";
-  return new Intl.DateTimeFormat("en-US", {
+  return formatDateTime(date);
+}
+
+// Joined by hand: ICU versions differ on the date/time separator ("," vs "at").
+function formatDateTime(date: Date): string {
+  const day = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
+  }).format(date);
+  return `${day}, ${formatClock(date)}`;
+}
+
+function formatClock(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   }).format(date);
+}
+
+export function formatSinceLabel(date: Date): string {
+  return `New since ${formatDateTime(date)}`;
 }
 
 export function formatTime(ts?: Timestamp): string {
   const date = timestampToDate(ts);
   if (!date) return "-";
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
+  return formatClock(date);
 }
 
 export function dayKey(date: Date): string {

@@ -37,6 +37,7 @@ export function InsightRow({
   mode: "list" | "search";
   onOpenInsight: (key: string) => void;
 }) {
+  const Heading = mode === "list" ? "h4" : "h3";
   const label = insight.key || insight.id.slice(0, 8);
   return (
     <article
@@ -46,7 +47,7 @@ export function InsightRow({
     >
       {mode === "list" && <StarMark />}
       <div className="insight-row-head">
-        <h3 className="mono">
+        <Heading className="mono">
           {insight.key ? (
             <Link
               className="insight-row-link"
@@ -66,7 +67,7 @@ export function InsightRow({
               {label}
             </Link>
           )}
-        </h3>
+        </Heading>
         <Pill>{insight.category}</Pill>
         <span className="insight-row-updated">
           {mode === "list"

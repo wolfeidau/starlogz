@@ -130,7 +130,6 @@ export function InsightHistory({
                   <button
                     aria-pressed={selected?.revision === revision.revision}
                     className="history-revision-button"
-                    data-selected={selected?.revision === revision.revision}
                     onClick={() => setSelectedRevision(revision.revision)}
                     type="button"
                   >

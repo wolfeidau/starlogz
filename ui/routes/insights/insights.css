@@ -13,15 +13,6 @@
   min-width: 0;
 }
 
-.project-title {
-  margin: 0;
-  font-size: var(--text-2xl);
-  font-weight: 700;
-  font-stretch: 78%;
-  line-height: 1.1;
-  overflow-wrap: anywhere;
-}
-
 .project-rail {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -88,7 +79,7 @@
 }
 
 .tag-chip:focus-visible {
-  outline: 3px solid var(--primary);
+  outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
 
@@ -253,7 +244,6 @@
 }
 
 .insight-row-star {
-  --cat: var(--cat-general);
   position: absolute;
   top: 19px;
   left: 0;
@@ -268,26 +258,6 @@
   background: var(--surface-soft);
 }
 
-.insight-row[data-category="fact"] .insight-row-star {
-  --cat: var(--cat-fact);
-}
-
-.insight-row[data-category="decision"] .insight-row-star {
-  --cat: var(--cat-decision);
-}
-
-.insight-row[data-category="insight"] .insight-row-star {
-  --cat: var(--cat-insight);
-}
-
-.insight-row[data-category="preference"] .insight-row-star {
-  --cat: var(--cat-preference);
-}
-
-.insight-row[data-category="context"] .insight-row-star {
-  --cat: var(--cat-context);
-}
-
 .insight-row-head {
   display: flex;
   flex-wrap: wrap;
@@ -296,7 +266,7 @@
   min-width: 0;
 }
 
-.insight-row-head h3 {
+.insight-row-head :is(h3, h4) {
   margin: 0;
   min-width: 0;
   font-size: var(--text-sm);
