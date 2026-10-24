@@ -27,8 +27,8 @@ Use `whoami` only when access is uncertain. Use `insight_list` only when the use
 Improve existing knowledge before adding new knowledge. In order of preference:
 
 1. Correct a surfaced insight that is stale or contradicted by the repository or this work. Rewrite a keyed insight as one current summary; never append dated update sections.
-2. Merge duplicates into one keyed insight and delete the rest. Deletion is soft and revisions remain restorable.
-3. Link related keyed insights with `[[key]]` when the relationship materially improves recall.
+2. Merge duplicates into one keyed insight. Before deleting a duplicate, call `insight_get` on it and rewrite every backlink source to link the surviving key. Keep the duplicate when any backlink cannot be migrated, because links resolve by exact key and deletion leaves them unresolved.
+3. Link related keyed insights with `[[insight:key]]` or `[[insight:key|label]]` when the relationship materially improves recall. Bare `[[key]]` stays literal text.
 4. Add a new insight only when no existing insight can hold the result.
 
 Pass `expected_revision` on every update and delete.
