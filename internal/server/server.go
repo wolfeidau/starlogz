@@ -168,7 +168,7 @@ func New(cfg Config) (*Server, error) {
 		authenticatedHandler.ServeHTTP(w, r)
 	})
 
-	handler := middleware.CORS(mux)
+	handler := middleware.CORS(middleware.Route(mux))
 	if cfg.SentryHandler != nil {
 		handler = cfg.SentryHandler(handler)
 	}

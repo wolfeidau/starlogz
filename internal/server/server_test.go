@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -304,6 +306,44 @@ func TestSentryHandler_ConfiguredWrapsRequests(t *testing.T) {
 
 	require.True(t, wrapped)
 	require.Equal(t, "true", resp.Header.Get("X-Sentry-Wrapped"))
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestAccessLog_RecordsRouteThroughRequestCopyingMiddleware(t *testing.T) {
+	var logs syncBuffer
+	ts, _ := testFixtureWithConfig(t, func(cfg *server.Config) {
+		cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		// Sentry's handler passes a copied request downstream.
+		cfg.SentryHandler = func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, r.Clone(r.Context()))
+			})
+		}
+	})
+
+	resp, err := http.Get(ts.URL + "/health")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(logs.String(), `"route":"/health"`)
+	}, time.Second, 10*time.Millisecond, logs.String())
 }
 
 func TestHealth_WrongMethod(t *testing.T) {
