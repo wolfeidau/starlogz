@@ -41,7 +41,11 @@ func newMCPServer(version string, st store.Store, eventEmitter *wideevent.Emitte
 		eventEmitter = wideevent.NewNoopEmitter()
 	}
 	ms := &mcpServer{
-		server: mcp.NewServer(&mcp.Implementation{Name: name, Title: "Starlogz", Version: version}, &mcp.ServerOptions{Instructions: serverInstructions}),
+		server: mcp.NewServer(&mcp.Implementation{Name: name, Title: "Starlogz", Version: version}, &mcp.ServerOptions{
+			Instructions: serverInstructions,
+			// Stateless Lambda cannot stream list-changed notifications, and advertising them makes subscriptions/listen block until timeout.
+			Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}, Logging: &mcp.LoggingCapabilities{}}, //nolint:staticcheck // keep the SDK-default logging capability
+		}),
 		store:  st,
 		events: eventEmitter,
 	}
