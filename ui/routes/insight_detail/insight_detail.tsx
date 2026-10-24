@@ -123,6 +123,19 @@ function RelationshipSection({
   );
 }
 
+// Row of the shown insight if listed, else the list heading, so focus never falls to <body>.
+function insightFocusTarget(id: string): HTMLElement | null {
+  for (const row of document.querySelectorAll<HTMLElement>(
+    "[data-insight-id]",
+  )) {
+    if (id && row.dataset.insightId === id) {
+      const link = row.querySelector<HTMLElement>("a.insight-row-link");
+      if (link) return link;
+    }
+  }
+  return document.getElementById("insights-heading");
+}
+
 export function InsightDetail({
   project,
   selector,
@@ -141,6 +154,7 @@ export function InsightDetail({
   onNavigate: (selector: InsightSelector) => void;
 }) {
   const insight = detail?.insight;
+  const shownId = insight?.id ?? (selector.case === "id" ? selector.value : "");
   const notFound =
     error instanceof ConnectError && error.code === Code.NotFound;
 
@@ -149,6 +163,9 @@ export function InsightDetail({
       className="detail-panel"
       labelledBy="insight-detail-title"
       onClose={onClose}
+      preferFallback
+      returnFocusFallback={() => insightFocusTarget(shownId)}
+      variant="drawer"
     >
       <div className="detail-content">
         <header className="detail-header">

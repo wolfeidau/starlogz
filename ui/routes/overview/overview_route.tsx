@@ -1,23 +1,37 @@
 import { useQuery } from "@connectrpc/connect-query";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import {
   getProjectDashboard,
   listTags,
 } from "../../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
+import { ProjectRail } from "../insights/project_rail";
+import { ViewTabs } from "../insights/view_tabs";
 import { OverviewCharts, SummaryTiles } from "./summary";
 
 export function OverviewRoute({ project }: { project: string }) {
+  const navigate = useNavigate();
   const dashboard = useQuery(getProjectDashboard, { project });
   const tags = useQuery(listTags, { project, limit: 60 });
   const topTags = tags.data?.tags ?? dashboard.data?.topTags ?? [];
 
   return (
-    <>
-      <Link to="/dashboard/$project" params={{ project }}>
-        Insights
-      </Link>
-      <SummaryTiles dashboard={dashboard.data} tagCount={topTags.length} />
-      <OverviewCharts dashboard={dashboard.data} topTags={topTags} />
-    </>
+    <div className="project-layout">
+      <ProjectRail
+        project={project}
+        selectedTag=""
+        onTagChange={(tag) =>
+          void navigate({
+            to: "/dashboard/$project",
+            params: { project },
+            search: { tag },
+          })
+        }
+      />
+      <div className="project-main">
+        <ViewTabs project={project} active="overview" />
+        <SummaryTiles dashboard={dashboard.data} tagCount={topTags.length} />
+        <OverviewCharts dashboard={dashboard.data} topTags={topTags} />
+      </div>
+    </div>
   );
 }

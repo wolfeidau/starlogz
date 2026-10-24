@@ -44,6 +44,13 @@ function setup({
     renderedHtml:
       '<p><a class="insight-link" href="/dashboard/alpha/insights/target" data-starlogz-action="open-insight" data-insight-key="target">target</a></p>',
   };
+  const keyless = {
+    id: "019fabcd-1111-7000-8000-000000000000",
+    key: "",
+    category: "decision",
+    source: "user",
+    renderedHtml: "<p>keyless body</p>",
+  };
   const transport = createRouterTransport((router) => {
     router.rpc(UIService.method.getSession, () => {
       if (sessionError) throw new ConnectError("no", Code.Unauthenticated);
@@ -57,7 +64,7 @@ function setup({
     }));
     router.rpc(UIService.method.listInsights, (req) => {
       calls.listInsights.push({ ...req });
-      return { insights: [insight] };
+      return { insights: [insight, keyless] };
     });
     router.rpc(UIService.method.searchInsights, (req) => {
       calls.searchInsights.push({ ...req });
@@ -65,6 +72,10 @@ function setup({
     });
     router.rpc(UIService.method.getInsight, (req) => {
       calls.getInsight.push({ ...req });
+      const value = req.selector?.value;
+      if (value === "ghost")
+        return { insight: { ...insight, id: "ghost-id", key: "ghost" } };
+      if (value === keyless.id) return { insight: keyless };
       return { insight: { ...insight, key: "source" } };
     });
     router.rpc(UIService.method.listInsightHistory, () => ({ revisions: [] }));
@@ -330,5 +341,129 @@ describe("operations", () => {
     expect(
       screen.queryByText("Service-operator access is required."),
     ).toBeNull();
+  });
+});
+
+describe("list layout", () => {
+  test("row links open the key route and the by-id route", async () => {
+    const { router } = setup({ entries: ["/dashboard/alpha?tag=auth"] });
+    fireEvent.click(await screen.findByRole("link", { name: "source" }));
+    await screen.findByRole("dialog");
+    expect(pathOf(router)).toBe("/dashboard/alpha/insights/source?tag=auth");
+
+    await act(async () => router.history.back());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(await screen.findByRole("link", { name: "019fabcd" }));
+    await screen.findByRole("dialog");
+    expect(pathOf(router)).toBe(
+      "/dashboard/alpha/insights/by-id/019fabcd-1111-7000-8000-000000000000?tag=auth",
+    );
+  });
+
+  test("tag chips toggle the tag filter", async () => {
+    const { router, calls } = setup({ entries: ["/dashboard/alpha"] });
+    const chip = await screen.findByRole("button", { name: /auth/ });
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByLabelText("Filter by tag")).toBeNull();
+
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(pathOf(router)).toBe("/dashboard/alpha?tag=auth"),
+    );
+    await waitFor(() =>
+      expect(calls.listInsights.at(-1)).toMatchObject({ tag: "auth" }),
+    );
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(chip);
+    await waitFor(() => expect(pathOf(router)).toBe("/dashboard/alpha"));
+    await waitFor(() =>
+      expect(calls.listInsights.at(-1)).toMatchObject({ tag: "" }),
+    );
+  });
+
+  test("tabs mark the active view", async () => {
+    setup({ entries: ["/dashboard/alpha/overview"] });
+    const nav = await screen.findByRole("navigation", {
+      name: "Project views",
+    });
+    expect(
+      within(nav)
+        .getByRole("link", { name: "Overview" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      within(nav)
+        .getByRole("link", { name: "List" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
+  test("typing issues one search after the debounce", async () => {
+    const { calls, router } = setup({ entries: ["/dashboard/alpha"] });
+    const input = await screen.findByLabelText("Search insights");
+    for (const value of ["h", "he", "hel"]) {
+      fireEvent.change(input, { target: { value } });
+    }
+    expect(calls.searchInsights).toHaveLength(0);
+    await waitFor(() => expect(pathOf(router)).toBe("/dashboard/alpha?q=hel"));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(calls.searchInsights).toHaveLength(1);
+    expect(calls.searchInsights[0]).toMatchObject({ query: "hel" });
+  });
+
+  test("search input follows external q changes", async () => {
+    const { router } = setup({ entries: ["/dashboard/alpha?q=one"] });
+    const input =
+      await screen.findByLabelText<HTMLInputElement>("Search insights");
+    expect(input.value).toBe("one");
+    await act(() =>
+      router.navigate({
+        to: "/dashboard/$project",
+        params: { project: "alpha" },
+        search: { q: "two" },
+      }),
+    );
+    await waitFor(() => expect(input.value).toBe("two"));
+  });
+
+  test("closing the drawer focuses the originating row link", async () => {
+    setup({ entries: ["/dashboard/alpha"] });
+    const link = await screen.findByRole("link", { name: "source" });
+    fireEvent.click(link);
+    const dialog = await screen.findByRole("dialog");
+    dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(link);
+  });
+
+  test("focus lands on the list heading when the insight is not listed", async () => {
+    const { router } = setup({ entries: ["/dashboard/alpha"] });
+    const link = await screen.findByRole("link", { name: "source" });
+    fireEvent.click(link);
+    await screen.findByRole("dialog", { name: "source" });
+
+    await act(() =>
+      router.navigate({
+        to: "/dashboard/$project/insights/$key",
+        params: { project: "alpha", key: "ghost" },
+      }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "ghost" });
+    dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Insights" }),
+    );
+  });
+
+  test("insight links inside row content open the drawer", async () => {
+    const { router } = setup({ entries: ["/dashboard/alpha"] });
+    fireEvent.click(await screen.findByRole("link", { name: "target" }), {
+      button: 0,
+      detail: 1,
+    });
+    await screen.findByRole("dialog");
+    expect(pathOf(router)).toBe("/dashboard/alpha/insights/target");
   });
 });

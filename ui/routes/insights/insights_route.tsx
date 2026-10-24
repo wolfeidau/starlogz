@@ -1,13 +1,11 @@
-import { useQuery } from "@connectrpc/connect-query";
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import {
-  listProjects,
-  listTags,
-} from "../../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
+import { Outlet, useNavigate } from "@tanstack/react-router";
 import { LoadMoreButton } from "../../components/load_more_button";
 import { useDashboardInsightPages } from "./dashboard_pagination";
-import { InsightTable } from "./insight_table";
-import { InsightsToolbar } from "./toolbar";
+import { InsightRow } from "./insight_row";
+import { ProjectRail } from "./project_rail";
+import { SearchBox } from "./search_box";
+import { ViewTabs } from "./view_tabs";
+import "./insights.css";
 
 export function InsightsRoute({
   project,
@@ -21,8 +19,6 @@ export function InsightsRoute({
   const navigate = useNavigate();
   const query = q ?? "";
   const selectedTag = tag ?? "";
-  const projects = useQuery(listProjects, {});
-  const tags = useQuery(listTags, { project, limit: 60 });
   const insightPages = useDashboardInsightPages({
     isAuthenticated: true,
     activeProject: project,
@@ -40,59 +36,63 @@ export function InsightsRoute({
     });
 
   return (
-    <>
-      <InsightsToolbar
-        projects={projects.data?.projects ?? []}
-        activeProject={project}
-        onSelectProject={(slug) =>
-          void navigate({
-            to: "/dashboard/$project",
-            params: { project: slug },
-          })
-        }
-        query={query}
-        onQueryChange={(value) => setSearch({ q: value || undefined })}
+    <div className="project-layout">
+      <ProjectRail
+        project={project}
         selectedTag={selectedTag}
-        onTagChange={(value) => setSearch({ tag: value || undefined })}
-        topTags={tags.data?.tags ?? []}
+        onTagChange={(next) => setSearch({ tag: next })}
       />
 
-      <Link to="/dashboard/$project/overview" params={{ project }}>
-        Overview
-      </Link>
-
-      <section className="panel insights-panel">
-        <div className="panel-heading">
-          <h2>{query.trim() === "" ? "Insights" : "Search Results"}</h2>
-          <span>{insights.length} shown</span>
+      <div className="project-main">
+        <div className="search-row">
+          <SearchBox
+            query={query}
+            onQueryChange={(value) => setSearch({ q: value || undefined })}
+          />
+          <ViewTabs project={project} active="list" q={q} tag={tag} />
         </div>
-        {insightPages.isLoading ? (
-          <div className="center-state">Loading insights</div>
-        ) : insights.length === 0 ? (
-          <div className="empty-panel">No matching insights.</div>
-        ) : (
-          <>
-            <InsightTable
-              insights={insights}
-              onOpenInsight={(key) =>
-                void navigate({
-                  to: "/dashboard/$project/insights/$key",
-                  params: { project, key },
-                  search: { q, tag },
-                })
-              }
-            />
-            {insightPages.hasNextPage && (
-              <LoadMoreButton
-                loading={insightPages.isFetchingNextPage}
-                onLoadMore={() => void insightPages.fetchNextPage()}
-              />
-            )}
-          </>
-        )}
-      </section>
+
+        <section className="panel insights-panel">
+          <div className="panel-heading">
+            <h2 id="insights-heading" tabIndex={-1}>
+              {query.trim() === "" ? "Insights" : "Search Results"}
+            </h2>
+            <span>{insights.length} shown</span>
+          </div>
+          {insightPages.isLoading ? (
+            <div className="center-state">Loading insights</div>
+          ) : insights.length === 0 ? (
+            <div className="empty-panel">No matching insights.</div>
+          ) : (
+            <>
+              {insights.map((insight) => (
+                <InsightRow
+                  insight={insight}
+                  key={insight.id}
+                  project={project}
+                  q={q}
+                  tag={tag}
+                  onOpenInsight={(key) =>
+                    void navigate({
+                      to: "/dashboard/$project/insights/$key",
+                      params: { project, key },
+                      search: { q, tag },
+                    })
+                  }
+                />
+              ))}
+              {insightPages.hasNextPage && (
+                <LoadMoreButton
+                  loading={insightPages.isFetchingNextPage}
+                  onLoadMore={() => void insightPages.fetchNextPage()}
+                />
+              )}
+            </>
+          )}
+        </section>
+      </div>
 
       <Outlet />
-    </>
+    </div>
   );
 }
