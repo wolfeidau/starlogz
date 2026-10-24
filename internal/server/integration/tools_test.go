@@ -190,6 +190,11 @@ func (f *toolFixture) tokenFor(t *testing.T, userID uuid.UUID, scopes string) st
 // token on every request. The session is closed on test cleanup.
 func (f *toolFixture) connect(t *testing.T, ctx context.Context, token string) *mcp.ClientSession {
 	t.Helper()
+	return f.connectWithOptions(t, ctx, token, nil)
+}
+
+func (f *toolFixture) connectWithOptions(t *testing.T, ctx context.Context, token string, opts *mcp.ClientSessionOptions) *mcp.ClientSession {
+	t.Helper()
 	httpClient := &http.Client{Transport: &bearerTransport{token: token, base: http.DefaultTransport}}
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:             f.ts.URL + "/mcp",
@@ -197,7 +202,7 @@ func (f *toolFixture) connect(t *testing.T, ctx context.Context, token string) *
 		DisableStandaloneSSE: true,
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "starlogz-tools-test"}, nil)
-	sess, err := client.Connect(ctx, transport, nil)
+	sess, err := client.Connect(ctx, transport, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.Close() })
 	return sess
