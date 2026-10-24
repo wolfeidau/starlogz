@@ -25,7 +25,8 @@ cannot issue its own refresh token or persist a refresh grant.
 An MCP client:
 
 1. Probes `/mcp` and receives a bearer challenge with the protected-resource
-   metadata URL.
+   metadata URL and `scope="insights:read insights:write"`. `insights:read` is
+   the minimum scope for `/mcp`; write tools require `insights:write`.
 2. Reads protected-resource and authorization-server metadata.
 3. Identifies itself through an existing registration, Dynamic Client
    Registration (DCR), or an HTTPS Client ID Metadata Document (CIMD) when
