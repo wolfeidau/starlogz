@@ -1,17 +1,10 @@
 import type { ActivityBucket } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { dayKey } from "../../lib/time";
 import "./overview.css";
-
-function localToday() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
 
 export function ActivityStrip({ buckets }: { buckets: ActivityBucket[] }) {
   const max = Math.max(1, ...buckets.map((b) => b.count));
-  const today = localToday();
-  const todayDate = buckets.findLast((b) => b.date === today)?.date;
+  const today = dayKey(new Date());
   return (
     <section className="panel activity-panel">
       <h2>Recent activity</h2>
@@ -20,7 +13,7 @@ export function ActivityStrip({ buckets }: { buckets: ActivityBucket[] }) {
           <div className="activity-day" key={bucket.date}>
             <div
               className={
-                bucket.date === todayDate
+                bucket.date === today
                   ? "activity-bar activity-bar-today"
                   : "activity-bar"
               }

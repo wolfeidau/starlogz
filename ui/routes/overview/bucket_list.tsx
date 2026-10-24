@@ -1,15 +1,6 @@
 import type { CountBucket } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
 import "./overview.css";
 
-const categories = new Set([
-  "fact",
-  "decision",
-  "insight",
-  "preference",
-  "context",
-  "general",
-]);
-
 export function BucketList({
   title,
   buckets,
@@ -33,11 +24,9 @@ export function BucketList({
               <div className="bar-track">
                 <div
                   className="bar-fill"
+                  data-category={categoryColors ? bucket.name : undefined}
                   style={{
                     width: `${Math.max(8, (bucket.count / max) * 100)}%`,
-                    ...(categoryColors && {
-                      background: `var(--cat-${categories.has(bucket.name) ? bucket.name : "general"})`,
-                    }),
                   }}
                 />
               </div>

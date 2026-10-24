@@ -45,6 +45,9 @@ describe("app shell session errors", () => {
   test("unauthenticated shows the login view", async () => {
     setup(() => new ConnectError("no", Code.Unauthenticated));
     expect(await screen.findByText("Sign in with GitHub")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "starlogz" }),
+    ).toBeTruthy();
   });
 
   test("other errors show a retry state that recovers", async () => {

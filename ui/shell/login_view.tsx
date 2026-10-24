@@ -4,12 +4,12 @@ export function LoginView() {
   return (
     <main className="login-shell">
       <section className="login-panel">
-        <p className="login-wordmark">
+        <h1 className="login-wordmark">
           <span className="wordmark-star" aria-hidden="true">
             ✦
           </span>
           starlogz
-        </p>
+        </h1>
         <p className="login-copy">
           The project memory your agents keep. Sign in to read it.
         </p>
