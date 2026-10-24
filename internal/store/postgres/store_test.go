@@ -2255,10 +2255,11 @@ func TestGetProjectDashboard(t *testing.T) {
 	_, err = st.DeleteInsight(ctx, store.DeleteInsightParams{OrgID: p.OrgID, InsightID: deleted.ID, ChangedBy: u.ID})
 	require.NoError(t, err)
 
-	dashboard, err := st.GetProjectDashboard(ctx, p.ID)
+	dashboard, err := st.GetProjectDashboard(ctx, p.ID, time.UTC)
 	require.NoError(t, err)
 	require.Equal(t, 2, dashboard.TotalInsights)
-	require.Len(t, dashboard.RecentActivity, 14)
+	// Two creates plus the deleted insight's create and delete revisions, all today.
+	require.Equal(t, []store.ActivityBucket{{Date: time.Now().UTC().Format("2006-01-02"), Count: 4}}, dashboard.RecentActivity)
 	require.Len(t, dashboard.RecentInsights, 2)
 
 	categoryCounts := map[string]int{}
@@ -2283,6 +2284,59 @@ func TestGetProjectDashboard(t *testing.T) {
 	require.Equal(t, 1, tagCounts["backend"])
 	require.Equal(t, 1, tagCounts["api"])
 	require.Zero(t, tagCounts["deleted"])
+}
+
+func TestGetProjectDashboardActivityWindowAndZone(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+	u, p := testUserAndProject(t, st, 77)
+
+	a, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: "a", Category: "fact", Source: "agent", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	_, err = st.UpdateInsight(ctx, store.UpdateInsightParams{
+		OrgID: p.OrgID, InsightID: a.ID, Content: "a2", ChangedBy: u.ID,
+	})
+	require.NoError(t, err)
+	b, err := st.WriteInsight(ctx, store.WriteInsightParams{
+		ProjectID: p.ID, Content: "b", Category: "fact", Source: "agent", CreatedBy: u.ID,
+	})
+	require.NoError(t, err)
+	_, err = st.DeleteInsight(ctx, store.DeleteInsightParams{OrgID: p.OrgID, InsightID: b.ID, ChangedBy: u.ID})
+	require.NoError(t, err)
+
+	day := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -10)
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	setChangedAt := func(id uuid.UUID, revision int, at time.Time) {
+		t.Helper()
+		_, err := pool.Exec(ctx, `UPDATE insight_revisions SET changed_at = $3 WHERE insight_id = $1 AND revision = $2`, id, revision, at)
+		require.NoError(t, err)
+	}
+	setChangedAt(a.ID, 1, day.Add(20*time.Hour))
+	setChangedAt(a.ID, 2, day.Add(21*time.Hour))
+	setChangedAt(b.ID, 1, day.AddDate(0, 0, -1).Add(2*time.Hour))
+	setChangedAt(b.ID, 2, time.Now().AddDate(0, 0, -400)) // outside the window
+
+	date := func(d time.Time) string { return d.Format("2006-01-02") }
+
+	utc, err := st.GetProjectDashboard(ctx, p.ID, time.UTC)
+	require.NoError(t, err)
+	require.Equal(t, []store.ActivityBucket{
+		{Date: date(day.AddDate(0, 0, -1)), Count: 1},
+		{Date: date(day), Count: 2},
+	}, utc.RecentActivity)
+
+	melbourne, err := time.LoadLocation("Australia/Melbourne")
+	require.NoError(t, err)
+	mel, err := st.GetProjectDashboard(ctx, p.ID, melbourne)
+	require.NoError(t, err)
+	require.Equal(t, []store.ActivityBucket{
+		{Date: date(day.AddDate(0, 0, -1)), Count: 1},
+		{Date: date(day.AddDate(0, 0, 1)), Count: 2},
+	}, mel.RecentActivity)
 }
 
 func TestGetOperationsOverview(t *testing.T) {

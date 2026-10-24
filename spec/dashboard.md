@@ -18,7 +18,7 @@ views in [dashboard_operations.md](dashboard_operations.md).
 | `/dashboard/<project>` | Insight log (see below). Optional search params: `q` (search text) and `tag` (tag filter). |
 | `/dashboard/<project>/insights/<key>` | Insight list with the detail drawer open for that key. |
 | `/dashboard/<project>/insights/by-id/<id>` | Insight list with the detail drawer open for a keyless insight. |
-| `/dashboard/<project>/overview` | Project summary and distributions. |
+| `/dashboard/<project>/overview` | Activity calendar and distributions (see below). |
 | `/admin/operations` | Operator view; see [dashboard_operations.md](dashboard_operations.md). |
 
 - Path parameters are single escaped segments, so keys containing `/`, `?`,
@@ -86,6 +86,17 @@ caller's previous visit from older ones.
   contains both newer and older entries. With no baseline, or when every
   loaded entry is on one side, no divider is shown.
 - Storage failures disable the marker without affecting the list.
+
+## Overview
+
+- The activity calendar counts insight revisions (all operations, including
+  soft-deleted insights) per day over 53 Sunday-start weeks ending today, in
+  the browser's time zone.
+- The dashboard request sends that zone as `time_zone` (IANA name; empty means
+  UTC). An invalid zone returns `InvalidArgument`.
+- `recent_activity` is sparse: only days with a nonzero count, ascending, dated
+  `YYYY-MM-DD` in the requested zone.
+- The view also shows category, source, and top-tag distributions.
 
 ## Headings
 
