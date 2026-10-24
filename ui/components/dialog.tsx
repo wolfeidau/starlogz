@@ -38,10 +38,14 @@ export function Dialog({
       event.preventDefault();
       onCloseRef.current();
     };
+    // Browsers may force-close after repeated prevented cancels; keep state in sync.
+    const handleClose = () => onCloseRef.current();
     dialog.addEventListener("cancel", handleCancel);
+    dialog.addEventListener("close", handleClose);
 
     return () => {
       dialog.removeEventListener("cancel", handleCancel);
+      dialog.removeEventListener("close", handleClose);
       document.body.style.overflow = previousOverflow;
       if (dialog.open) dialog.close();
       const target = opener?.isConnected ? opener : fallbackRef.current?.();
