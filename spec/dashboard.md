@@ -50,6 +50,9 @@ exist in bookmarks and in content agents have copied.
 - Shell routes are registered as prefix patterns. Access logs record only the
   matched mux pattern, so project slugs, insight keys, and search text never
   appear in server logs or wide events.
+- Edge routing must forward the same shell paths. API Gateway routes
+  (`infra/terraform/apigw.tf`) include `GET /dashboard/{proxy+}`; a missing
+  edge route returns 404 before the request reaches the server.
 
 ## Session handling
 
