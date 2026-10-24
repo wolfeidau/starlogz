@@ -367,6 +367,37 @@ func TestDashboard_Route(t *testing.T) {
 	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
 }
 
+func TestDashboard_SubtreeRoutes(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	for _, path := range []string{
+		"/dashboard/alpha",
+		"/dashboard/alpha/insights/x",
+		"/dashboard/alpha/insights/by-id/123",
+		"/dashboard/alpha/overview",
+	} {
+		resp, err := http.Get(ts.URL + path)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		require.Contains(t, resp.Header.Get("Content-Type"), "text/html", path)
+	}
+}
+
+func TestRoot_ServesLandingAndUnknownPathsReturn404(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := http.Get(ts.URL + "/")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = http.Get(ts.URL + "/nope")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
 func TestOperations_Route(t *testing.T) {
 	ts, _ := testFixture(t)
 

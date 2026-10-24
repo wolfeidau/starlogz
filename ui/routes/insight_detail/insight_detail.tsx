@@ -1,5 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import type { MouseEvent } from "react";
+import { Link, useSearch } from "@tanstack/react-router";
 import type {
   GetInsightResponse,
   InsightReference,
@@ -7,11 +7,7 @@ import type {
 import { Dialog } from "../../components/dialog";
 import { Pill } from "../../components/pill";
 import { Tag } from "../../components/tag";
-import {
-  dashboardURL,
-  type InsightSelector,
-  isUnmodifiedPrimaryClick,
-} from "../../lib/insight_navigation";
+import type { InsightSelector } from "../../lib/insight_navigation";
 import { RenderedMarkdown } from "../../lib/markdown";
 import { formatTimestamp } from "../../lib/time";
 import { InsightHistory } from "./insight_history";
@@ -22,28 +18,32 @@ function DetailRelation({
   reference,
   project,
   selector,
-  onNavigate,
 }: {
   label: string;
   reference: InsightReference;
   project: string;
   selector: InsightSelector;
-  onNavigate: (selector: InsightSelector) => void;
 }) {
-  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!isUnmodifiedPrimaryClick(event)) return;
-    event.preventDefault();
-    onNavigate(selector);
-  };
-
+  const { q, tag } = useSearch({ strict: false });
   return (
     <li className="relationship-item">
-      <a
-        href={dashboardURL(window.location.href, project, selector)}
-        onClick={handleClick}
-      >
-        {label}
-      </a>
+      {selector.case === "key" ? (
+        <Link
+          to="/dashboard/$project/insights/$key"
+          params={{ project, key: selector.value }}
+          search={{ q, tag }}
+        >
+          {label}
+        </Link>
+      ) : (
+        <Link
+          to="/dashboard/$project/insights/by-id/$id"
+          params={{ project, id: selector.value }}
+          search={{ q, tag }}
+        >
+          {label}
+        </Link>
+      )}
       {reference.category && <Pill>{reference.category}</Pill>}
       {reference.updatedAt && (
         <span className="muted">{formatTimestamp(reference.updatedAt)}</span>
@@ -59,7 +59,6 @@ function RelationshipSection({
   truncated,
   kind,
   project,
-  onNavigate,
 }: {
   title: string;
   references: InsightReference[];
@@ -67,7 +66,6 @@ function RelationshipSection({
   truncated: boolean;
   kind: "links" | "backlinks";
   project: string;
-  onNavigate: (selector: InsightSelector) => void;
 }) {
   return (
     <section className="relationship-section">
@@ -111,7 +109,6 @@ function RelationshipSection({
                 reference={reference}
                 project={project}
                 selector={selector}
-                onNavigate={onNavigate}
               />
             );
           })}
@@ -204,7 +201,6 @@ export function InsightDetail({
                 truncated={detail?.linksTruncated ?? false}
                 kind="links"
                 project={project}
-                onNavigate={onNavigate}
               />
               <RelationshipSection
                 title="Backlinks"
@@ -213,7 +209,6 @@ export function InsightDetail({
                 truncated={detail?.backlinksTruncated ?? false}
                 kind="backlinks"
                 project={project}
-                onNavigate={onNavigate}
               />
             </div>
             <InsightHistory

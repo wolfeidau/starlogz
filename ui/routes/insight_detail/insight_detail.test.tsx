@@ -4,6 +4,12 @@ import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { TransportProvider } from "@connectrpc/connect-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import {
   cleanup,
   fireEvent,
   render,
@@ -19,14 +25,20 @@ import { InsightDetail } from "./insight_detail";
 
 afterEach(cleanup);
 
-function renderDetail(ui: ReactNode) {
+async function renderDetail(ui: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   const transport = createRouterTransport((router) => {
     router.rpc(UIService.method.listInsightHistory, () => ({ revisions: [] }));
   });
-  return render(ui, {
+  // Links only need a router context; the real route tree is covered in router.test.tsx.
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => ui }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  return render(<RouterProvider router={router as never} />, {
     wrapper: ({ children }) => (
       <TransportProvider transport={transport}>
         <QueryClientProvider client={queryClient}>
@@ -85,52 +97,44 @@ function detailProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe("insight detail content", () => {
-  test("distinguishes not-found and generic request errors", () => {
+  test("distinguishes not-found and generic request errors", async () => {
     const props = detailProps({
       detail: undefined,
       error: new ConnectError("missing", Code.NotFound),
     });
-    const view = renderDetail(<InsightDetail {...props} />);
+    const view = await renderDetail(<InsightDetail {...props} />);
     expect(
-      screen.getByRole("heading", { name: "Insight not found" }),
+      await screen.findByRole("heading", { name: "Insight not found" }),
     ).toBeTruthy();
     expect(screen.getByText(/missing, deleted, or unavailable/)).toBeTruthy();
+    view.unmount();
 
-    view.rerender(
+    await renderDetail(
       <InsightDetail {...props} error={new Error("network failure")} />,
     );
     expect(
-      screen.getByRole("heading", { name: "Unable to load insight" }),
+      await screen.findByRole("heading", { name: "Unable to load insight" }),
     ).toBeTruthy();
     expect(screen.getByText(/request failed/)).toBeTruthy();
   });
 
-  test("renders relationships and routes resolved traversal", () => {
+  test("renders relationship links as router links and routes rendered links", async () => {
     const onNavigate = mock(() => {});
-    renderDetail(<InsightDetail {...detailProps({ onNavigate })} />);
-    const dialog = screen.getByRole("dialog", { name: "source" });
+    await renderDetail(<InsightDetail {...detailProps({ onNavigate })} />);
+    const dialog = await screen.findByRole("dialog", { name: "source" });
 
     expect(within(dialog).getByText("Unresolved")).toBeTruthy();
     expect(within(dialog).getByText("Showing the first 2 of 3.")).toBeTruthy();
     expect(within(dialog).queryByRole("link", { name: "missing" })).toBeNull();
 
-    fireEvent.click(within(dialog).getByRole("link", { name: "target" }), {
-      button: 0,
-      detail: 1,
-    });
-    expect(onNavigate).toHaveBeenLastCalledWith({
-      case: "key",
-      value: "target",
-    });
-
-    fireEvent.click(within(dialog).getByRole("link", { name: "backlink-id" }), {
-      button: 0,
-      detail: 1,
-    });
-    expect(onNavigate).toHaveBeenLastCalledWith({
-      case: "id",
-      value: "backlink-id",
-    });
+    expect(
+      within(dialog).getByRole("link", { name: "target" }).getAttribute("href"),
+    ).toBe("/dashboard/starlogz/insights/target");
+    expect(
+      within(dialog)
+        .getByRole("link", { name: "backlink-id" })
+        .getAttribute("href"),
+    ).toBe("/dashboard/starlogz/insights/by-id/backlink-id");
 
     fireEvent.click(
       within(dialog).getByRole("link", { name: "rendered target" }),
@@ -144,14 +148,16 @@ describe("insight detail content", () => {
 });
 
 describe("insight detail modal behavior", () => {
-  test("opens modally, closes on cancel, and restores focus", () => {
+  test("opens modally, closes on cancel, and restores focus", async () => {
     const opener = document.createElement("button");
     opener.textContent = "Open insight";
     document.body.append(opener);
     opener.focus();
     const onClose = mock(() => {});
-    const view = renderDetail(<InsightDetail {...detailProps({ onClose })} />);
-    const dialog = screen.getByRole("dialog", { name: "source" });
+    const view = await renderDetail(
+      <InsightDetail {...detailProps({ onClose })} />,
+    );
+    const dialog = await screen.findByRole("dialog", { name: "source" });
     const close = screen.getByRole("button", { name: "Close insight detail" });
 
     expect((dialog as HTMLDialogElement).open).toBe(true);
@@ -169,10 +175,10 @@ describe("insight detail modal behavior", () => {
     opener.remove();
   });
 
-  test("closes only when the dialog backdrop itself is pressed", () => {
+  test("closes only when the dialog backdrop itself is pressed", async () => {
     const onClose = mock(() => {});
-    renderDetail(<InsightDetail {...detailProps({ onClose })} />);
-    const dialog = screen.getByRole("dialog", { name: "source" });
+    await renderDetail(<InsightDetail {...detailProps({ onClose })} />);
+    const dialog = await screen.findByRole("dialog", { name: "source" });
     const content = dialog.querySelector<HTMLElement>(".detail-content");
 
     if (!content) throw new Error("detail content missing");

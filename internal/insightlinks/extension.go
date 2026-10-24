@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark/v2/ast"
@@ -116,7 +115,7 @@ func renderInsightLink(writer io.Writer, _ []byte, node ast.Node, entering bool,
 		return ast.WalkContinue, nil
 	}
 	link := node.(*InsightLink)
-	href := "?project=" + escapeQueryValue(link.Project) + "&insight_key=" + escapeQueryValue(link.TargetKey)
+	href := "/dashboard/" + url.PathEscape(link.Project) + "/insights/" + url.PathEscape(link.TargetKey)
 	_, _ = w.WriteString(`<a class="insight-link" href="`)
 	_, _ = w.Write(util.EscapeHTML([]byte(href)))
 	_, _ = w.WriteString(`" data-starlogz-action="open-insight" data-insight-key="`)
@@ -125,10 +124,6 @@ func renderInsightLink(writer io.Writer, _ []byte, node ast.Node, entering bool,
 	_, _ = w.Write(util.EscapeHTML([]byte(link.Label)))
 	_, _ = w.WriteString(`</a>`)
 	return ast.WalkContinue, nil
-}
-
-func escapeQueryValue(value string) string {
-	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }
 
 var htmlPolicy = func() *bluemonday.Policy {

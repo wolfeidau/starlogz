@@ -3,9 +3,10 @@ import "./styles/base.css";
 import { TransportProvider } from "@connectrpc/connect-query";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
-import { DashboardView } from "./shell/dashboard_view";
+import { createAppRouter } from "./router";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,6 +15,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+const router = createAppRouter({ queryClient });
 
 function App() {
   const transport = useMemo(
@@ -27,7 +30,7 @@ function App() {
   return (
     <TransportProvider transport={transport}>
       <QueryClientProvider client={queryClient}>
-        <DashboardView />
+        <RouterProvider router={router} />
       </QueryClientProvider>
     </TransportProvider>
   );

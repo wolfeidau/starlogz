@@ -1,47 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  dashboardURL,
-  openInsightKeyForClick,
-  readDashboardLocation,
-} from "./insight_navigation";
-
-describe("dashboard location", () => {
-  test("reads key and ID selectors only with a project", () => {
-    expect(
-      readDashboardLocation("?project=starlogz&insight_key=project-workflow"),
-    ).toEqual({
-      project: "starlogz",
-      selector: { case: "key", value: "project-workflow" },
-    });
-    expect(
-      readDashboardLocation("?project=starlogz&insight_id=019f-test"),
-    ).toEqual({
-      project: "starlogz",
-      selector: { case: "id", value: "019f-test" },
-    });
-    expect(readDashboardLocation("?insight_key=orphaned")).toEqual({
-      project: "",
-      selector: null,
-    });
-  });
-
-  test("writes one selector and preserves unrelated query state", () => {
-    expect(
-      dashboardURL(
-        "https://example.com/?filter=active&insight_id=old#top",
-        "my project",
-        { case: "key", value: "a&b" },
-      ),
-    ).toBe("/?filter=active&project=my+project&insight_key=a%26b#top");
-    expect(
-      dashboardURL(
-        "https://example.com/?project=starlogz&insight_key=old",
-        "starlogz",
-        null,
-      ),
-    ).toBe("/?project=starlogz");
-  });
-});
+import { openInsightKeyForClick } from "./insight_navigation";
 
 describe("delegated insight actions", () => {
   const event = {
