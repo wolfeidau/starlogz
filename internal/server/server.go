@@ -161,7 +161,7 @@ func New(cfg Config) (*Server, error) {
 	mux.HandleFunc("/health", srv.healthHandler)
 	mux.Handle("/mcp", authenticatedHandler)
 
-	handler := middleware.CORS(mux)
+	handler := middleware.CORS(middleware.Route(mux))
 	if cfg.SentryHandler != nil {
 		handler = cfg.SentryHandler(handler)
 	}

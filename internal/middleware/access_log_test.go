@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -67,6 +68,38 @@ func TestAccessLogUsesUnmatchedRoute(t *testing.T) {
 	require.NotContains(t, event, "trace_id")
 	require.NotContains(t, output.String(), "private")
 	require.NotContains(t, output.String(), "secret")
+}
+
+func TestAccessLogRecordsRouteBehindRequestCopyingMiddleware(t *testing.T) {
+	type ctxKey struct{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /oauth2/{action}", func(http.ResponseWriter, *http.Request) {})
+	copying := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, "x")))
+		})
+	}
+
+	tests := []struct {
+		name  string
+		inner http.Handler
+		want  string
+	}{
+		{name: "wrapped in Route", inner: Route(mux), want: "/oauth2/{action}"},
+		{name: "bare mux loses the pattern", inner: mux, want: "unmatched"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			handler := AccessLog(slog.New(slog.NewJSONHandler(&output, nil)))(copying(test.inner))
+
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/oauth2/token", nil))
+
+			var event map[string]any
+			require.NoError(t, json.Unmarshal(output.Bytes(), &event))
+			require.Equal(t, test.want, event["route"])
+		})
+	}
 }
 
 func TestAccessLogClassifiesUserAgentWithoutLoggingRawValue(t *testing.T) {

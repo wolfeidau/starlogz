@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -65,30 +66,31 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				reqLogger = reqLogger.With(slog.String("edge_request_id", edgeRequestID))
 				ctx = ctxlog.WithEdgeRequestID(ctx, edgeRequestID)
 			}
-			r = r.WithContext(ctxlog.WithLogger(ctx, reqLogger))
+			ctx = ctxlog.WithLogger(ctx, reqLogger)
+			req, holder := withRouteHolder(r.WithContext(ctx))
 
 			start := time.Now()
 			rw := &responseWriter{ResponseWriter: w}
 
-			next.ServeHTTP(rw, r)
+			next.ServeHTTP(rw, req)
 			if rw.status == 0 {
 				rw.status = http.StatusOK
 			}
 
 			attrs := []slog.Attr{
 				slog.String("method", r.Method),
-				slog.String("route", routePattern(r)),
+				slog.String("route", routePattern(req, holder.pattern)),
 				slog.Int("status", rw.status),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 				slog.Int64("response_bytes", rw.bytes),
 			}
-			spanContext := trace.SpanContextFromContext(r.Context())
+			spanContext := trace.SpanContextFromContext(ctx)
 			if spanContext.IsValid() {
 				attrs = append(attrs, slog.String("trace_id", spanContext.TraceID().String()))
 			}
 			attrs = append(attrs, userAgentAttrs(parser.Parse(r.UserAgent()))...)
 
-			reqLogger.LogAttrs(r.Context(), slog.LevelInfo, "http_request", attrs...)
+			reqLogger.LogAttrs(ctx, slog.LevelInfo, "http_request", attrs...)
 		})
 	}
 }
@@ -105,16 +107,41 @@ func validEdgeRequestID(value string) string {
 	return value
 }
 
-func routePattern(r *http.Request) string {
-	if r.Pattern == "" {
+type routeHolderKey struct{}
+
+type routeHolder struct{ pattern string }
+
+func withRouteHolder(r *http.Request) (*http.Request, *routeHolder) {
+	holder := &routeHolder{}
+	return r.WithContext(context.WithValue(r.Context(), routeHolderKey{}, holder)), holder
+}
+
+// Route records the mux-matched pattern for AccessLog. Wrap the mux directly:
+// ServeMux sets Pattern on the request it receives, which is a copy when an
+// outer middleware (e.g. Sentry) calls WithContext.
+func Route(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		if holder, ok := r.Context().Value(routeHolderKey{}).(*routeHolder); ok {
+			holder.pattern = r.Pattern
+		}
+	})
+}
+
+func routePattern(r *http.Request, recorded string) string {
+	pattern := recorded
+	if pattern == "" {
+		pattern = r.Pattern
+	}
+	if pattern == "" {
 		return "unmatched"
 	}
-	parts := strings.Fields(r.Pattern)
-	pattern := parts[len(parts)-1]
-	if pattern == "/" && r.URL.Path != "/" {
+	parts := strings.Fields(pattern)
+	route := parts[len(parts)-1]
+	if route == "/" && r.URL.Path != "/" {
 		return "/*"
 	}
-	return pattern
+	return route
 }
 
 func userAgentAttrs(ua useragent.UserAgent) []slog.Attr {
