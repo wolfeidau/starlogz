@@ -19,8 +19,9 @@ import (
 	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
 
-const serverInstructions = `Starlogz stores persistent project insights.
-Search or list before writing to avoid duplicates, and call insight_list_tags before choosing tags.
+const serverInstructions = `Starlogz is a compounding project knowledge base: leave it more accurate, better connected, and no larger than necessary.
+Search before writing; correct, merge, or link existing insights before adding new ones, and call insight_list_tags before choosing tags.
+Search with 2-4 distinctive terms; use query_mode=web with OR for broader recall.
 Supply key for single authoritative values (upsert); omit it for append-only entries.
 Search returns snippets; use insight_get for full content.
 Pass expected_revision on mutations for optimistic concurrency.
@@ -94,7 +95,7 @@ func newMCPServer(version string, st store.Store, eventEmitter *wideevent.Emitte
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
 		Title:       "Search Insights",
-		Description: "Full-text search over live insights in a project. Returns bounded snippets and metadata; use insight_get for full content. Use detail=brief for progressive discovery and exclude_ids to omit insights already surfaced in the current recall. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Results are ordered by relevance and support opaque cursor continuation.",
+		Description: "Full-text search over live insights in a project. Returns bounded snippets and metadata; use insight_get for full content. Use detail=brief for progressive discovery and exclude_ids to omit insights already surfaced in the current recall. query_mode=all requires every term, so use 2-4 distinctive terms. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Results are ordered by relevance and support opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
 		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
