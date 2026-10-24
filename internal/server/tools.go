@@ -314,7 +314,9 @@ func addTelemetrySchema(schema *jsonschema.Schema) *jsonschema.Schema {
 		}},
 		Required: []string{telemetryContextProperty},
 	}
-	schema.Required = append(schema.Required, telemetrySchemaProperty)
+	if !slices.Contains(schema.Required, telemetrySchemaProperty) {
+		schema.Required = append(schema.Required, telemetrySchemaProperty)
+	}
 	return schema
 }
 

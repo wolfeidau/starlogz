@@ -911,6 +911,13 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	for _, tool := range list.Tools {
 		schema := inputSchemaMap(t, list.Tools, tool.Name)
 		require.Contains(t, schema["required"], "telemetry")
+		required, ok := schema["required"].([]any)
+		require.True(t, ok)
+		seen := map[any]bool{}
+		for _, name := range required {
+			require.False(t, seen[name], "duplicate required entry %v in %s", name, tool.Name)
+			seen[name] = true
+		}
 		telemetry := schemaProperty(t, schema, "telemetry")
 		require.Contains(t, telemetry["required"], "context")
 		context := schemaProperty(t, telemetry, "context")
@@ -921,6 +928,9 @@ func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 		requireSchemaNumber(t, 1, context["minLength"])
 		requireSchemaNumber(t, 512, context["maxLength"])
 	}
+
+	require.Empty(t, schemaRequired(t, inputSchemaMap(t, list.Tools, "whoami")))
+	require.Empty(t, schemaRequired(t, inputSchemaMap(t, list.Tools, "project_list")))
 
 	projectEnsure := inputSchemaMap(t, list.Tools, "project_ensure")
 	require.ElementsMatch(t, []string{"slug"}, schemaRequired(t, projectEnsure))
