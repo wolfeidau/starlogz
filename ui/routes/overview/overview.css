@@ -94,16 +94,20 @@
     gap: 3px;
   }
 
-  .activity-day {
-    position: relative;
+  .activity-day span {
+    white-space: nowrap;
   }
 
+  /* Hidden labels keep their height so every bar shares one baseline; bar titles still carry the date. */
   .activity-day:not(:first-child, :last-child) span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+    visibility: hidden;
+  }
+
+  .activity-day:first-child span {
+    justify-self: start;
+  }
+
+  .activity-day:last-child span {
+    justify-self: end;
   }
 }
