@@ -10,6 +10,7 @@ import {
   render,
   screen,
   waitFor,
+  waitForElementToBeRemoved,
   within,
 } from "@testing-library/react";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
@@ -323,7 +324,7 @@ describe("search state", () => {
     await waitFor(() =>
       expect(pathOf(router)).toBe("/dashboard/alpha?q=hi&tag=auth"),
     );
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     const dialogTarget = await screen.findByRole("link", { name: "target" });
     fireEvent.click(dialogTarget, { button: 0, detail: 1 });
@@ -395,7 +396,7 @@ describe("list layout", () => {
     expect(pathOf(router)).toBe("/dashboard/alpha/insights/source?tag=auth");
 
     await act(async () => router.history.back());
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(await screen.findByRole("link", { name: "019fabcd" }));
     await screen.findByRole("dialog");
     expect(pathOf(router)).toBe(
@@ -476,7 +477,7 @@ describe("list layout", () => {
     fireEvent.click(link);
     const dialog = await screen.findByRole("dialog");
     dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
     expect(document.activeElement).toBe(link);
   });
 
@@ -494,7 +495,7 @@ describe("list layout", () => {
     );
     const dialog = await screen.findByRole("dialog", { name: "ghost" });
     dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
     expect(document.activeElement).toBe(
       screen.getByRole("heading", { level: 1, name: "alpha" }),
     );

@@ -8,7 +8,7 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
+  waitForElementToBeRemoved,
 } from "@testing-library/react";
 import { UIService } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { createAppRouter } from "../router";
@@ -60,7 +60,7 @@ describe("app shell session errors", () => {
 
     failing = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await waitForElementToBeRemoved(() => screen.queryByRole("alert"));
     expect(await screen.findByText("User")).toBeTruthy();
   });
 });
