@@ -541,6 +541,28 @@ func TestMCP_NoAuth_Returns401(t *testing.T) {
 	wwwAuth := resp.Header.Get("WWW-Authenticate")
 	require.Contains(t, wwwAuth, "Bearer")
 	require.Contains(t, wwwAuth, "oauth-protected-resource")
+	require.True(t, strings.HasSuffix(wwwAuth, `, scope="insights:read insights:write"`), wwwAuth)
+}
+
+func TestMCP_WriteOnlyToken_Returns403WithChallenge(t *testing.T) {
+	ts, oidcSrv := testFixture(t)
+
+	tokenString, err := oidcSrv.IssueJWT("12345678", "test-client", "insights:write", uuid.New().String(), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	wwwAuth := resp.Header.Get("WWW-Authenticate")
+	require.Contains(t, wwwAuth, "oauth-protected-resource")
+	require.True(t, strings.HasSuffix(wwwAuth, `, scope="insights:read insights:write"`), wwwAuth)
 }
 
 func TestMCP_ValidJWT_PassesAuth(t *testing.T) {

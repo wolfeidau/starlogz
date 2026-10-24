@@ -240,6 +240,7 @@ func TestDiscoveryHandler_ReturnsAuthServerMeta(t *testing.T) {
 	require.Equal(t, "http://example.com/oauth2/token", meta["token_endpoint"])
 	require.Equal(t, "http://example.com/oauth2/register", meta["registration_endpoint"])
 	require.Equal(t, "http://example.com/.well-known/jwks", meta["jwks_uri"])
+	require.Equal(t, true, meta["authorization_response_iss_parameter_supported"])
 
 	methods, ok := meta["code_challenge_methods_supported"].([]any)
 	require.True(t, ok)
@@ -2367,7 +2368,7 @@ func TestExternalAuthorizationRequiresConfirmationAndApprovalIssuesUsableCode(t 
 	srv := newTestOIDCServer(t)
 	authState := srv.authState.(*inMemAuthState)
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	redirectURI := "https://client.example.com/callback?keep=value&code=old&error=old&state=old"
+	redirectURI := "https://client.example.com/callback?keep=value&code=old&error=old&state=old&iss=old"
 	srv.github = &mockGitHubConnector{
 		token:    &oauth2.Token{AccessToken: "gha_test", RefreshToken: "ghr_test", Expiry: time.Now().Add(time.Hour)},
 		identity: &githubIdentity{ID: 42, Email: "dev@example.com", Login: "devuser"},
@@ -2411,6 +2412,7 @@ func TestExternalAuthorizationRequiresConfirmationAndApprovalIssuesUsableCode(t 
 	require.NoError(t, err)
 	require.Equal(t, "value", location.Query().Get("keep"))
 	require.Equal(t, "opaque-client-state", location.Query().Get("state"))
+	require.Equal(t, []string{"http://example.com"}, location.Query()["iss"])
 	require.Empty(t, location.Query().Get("error"))
 	code := location.Query().Get("code")
 	require.NotEmpty(t, code)
@@ -2438,7 +2440,7 @@ func TestAuthorizationConfirmationDenialRedirectsWithoutCode(t *testing.T) {
 	token, tokenHash, err := newConfirmationToken()
 	require.NoError(t, err)
 	require.NoError(t, authState.StoreAuthorizationConfirmation(t.Context(), tokenHash, store.AuthorizationConfirmation{
-		RedirectURI: "https://client.example.com/callback?keep=1&code=old&error_description=old",
+		RedirectURI: "https://client.example.com/callback?keep=1&code=old&error_description=old&iss=old",
 		ClientState: "original-state",
 	}))
 	form := url.Values{"token": {token}, "decision": {"deny"}}
@@ -2452,6 +2454,7 @@ func TestAuthorizationConfirmationDenialRedirectsWithoutCode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "access_denied", location.Query().Get("error"))
 	require.Equal(t, "original-state", location.Query().Get("state"))
+	require.Equal(t, []string{"http://example.com"}, location.Query()["iss"])
 	require.Equal(t, "1", location.Query().Get("keep"))
 	require.Empty(t, location.Query().Get("code"))
 	require.Empty(t, location.Query().Get("error_description"))
@@ -2471,26 +2474,26 @@ func TestAuthorizationResultRedirectPreservesUnrelatedRawQuery(t *testing.T) {
 		{
 			name: "raw semicolon", redirectURI: "https://client.example.com/callback?tenant=a;b&keep=1",
 			clientState: "new-state", approve: true, code: "new-code",
-			wantRawQuery: "tenant=a;b&keep=1&code=new-code&state=new-state",
+			wantRawQuery: "tenant=a;b&keep=1&code=new-code&iss=http%3A%2F%2Fexample.com&state=new-state",
 		},
 		{
 			name:        "duplicates and empty values",
 			redirectURI: "https://client.example.com/callback?flag&empty=&dup=1&dup=2&code=old&error=old&error_description=old&state=old",
 			clientState: "new-state", approve: false,
-			wantRawQuery: "flag&empty=&dup=1&dup=2&error=access_denied&state=new-state",
+			wantRawQuery: "flag&empty=&dup=1&dup=2&error=access_denied&iss=http%3A%2F%2Fexample.com&state=new-state",
 		},
 		{
 			name:        "encoded reserved names",
 			redirectURI: "https://client.example.com/callback?%63ode=old&%73tate=old&na%6De=v%2f",
 			approve:     true, code: "new-code",
-			wantRawQuery: "na%6De=v%2f&code=new-code",
+			wantRawQuery: "na%6De=v%2f&code=new-code&iss=http%3A%2F%2Fexample.com",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := authorizationResultRedirect(&store.AuthorizationConfirmationResult{
 				RedirectURI: test.redirectURI, ClientState: test.clientState,
-			}, test.approve, test.code)
+			}, test.approve, test.code, "http://example.com")
 			require.NoError(t, err)
 			parsed, err := url.Parse(got)
 			require.NoError(t, err)

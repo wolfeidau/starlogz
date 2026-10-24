@@ -270,7 +270,7 @@ func (s *Server) AuthorizationConfirmationHandler() http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		redirectTo, err := authorizationResultRedirect(result, approve, code)
+		redirectTo, err := authorizationResultRedirect(result, approve, code, s.baseURL.String())
 		if err != nil {
 			ctxlog.LoggerFrom(r.Context()).ErrorContext(r.Context(), "invalid stored authorization redirect")
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -291,7 +291,7 @@ func (s *Server) AuthorizationConfirmationHandler() http.Handler {
 	return s.events.HTTPHandler(wideevent.OAuthAuthorizationConfirmationCompleted, noStore)
 }
 
-func authorizationResultRedirect(result *store.AuthorizationConfirmationResult, approve bool, code string) (string, error) {
+func authorizationResultRedirect(result *store.AuthorizationConfirmationResult, approve bool, code, issuer string) (string, error) {
 	redirectTo, err := url.Parse(result.RedirectURI)
 	if err != nil {
 		return "", err
@@ -301,6 +301,7 @@ func authorizationResultRedirect(result *store.AuthorizationConfirmationResult, 
 		return "", err
 	}
 	response := url.Values{}
+	response.Set("iss", issuer) // RFC 9207 mix-up defence
 	if approve {
 		response.Set(oauthCode, code)
 	} else {
@@ -339,7 +340,7 @@ func preservedAuthorizationRedirectQuery(rawQuery string) ([]string, error) {
 
 func isReservedAuthorizationResponseParameter(name string) bool {
 	switch name {
-	case oauthCode, "error", "error_description", "state":
+	case oauthCode, "error", "error_description", "iss", "state":
 		return true
 	default:
 		return false

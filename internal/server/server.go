@@ -119,10 +119,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	mcpSrv := newMCPServer(version, cfg.Store, eventEmitter)
 
-	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
-		Scopes:              []string{"insights:read"},
-		ResourceMetadataURL: oidcServer.ResourceMetadataURL(),
-	})
+	jwtAuth := mcpBearerAuth(oidcServer.VerifyJWT, oidcServer.ResourceMetadataURL())
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return mcpSrv.server
