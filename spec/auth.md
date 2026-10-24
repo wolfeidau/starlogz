@@ -35,7 +35,8 @@ An MCP client:
 5. Redirects the user through GitHub authentication.
 6. Confirms the resolved client, validated redirect URI, and requested Starlogz
    scopes on a Starlogz-hosted page.
-7. Receives a single-use authorization code at its validated redirect URI.
+7. Receives a single-use authorization code and `iss` (RFC 9207) at its
+   validated redirect URI.
 8. Exchanges the code, matching `client_id`, `redirect_uri`, and PKCE verifier,
    for a Starlogz access token and, when eligible, a refresh token.
 9. Sends the access token as `Authorization: Bearer <token>` to `/mcp`.
@@ -70,8 +71,9 @@ submissions fail closed with errors that do not disclose token existence.
 
 Approval returns `303 See Other` with `code` and the original client `state`.
 Denial returns `303 See Other` with `error=access_denied` and the original
-state. Both preserve unrelated validated redirect query parameters while
-replacing reserved OAuth response parameters. The page replaces the consumed
+state. Both include `iss` (the server base URL, RFC 9207) and preserve
+unrelated validated redirect query parameters while replacing reserved OAuth
+response parameters. The page replaces the consumed
 GitHub callback URL in browser history before interaction. The first-party
 dashboard retains its direct post-GitHub authorization-code redirect.
 
@@ -338,6 +340,7 @@ Authorization-server metadata advertises:
   "jwks_uri": "<server-url>/.well-known/jwks",
   "registration_endpoint": "<server-url>/oauth2/register",
   "client_id_metadata_document_supported": true,
+  "authorization_response_iss_parameter_supported": true,
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "scopes_supported": ["insights:read", "insights:write"],

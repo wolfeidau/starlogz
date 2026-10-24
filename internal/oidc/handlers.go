@@ -827,7 +827,7 @@ func (s *Server) GitHubCallbackHandler() http.Handler {
 		redirectTo, err := authorizationResultRedirect(&storepkg.AuthorizationConfirmationResult{
 			RedirectURI: pending.RedirectURI,
 			ClientState: pending.ClientState,
-		}, true, code)
+		}, true, code, s.baseURL.String())
 		if err != nil {
 			log.ErrorContext(ctx, "invalid redirect URI in pending auth")
 			http.Error(w, "invalid redirect_uri", http.StatusInternalServerError)
