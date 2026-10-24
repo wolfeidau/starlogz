@@ -11,3 +11,5 @@ pre-commit:
       run: bun run proto:check
     - name: typecheck
       run: bun run typecheck
+    - name: ui lint
+      run: bun run lint
