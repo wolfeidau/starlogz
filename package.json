@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build ./ui/dashboard.tsx --outdir ./internal/server/public --target browser --format esm --production",
+    "build": "bun ui/build.ts",
     "test": "bun test ui",
     "lint": "biome lint ui",
     "typecheck": "tsc --noEmit",

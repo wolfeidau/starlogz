@@ -4,13 +4,13 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect,
 } from "@tanstack/react-router";
 import { InsightDetailRoute } from "./routes/insight_detail/detail_route";
 import { DashboardRedirect } from "./routes/insights/dashboard_redirect";
 import { InsightsRoute } from "./routes/insights/insights_route";
 import { ProjectLayout } from "./routes/insights/project_layout";
-import { OperationsRoute } from "./routes/operations/operations_route";
 import { OverviewRoute } from "./routes/overview/overview_route";
 import { AppShell } from "./shell/app_shell";
 import { NotFound } from "./shell/not_found";
@@ -128,7 +128,10 @@ const overviewRoute = createRoute({
 const operationsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/operations",
-  component: OperationsRoute,
+  component: lazyRouteComponent(
+    () => import("./routes/operations/operations_route"),
+    "OperationsRoute",
+  ),
 });
 
 const routeTree = rootRoute.addChildren([
