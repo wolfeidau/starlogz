@@ -79,7 +79,7 @@ const listRoute = createRoute({
   component: function ListPage() {
     const { project } = listRoute.useParams();
     const { q, tag } = listRoute.useSearch();
-    return <InsightsRoute project={project} q={q} tag={tag} />;
+    return <InsightsRoute key={project} project={project} q={q} tag={tag} />;
   },
 });
 

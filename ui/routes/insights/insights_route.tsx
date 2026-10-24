@@ -1,47 +1,15 @@
 import { Outlet, useNavigate } from "@tanstack/react-router";
-import { Fragment, useEffect, useRef, useState } from "react";
-import type { Insight } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { Fragment, useEffect, useState } from "react";
 import { LoadMoreButton } from "../../components/load_more_button";
 import { useDashboardInsightPages } from "./dashboard_pagination";
-import { dayKey, formatDayLabel, timestampToDate } from "../../lib/time";
+import { formatSinceLabel } from "../../lib/time";
 import { InsightRow } from "./insight_row";
+import { toGroups } from "./log_groups";
 import { newSinceIndex, readLastSeen, writeLastSeen } from "./last_seen";
 import { ProjectRail } from "./project_rail";
 import { SearchBox } from "./search_box";
 import { ViewTabs } from "./view_tabs";
 import "./insights.css";
-
-type DayGroup = { key: string; label: string; items: [Insight, number][] };
-
-function groupByDay(insights: Insight[], now: Date): DayGroup[] {
-  const groups: DayGroup[] = [];
-  insights.forEach((insight, index) => {
-    const date = timestampToDate(insight.updatedAt);
-    const key = date ? dayKey(date) : "unknown";
-    const last = groups.at(-1);
-    if (last && last.key === key) {
-      last.items.push([insight, index]);
-    } else {
-      groups.push({
-        key,
-        label: date ? formatDayLabel(date, now) : "Unknown date",
-        items: [[insight, index]],
-      });
-    }
-  });
-  return groups;
-}
-
-function formatSince(date: Date): string {
-  const text = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-  return `New since ${text}`;
-}
 
 export function InsightsRoute({
   project,
@@ -64,16 +32,9 @@ export function InsightsRoute({
   const insights = insightPages.insights;
   const searching = query.trim() !== "";
 
-  // Held for the whole visit so the divider stays put while we record "now".
-  const [lastSeen, setLastSeen] = useState(() => readLastSeen(project));
-  const seenProject = useRef(project);
-  useEffect(() => {
-    if (seenProject.current !== project) {
-      seenProject.current = project;
-      setLastSeen(readLastSeen(project));
-    }
-    writeLastSeen(project, new Date());
-  }, [project]);
+  // Held for the whole visit so the divider stays put while we record "now"; the router remounts per project.
+  const [lastSeen] = useState(() => readLastSeen(project));
+  useEffect(() => writeLastSeen(project, new Date()), [project]);
   const sinceIndex = searching ? null : newSinceIndex(insights, lastSeen);
 
   const setSearch = (next: { q?: string; tag?: string }) =>
@@ -93,7 +54,9 @@ export function InsightsRoute({
       />
 
       <div className="project-main">
-        <h1 className="project-title">{project}</h1>
+        <h1 className="project-title" id="project-title" tabIndex={-1}>
+          {project}
+        </h1>
         <div className="search-row">
           <SearchBox
             query={query}
@@ -119,18 +82,7 @@ export function InsightsRoute({
             <div className="log-state">No matching insights.</div>
           ) : (
             <>
-              {(searching
-                ? [
-                    {
-                      key: "results",
-                      label: "",
-                      items: insights.map(
-                        (i, n) => [i, n] as [Insight, number],
-                      ),
-                    },
-                  ]
-                : groupByDay(insights, new Date())
-              ).map((group) => (
+              {toGroups(insights, searching, new Date()).map((group) => (
                 <div
                   className="log-day"
                   data-mode={searching ? "search" : "list"}
@@ -144,7 +96,7 @@ export function InsightsRoute({
                       <Fragment key={insight.id}>
                         {index === sinceIndex && lastSeen && (
                           <div className="log-since">
-                            <span>{formatSince(lastSeen)}</span>
+                            <span>{formatSinceLabel(lastSeen)}</span>
                           </div>
                         )}
                         <InsightRow

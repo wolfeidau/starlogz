@@ -123,7 +123,7 @@ function RelationshipSection({
   );
 }
 
-// Row of the shown insight if listed, else the list heading, so focus never falls to <body>.
+// Row of the shown insight if listed, else the visible project title, so focus never falls to <body>.
 function insightFocusTarget(id: string): HTMLElement | null {
   for (const row of document.querySelectorAll<HTMLElement>(
     "[data-insight-id]",
@@ -133,7 +133,7 @@ function insightFocusTarget(id: string): HTMLElement | null {
       if (link) return link;
     }
   }
-  return document.getElementById("insights-heading");
+  return document.getElementById("project-title");
 }
 
 export function InsightDetail({
