@@ -2,6 +2,7 @@
   min-height: 100vh;
   padding: 24px;
   display: grid;
+  align-content: start;
   gap: 18px;
 }
 

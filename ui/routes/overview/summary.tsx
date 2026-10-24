@@ -9,20 +9,12 @@ import "./overview.css";
 
 export function SummaryTiles({
   dashboard,
-  tagCount,
 }: {
   dashboard?: GetProjectDashboardResponse;
-  tagCount: number;
 }) {
   return (
     <section className="summary-grid">
       <Metric label="Total insights" value={dashboard?.totalInsights ?? 0} />
-      <Metric
-        label="Categories"
-        value={dashboard?.categoryCounts.length ?? 0}
-      />
-      <Metric label="Sources" value={dashboard?.sourceCounts.length ?? 0} />
-      <Metric label="Tags" value={tagCount} />
     </section>
   );
 }

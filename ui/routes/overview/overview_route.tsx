@@ -29,7 +29,7 @@ export function OverviewRoute({ project }: { project: string }) {
       />
       <div className="project-main">
         <ViewTabs project={project} active="overview" />
-        <SummaryTiles dashboard={dashboard.data} tagCount={topTags.length} />
+        <SummaryTiles dashboard={dashboard.data} />
         <OverviewCharts dashboard={dashboard.data} topTags={topTags} />
       </div>
     </div>
