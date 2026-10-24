@@ -1,4 +1,3 @@
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { max } from "d3-array";
 import { scaleLinear, scaleUtc } from "d3-scale";
 import { area, line } from "d3-shape";
@@ -7,21 +6,16 @@ import type {
   GetOperationsOverviewResponse,
   GetOperationsTelemetryResponse,
   OperationsTimeBucket,
-} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
-import { formatTimestamp } from "./insight_content";
+} from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { Metric } from "../../components/metric";
+import { formatTimestamp, timestampToDate } from "../../lib/time";
+import "./operations.css";
 
 function Status({ active }: { active: boolean }) {
   return (
     <span className={`status ${active ? "status-active" : "status-inactive"}`}>
       {active ? "Active" : "Inactive"}
     </span>
-  );
-}
-
-function timestampToDate(timestamp?: Timestamp): Date | null {
-  if (!timestamp) return null;
-  return new Date(
-    Number(timestamp.seconds) * 1000 + Math.floor(timestamp.nanos / 1_000_000),
   );
 }
 
@@ -277,24 +271,22 @@ function OperationsTelemetry({
   return (
     <>
       <section className="summary-grid operations-summary">
-        <div className="metric">
-          <span>Tool calls, 24 hours</span>
-          <strong>{telemetry.totalToolCalls}</strong>
-        </div>
-        <div className="metric">
-          <span>Tool failure rate</span>
-          <strong>
-            {failureRate(telemetry.totalToolCalls, telemetry.failedToolCalls)}
-          </strong>
-        </div>
-        <div className="metric">
-          <span>Tool duration p95</span>
-          <strong>{Number(telemetry.p95ToolDurationMs)} ms</strong>
-        </div>
-        <div className="metric">
-          <span>Dashboard logins</span>
-          <strong>{telemetry.successfulDashboardLogins}</strong>
-        </div>
+        <Metric label="Tool calls, 24 hours" value={telemetry.totalToolCalls} />
+        <Metric
+          label="Tool failure rate"
+          value={failureRate(
+            telemetry.totalToolCalls,
+            telemetry.failedToolCalls,
+          )}
+        />
+        <Metric
+          label="Tool duration p95"
+          value={`${Number(telemetry.p95ToolDurationMs)} ms`}
+        />
+        <Metric
+          label="Dashboard logins"
+          value={telemetry.successfulDashboardLogins}
+        />
       </section>
 
       <section className="operations-telemetry-grid">
@@ -471,22 +463,22 @@ export function OperationsView({
   return (
     <>
       <section className="summary-grid operations-summary">
-        <div className="metric">
-          <span>Active dashboard sessions</span>
-          <strong>{overview?.activeWebSessions ?? 0}</strong>
-        </div>
-        <div className="metric">
-          <span>Active OAuth grants</span>
-          <strong>{overview?.activeOauthGrants ?? 0}</strong>
-        </div>
-        <div className="metric">
-          <span>Recent sessions shown</span>
-          <strong>{overview?.recentWebSessions.length ?? 0}</strong>
-        </div>
-        <div className="metric">
-          <span>Recent grants shown</span>
-          <strong>{overview?.recentOauthGrants.length ?? 0}</strong>
-        </div>
+        <Metric
+          label="Active dashboard sessions"
+          value={overview?.activeWebSessions ?? 0}
+        />
+        <Metric
+          label="Active OAuth grants"
+          value={overview?.activeOauthGrants ?? 0}
+        />
+        <Metric
+          label="Recent sessions shown"
+          value={overview?.recentWebSessions.length ?? 0}
+        />
+        <Metric
+          label="Recent grants shown"
+          value={overview?.recentOauthGrants.length ?? 0}
+        />
       </section>
 
       <OperationsTelemetry

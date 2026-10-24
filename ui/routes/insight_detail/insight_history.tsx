@@ -1,9 +1,14 @@
 import { useInfiniteQuery } from "@connectrpc/connect-query";
 import { useState } from "react";
-import type { InsightRevision } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
-import { listInsightHistory } from "../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
-import { LoadMoreButton, nextPageCursor } from "./dashboard_pagination";
-import { formatTimestamp, RenderedMarkdown } from "./insight_content";
+import type { InsightRevision } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { listInsightHistory } from "../../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
+import { LoadMoreButton } from "../../components/load_more_button";
+import { Pill } from "../../components/pill";
+import { Tag } from "../../components/tag";
+import { RenderedMarkdown } from "../../lib/markdown";
+import { formatTimestamp } from "../../lib/time";
+import { nextPageCursor } from "../insights/dashboard_pagination";
+import "./insight_detail.css";
 
 function operationLabel(operation: string): string {
   const labels: Record<string, string> = {
@@ -40,7 +45,7 @@ function RevisionPreview({
         </span>
       </header>
       <div className="history-preview-metadata">
-        <span className="pill">{revision.category}</span>
+        <Pill>{revision.category}</Pill>
         <span>{revision.source}</span>
         <span>{formatTimestamp(revision.changedAt)}</span>
         <span>
@@ -57,9 +62,7 @@ function RevisionPreview({
       {revision.tags.length > 0 && (
         <div className="detail-tags">
           {revision.tags.map((tag) => (
-            <span className="tag" key={tag}>
-              {tag}
-            </span>
+            <Tag key={tag}>{tag}</Tag>
           ))}
         </div>
       )}

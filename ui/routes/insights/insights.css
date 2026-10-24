@@ -1,0 +1,49 @@
+.toolbar {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(220px, 1fr) minmax(
+      160px,
+      220px
+    );
+  gap: 12px;
+}
+
+.toolbar input,
+.toolbar select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgb(18 32 51 / 4%);
+}
+
+.toolbar input:focus,
+.toolbar select:focus {
+  border-color: var(--primary);
+  outline: 3px solid rgb(37 99 235 / 16%);
+}
+
+.insights-panel {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+}
+
+.insight-content {
+  max-width: 680px;
+  line-height: 1.45;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 960px) {
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
+}

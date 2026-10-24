@@ -9,9 +9,9 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { UIService } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { UIService } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { LoadMoreButton } from "../../components/load_more_button";
 import {
-  LoadMoreButton,
   nextPageCursor,
   useDashboardInsightPages,
 } from "./dashboard_pagination";

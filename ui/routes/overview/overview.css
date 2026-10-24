@@ -1,0 +1,59 @@
+.dashboard-grid {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bucket-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bucket-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) minmax(80px, 1.5fr) 34px;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.activity-panel {
+  display: grid;
+}
+
+.activity-strip {
+  height: 112px;
+  display: grid;
+  grid-template-columns: repeat(14, minmax(12px, 1fr));
+  gap: 6px;
+  align-items: end;
+}
+
+.activity-day {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.activity-bar {
+  width: 100%;
+  max-width: 18px;
+  border-radius: 4px 4px 0 0;
+  background: var(--chart);
+}
+
+@media (max-width: 960px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}

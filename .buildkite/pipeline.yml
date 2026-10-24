@@ -43,5 +43,6 @@ steps:
           - bun install --frozen-lockfile
           - bun run test
           - bun run lint
+          - bun run typecheck
         plugins:
           - mise#v1.1.5: ~

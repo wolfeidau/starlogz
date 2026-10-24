@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@connectrpc/connect-query";
 import {
   listInsights,
   searchInsights,
-} from "../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
+} from "../../../api/gen/proto/es/starlogz/v1/ui-UIService_connectquery";
 
 export function nextPageCursor(page: { nextCursor: string }) {
   return page.nextCursor || undefined;
@@ -53,27 +53,4 @@ export function useDashboardInsightPages({
     isFetchingNextPage: active.isFetchingNextPage,
     fetchNextPage: active.fetchNextPage,
   };
-}
-
-export function LoadMoreButton({
-  loading,
-  label = "Load more",
-  onLoadMore,
-}: {
-  loading: boolean;
-  label?: string;
-  onLoadMore: () => void;
-}) {
-  return (
-    <div className="pagination-actions">
-      <button
-        className="load-more-button"
-        type="button"
-        disabled={loading}
-        onClick={onLoadMore}
-      >
-        {loading ? "Loading" : label}
-      </button>
-    </div>
-  );
 }

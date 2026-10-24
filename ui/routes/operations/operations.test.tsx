@@ -10,7 +10,7 @@ import {
 import {
   GetOperationsOverviewResponseSchema,
   GetOperationsTelemetryResponseSchema,
-} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+} from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { OperationsView } from "./operations";
 
 afterEach(cleanup);

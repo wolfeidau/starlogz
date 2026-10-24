@@ -1,0 +1,274 @@
+.operations-summary,
+.operations-panel {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+}
+
+.operations-confirmation {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  border-color: #fecaca;
+  background: #fffafa;
+}
+
+.operations-confirmation h2,
+.operations-confirmation p {
+  margin: 0;
+}
+
+.operations-confirmation p:not(.eyebrow) {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.operations-confirmation-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.operations-secondary-button {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-weight: 650;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.operations-danger-button {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-weight: 650;
+  cursor: pointer;
+  border: 1px solid var(--failure);
+  background: var(--failure);
+  color: #ffffff;
+}
+
+.operations-row-action {
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-weight: 650;
+  cursor: pointer;
+  border: 1px solid #fca5a5;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+
+.operations-secondary-button:disabled,
+.operations-danger-button:disabled,
+.operations-row-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.operations-confirmation p.operations-action-error {
+  color: var(--failure);
+  font-weight: 650;
+}
+
+.operations-telemetry-grid {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 12px;
+}
+
+.operations-chart {
+  display: block;
+  width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chart-axis-line {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-grid-line {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-grid-line-vertical {
+  stroke-dasharray: 2 5;
+}
+
+.chart-axis-label {
+  fill: var(--muted);
+}
+
+.chart-axis-title {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.chart-area-success {
+  fill: var(--primary);
+  opacity: 0.08;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-line-success {
+  stroke: var(--primary);
+}
+
+.chart-line-failure {
+  stroke: var(--failure);
+  stroke-dasharray: 5 4;
+}
+
+.chart-point {
+  fill: var(--surface);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-point-success {
+  stroke: var(--primary);
+}
+
+.chart-point-failure {
+  stroke: var(--failure);
+}
+
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.legend-success {
+  background: var(--primary);
+}
+
+.chart-legend .legend-failure {
+  height: 0;
+  border-top: 2px dashed var(--failure);
+  background: transparent;
+}
+
+.operations-tool-list {
+  display: grid;
+  gap: 12px;
+}
+
+.operations-tool-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(80px, 1fr) 36px 58px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.operations-tool-row > span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.operations-aggregate-table {
+  min-width: 420px;
+}
+
+.operations-panel td strong {
+  display: block;
+}
+
+.table-secondary {
+  display: block;
+  max-width: 420px;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.status-active {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.status-inactive {
+  color: #64748b;
+  background: #e2e8f0;
+}
+
+.operations-next {
+  border-style: dashed;
+}
+
+.operations-next h2,
+.operations-next p {
+  margin-bottom: 0;
+}
+
+.operations-panel table {
+  min-width: 980px;
+}
+
+.operations-tool-row code {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 960px) {
+  .operations-telemetry-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .operations-telemetry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-confirmation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

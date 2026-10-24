@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 import {
   GetInsightResponseSchema,
   UIService,
-} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+} from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { InsightDetail } from "./insight_detail";
 
 afterEach(cleanup);
@@ -144,44 +144,43 @@ describe("insight detail content", () => {
 });
 
 describe("insight detail modal behavior", () => {
-  test("moves and traps focus, closes on Escape, and restores focus", () => {
+  test("opens modally, closes on cancel, and restores focus", () => {
     const opener = document.createElement("button");
     opener.textContent = "Open insight";
     document.body.append(opener);
     opener.focus();
     const onClose = mock(() => {});
     const view = renderDetail(<InsightDetail {...detailProps({ onClose })} />);
+    const dialog = screen.getByRole("dialog", { name: "source" });
     const close = screen.getByRole("button", { name: "Close insight detail" });
-    const lastLink = screen.getByRole("link", { name: "backlink-id" });
 
+    expect((dialog as HTMLDialogElement).open).toBe(true);
     expect(document.activeElement).toBe(close);
-    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(lastLink);
-    fireEvent.keyDown(lastLink, { key: "Tab" });
-    expect(document.activeElement).toBe(close);
+    expect(document.body.style.overflow).toBe("hidden");
 
-    fireEvent.keyDown(close, { key: "Escape" });
+    const cancel = new Event("cancel", { cancelable: true });
+    dialog.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
 
     view.unmount();
+    expect(document.body.style.overflow).toBe("");
     expect(document.activeElement).toBe(opener);
     opener.remove();
   });
 
-  test("closes only when the backdrop itself is pressed", () => {
+  test("closes only when the dialog backdrop itself is pressed", () => {
     const onClose = mock(() => {});
-    const { container } = renderDetail(
-      <InsightDetail {...detailProps({ onClose })} />,
-    );
-    const backdrop = container.querySelector<HTMLElement>(".detail-backdrop");
-    const panel = screen.getByRole("dialog", { name: "source" });
+    renderDetail(<InsightDetail {...detailProps({ onClose })} />);
+    const dialog = screen.getByRole("dialog", { name: "source" });
+    const content = dialog.querySelector<HTMLElement>(".detail-content");
 
-    if (!backdrop) throw new Error("detail backdrop missing");
-    fireEvent.mouseDown(panel);
+    if (!content) throw new Error("detail content missing");
+    fireEvent.mouseDown(content);
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.mouseDown(backdrop, { button: 2 });
+    fireEvent.mouseDown(dialog, { button: 2 });
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.mouseDown(backdrop);
+    fireEvent.mouseDown(dialog);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

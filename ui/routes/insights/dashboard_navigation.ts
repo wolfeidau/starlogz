@@ -3,7 +3,7 @@ import {
   dashboardURL,
   readDashboardLocation,
   type InsightSelector,
-} from "./insight_navigation";
+} from "../../lib/insight_navigation";
 
 type ProjectLocation = {
   slug: string;

@@ -9,7 +9,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { UIService } from "../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { UIService } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { InsightHistory } from "./insight_history";
 
 afterEach(cleanup);

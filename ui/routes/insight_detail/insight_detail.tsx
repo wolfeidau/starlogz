@@ -1,25 +1,21 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { type KeyboardEvent, type MouseEvent, useEffect, useRef } from "react";
+import type { MouseEvent } from "react";
 import type {
   GetInsightResponse,
   InsightReference,
-} from "../../api/gen/proto/es/starlogz/v1/ui_pb";
-import { formatTimestamp, RenderedMarkdown } from "./insight_content";
-import { InsightHistory } from "./insight_history";
+} from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { Dialog } from "../../components/dialog";
+import { Pill } from "../../components/pill";
+import { Tag } from "../../components/tag";
 import {
   dashboardURL,
   type InsightSelector,
   isUnmodifiedPrimaryClick,
-} from "./insight_navigation";
-
-const focusableSelector = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(",");
+} from "../../lib/insight_navigation";
+import { RenderedMarkdown } from "../../lib/markdown";
+import { formatTimestamp } from "../../lib/time";
+import { InsightHistory } from "./insight_history";
+import "./insight_detail.css";
 
 function DetailRelation({
   label,
@@ -48,7 +44,7 @@ function DetailRelation({
       >
         {label}
       </a>
-      {reference.category && <span className="pill">{reference.category}</span>}
+      {reference.category && <Pill>{reference.category}</Pill>}
       {reference.updatedAt && (
         <span className="muted">{formatTimestamp(reference.updatedAt)}</span>
       )}
@@ -147,78 +143,17 @@ export function InsightDetail({
   onClose: () => void;
   onNavigate: (selector: InsightSelector) => void;
 }) {
-  const panelRef = useRef<HTMLElement>(null);
   const insight = detail?.insight;
   const notFound =
     error instanceof ConnectError && error.code === Code.NotFound;
 
-  useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    panelRef.current?.querySelector<HTMLElement>(".detail-close")?.focus();
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, []);
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-
-    const panel = panelRef.current;
-    if (!panel) return;
-    const focusable = Array.from(
-      panel.querySelectorAll<HTMLElement>(focusableSelector),
-    ).filter(
-      (element) =>
-        !element.hasAttribute("disabled") &&
-        element.getAttribute("aria-hidden") !== "true",
-    );
-    if (focusable.length === 0) {
-      event.preventDefault();
-      panel.focus();
-      return;
-    }
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-    if (event.shiftKey && (active === first || active === panel)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && active === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  const handleBackdropClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.button === 0 && event.target === event.currentTarget) onClose();
-  };
-
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop clicks complement the dialog's keyboard close behavior.
-    <div className="detail-backdrop" onMouseDown={handleBackdropClick}>
-      <section
-        aria-labelledby="insight-detail-title"
-        aria-modal="true"
-        className="detail-panel"
-        onKeyDown={handleKeyDown}
-        ref={panelRef}
-        role="dialog"
-        tabIndex={-1}
-      >
+    <Dialog
+      className="detail-panel"
+      labelledBy="insight-detail-title"
+      onClose={onClose}
+    >
+      <div className="detail-content">
         <header className="detail-header">
           <div>
             <p className="eyebrow">Insight detail</p>
@@ -248,7 +183,7 @@ export function InsightDetail({
         ) : insight ? (
           <>
             <div className="detail-metadata">
-              <span className="pill">{insight.category}</span>
+              <Pill>{insight.category}</Pill>
               <span>{insight.source}</span>
               <span>{formatTimestamp(insight.updatedAt)}</span>
             </div>
@@ -258,9 +193,7 @@ export function InsightDetail({
             />
             <div className="detail-tags">
               {insight.tags.map((tag) => (
-                <span className="tag" key={tag}>
-                  {tag}
-                </span>
+                <Tag key={tag}>{tag}</Tag>
               ))}
             </div>
             <div className="relationships-grid">
@@ -293,7 +226,7 @@ export function InsightDetail({
         ) : (
           <div className="detail-state detail-error">Insight not found.</div>
         )}
-      </section>
-    </div>
+      </div>
+    </Dialog>
   );
 }
