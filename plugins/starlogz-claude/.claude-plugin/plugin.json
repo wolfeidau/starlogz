@@ -1,6 +1,6 @@
 {
   "name": "starlogz-claude",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Build durable project memory with Starlogz and Claude Code.",
   "author": {
     "name": "Mark Wolfe",

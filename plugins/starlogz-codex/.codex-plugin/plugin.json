@@ -1,6 +1,6 @@
 {
   "name": "starlogz-codex",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Build durable project memory with Starlogz and Codex.",
   "author": {
     "name": "Mark Wolfe",
@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Starlogz Codex",
     "shortDescription": "Build durable project memory with Starlogz.",
-    "longDescription": "Explicitly recall focused project context, verify it against the repository, and preserve one concise durable result for future Codex sessions.",
+    "longDescription": "Explicitly recall focused project context, verify it against the repository, and improve the project knowledge base by correcting, consolidating, or adding concise durable results for future Codex sessions.",
     "developerName": "Mark Wolfe",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

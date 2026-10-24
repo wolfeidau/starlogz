@@ -92,7 +92,7 @@ Point it at `http://localhost:8088/mcp`. The inspector walks through the full OA
 
 ### Use Starlogz with Codex
 
-Starlogz is used during its own development as persistent project memory for OpenAI Codex. Invoke the optional `$compound-knowledge` skill when a task needs prior decisions, conventions, architecture, known pitfalls, or preferences. It can perform multiple focused brief searches without returning previously surfaced insight IDs, retrieves full records selectively, verifies them against the current repository, and writes at most one concise reusable result.
+Starlogz is used during its own development as persistent project memory for OpenAI Codex. Invoke the optional `$compound-knowledge` skill when a task needs prior decisions, conventions, architecture, known pitfalls, or preferences. It can perform multiple focused brief searches without returning previously surfaced insight IDs, retrieves full records selectively, verifies them against the current repository, and improves the knowledge base by correcting or consolidating stale and duplicate insights before adding at most one concise reusable result.
 
 Install the repository marketplace and plugin:
 
@@ -111,7 +111,7 @@ The plugin is an explicit opt-in Codex workflow, not a runtime dependency of the
 
 ### Use Starlogz with Claude Code
 
-Starlogz is also used during its own development as persistent project memory for Claude Code, via the same `compound-knowledge` skill packaged as a Claude Code plugin. It performs duplicate-free progressive recall with brief discovery results, verifies selected records against the current repository, and preserves at most one concise reusable result.
+Starlogz is also used during its own development as persistent project memory for Claude Code, via the same `compound-knowledge` skill packaged as a Claude Code plugin. It performs duplicate-free progressive recall with brief discovery results, verifies selected records against the current repository, and improves the knowledge base by correcting or consolidating existing insights before adding at most one new result.
 
 Install the repository marketplace and plugin:
 
