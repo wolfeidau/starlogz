@@ -1,7 +1,7 @@
 # Codex compound-knowledge plugin
 
 > Status: Implemented decision
-> Last reviewed: 2026-07-28
+> Last reviewed: 2026-10-25
 > Authority: Historical rationale and lasting constraints; the packaged skill, plugin manifests, and README define current implementation details.
 
 ## Context
@@ -75,5 +75,7 @@ packages even when they share the same concise knowledge policy.
 
 The repository ships the marketplace entry, plugin manifest, MCP dependency
 metadata, and explicit compound-knowledge skill. Version `0.2.0` adds
-invocation-local duplicate suppression and progressive brief discovery. The
+invocation-local duplicate suppression and progressive brief discovery. Version
+`0.3.0` states the compounding goal: short search queries, correcting and
+consolidating surfaced insights before adding one, and no status records. The
 README documents installation and on-demand use during Starlogz development.
