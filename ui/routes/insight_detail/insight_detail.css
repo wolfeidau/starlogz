@@ -4,12 +4,12 @@
   border-left: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
-  box-shadow: -24px 0 64px rgb(15 23 42 / 18%);
+  box-shadow: -24px 0 64px var(--shadow-drawer);
   padding: 0;
 }
 
 .detail-panel::backdrop {
-  background: rgb(15 23 42 / 42%);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
 }
 
@@ -154,7 +154,7 @@
   border-radius: 999px;
   background: var(--accent-soft);
   padding: 3px 8px;
-  color: #92400e;
+  color: var(--tag-ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -236,7 +236,7 @@
 }
 
 .history-revision-button:focus-visible {
-  outline: 3px solid rgb(37 99 235 / 20%);
+  outline: 3px solid var(--focus-ring);
   outline-offset: -3px;
 }
 
@@ -255,9 +255,9 @@
 
 .history-deleted {
   border-radius: 999px;
-  background: #fee2e2;
+  background: var(--danger-bg-strong);
   padding: 3px 8px;
-  color: #b91c1c;
+  color: var(--danger-ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -306,7 +306,7 @@
 }
 
 .history-error {
-  color: #b91c1c;
+  color: var(--danger-ink);
 }
 
 .history-navigation .pagination-actions {
@@ -317,7 +317,7 @@
   margin: 0;
   border-top: 1px solid var(--line-soft);
   padding: 12px 12px 0;
-  color: #b91c1c;
+  color: var(--danger-ink);
   font-size: 12px;
 }
 
