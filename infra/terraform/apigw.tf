@@ -2,6 +2,7 @@ locals {
   apigw_routes = toset([
     "GET /",
     "GET /dashboard",
+    "GET /dashboard/{proxy+}",
     "GET /admin/operations",
     "GET /health",
     "GET /login",
