@@ -159,14 +159,7 @@ func New(cfg Config) (*Server, error) {
 	mux.Handle("/auth/github/callback", oidcServer.GitHubCallbackHandler())
 	mux.Handle("/auth/logout", oidcServer.LogoutHandler())
 	mux.HandleFunc("/health", srv.healthHandler)
-	// DELETE intercept: go-sdk returns 204 which browser Fetch API rejects in Service Workers.
-	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		authenticatedHandler.ServeHTTP(w, r)
-	})
+	mux.Handle("/mcp", authenticatedHandler)
 
 	handler := middleware.CORS(mux)
 	if cfg.SentryHandler != nil {
