@@ -7,7 +7,7 @@
 .operations-dialog {
   width: min(480px, calc(100vw - 32px));
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
   padding: 20px;
   color: var(--ink);
@@ -93,6 +93,7 @@
 
 .operations-chart {
   display: block;
+  font-family: var(--font-ui);
   width: 100%;
   color: var(--muted);
   font-size: 11px;
@@ -116,6 +117,7 @@
 
 .chart-axis-label {
   fill: var(--muted);
+  font-family: var(--font-ui);
 }
 
 .chart-axis-title {
@@ -125,8 +127,8 @@
 }
 
 .chart-area-success {
-  fill: var(--chart-success);
-  opacity: 0.08;
+  fill: var(--primary);
+  opacity: 0.12;
 }
 
 .chart-line {
@@ -138,7 +140,7 @@
 }
 
 .chart-line-success {
-  stroke: var(--chart-success);
+  stroke: var(--primary);
 }
 
 .chart-line-failure {
@@ -153,7 +155,7 @@
 }
 
 .chart-point-success {
-  stroke: var(--chart-success);
+  stroke: var(--primary);
 }
 
 .chart-point-failure {
@@ -180,7 +182,7 @@
 }
 
 .legend-success {
-  background: var(--chart-success);
+  background: var(--primary);
 }
 
 .chart-legend .legend-failure {
@@ -230,8 +232,8 @@
   display: inline-flex;
   border-radius: 999px;
   padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 750;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .status-active {

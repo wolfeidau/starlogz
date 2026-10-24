@@ -1,7 +1,11 @@
 import { Outlet, useNavigate } from "@tanstack/react-router";
+import { Fragment, useEffect, useState } from "react";
 import { LoadMoreButton } from "../../components/load_more_button";
 import { useDashboardInsightPages } from "./dashboard_pagination";
+import { formatSinceLabel } from "../../lib/time";
 import { InsightRow } from "./insight_row";
+import { toGroups } from "./log_groups";
+import { newSinceIndex, readLastSeen, writeLastSeen } from "./last_seen";
 import { ProjectRail } from "./project_rail";
 import { SearchBox } from "./search_box";
 import { ViewTabs } from "./view_tabs";
@@ -26,6 +30,12 @@ export function InsightsRoute({
     selectedTag,
   });
   const insights = insightPages.insights;
+  const searching = query.trim() !== "";
+
+  // Held for the whole visit so the divider stays put while we record "now"; the router remounts per project.
+  const [lastSeen] = useState(() => readLastSeen(project));
+  useEffect(() => writeLastSeen(project, new Date()), [project]);
+  const sinceIndex = searching ? null : newSinceIndex(insights, lastSeen);
 
   const setSearch = (next: { q?: string; tag?: string }) =>
     void navigate({
@@ -44,6 +54,9 @@ export function InsightsRoute({
       />
 
       <div className="project-main">
+        <h1 className="project-title" id="project-title" tabIndex={-1}>
+          {project}
+        </h1>
         <div className="search-row">
           <SearchBox
             query={query}
@@ -52,34 +65,58 @@ export function InsightsRoute({
           <ViewTabs project={project} active="list" q={q} tag={tag} />
         </div>
 
-        <section className="panel insights-panel">
-          <div className="panel-heading">
+        <section
+          className="log-ledger"
+          aria-labelledby="insights-heading"
+          data-searching={searching}
+        >
+          <div className="log-heading">
             <h2 id="insights-heading" tabIndex={-1}>
-              {query.trim() === "" ? "Insights" : "Search Results"}
+              {searching ? "Search results" : "Insights"}
             </h2>
             <span>{insights.length} shown</span>
           </div>
           {insightPages.isLoading ? (
-            <div className="center-state">Loading insights</div>
+            <div className="log-state">Loading insights</div>
           ) : insights.length === 0 ? (
-            <div className="empty-panel">No matching insights.</div>
+            <div className="log-state">No matching insights.</div>
           ) : (
             <>
-              {insights.map((insight) => (
-                <InsightRow
-                  insight={insight}
-                  key={insight.id}
-                  project={project}
-                  q={q}
-                  tag={tag}
-                  onOpenInsight={(key) =>
-                    void navigate({
-                      to: "/dashboard/$project/insights/$key",
-                      params: { project, key },
-                      search: { q, tag },
-                    })
-                  }
-                />
+              {toGroups(insights, searching, new Date()).map((group) => (
+                <div
+                  className="log-day"
+                  data-mode={searching ? "search" : "list"}
+                  key={group.key}
+                >
+                  {!searching && (
+                    <h3 className="log-day-heading">{group.label}</h3>
+                  )}
+                  <div className="log-entries">
+                    {group.items.map(([insight, index]) => (
+                      <Fragment key={insight.id}>
+                        {index === sinceIndex && lastSeen && (
+                          <div className="log-since">
+                            <span>{formatSinceLabel(lastSeen)}</span>
+                          </div>
+                        )}
+                        <InsightRow
+                          insight={insight}
+                          mode={searching ? "search" : "list"}
+                          project={project}
+                          q={q}
+                          tag={tag}
+                          onOpenInsight={(key) =>
+                            void navigate({
+                              to: "/dashboard/$project/insights/$key",
+                              params: { project, key },
+                              search: { q, tag },
+                            })
+                          }
+                        />
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
               ))}
               {insightPages.hasNextPage && (
                 <LoadMoreButton

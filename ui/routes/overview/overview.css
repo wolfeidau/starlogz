@@ -1,9 +1,28 @@
+.overview-lead {
+  width: min(1440px, 100%);
+  margin: 0 auto 14px;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.overview-lead strong {
+  color: var(--ink);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  font-stretch: 78%;
+  font-variant-numeric: tabular-nums;
+}
+
 .dashboard-grid {
   width: min(1440px, 100%);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.activity-panel {
+  grid-column: 1 / -1;
 }
 
 .bucket-list {
@@ -16,7 +35,17 @@
   grid-template-columns: minmax(72px, 1fr) minmax(80px, 1.5fr) 34px;
   gap: 10px;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--text-sm);
+}
+
+.bucket-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bucket-row strong {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .activity-panel {
@@ -36,14 +65,18 @@
   gap: 6px;
   justify-items: center;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--text-xs);
 }
 
 .activity-bar {
   width: 100%;
   max-width: 18px;
   border-radius: 4px 4px 0 0;
-  background: var(--chart);
+  background: var(--primary);
+}
+
+.activity-bar-today {
+  background: var(--accent);
 }
 
 @media (max-width: 960px) {
@@ -55,5 +88,26 @@
 @media (max-width: 640px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .activity-strip {
+    gap: 3px;
+  }
+
+  .activity-day span {
+    white-space: nowrap;
+  }
+
+  /* Hidden labels keep their height so every bar shares one baseline; bar titles still carry the date. */
+  .activity-day:not(:first-child, :last-child) span {
+    visibility: hidden;
+  }
+
+  .activity-day:first-child span {
+    justify-self: start;
+  }
+
+  .activity-day:last-child span {
+    justify-self: end;
   }
 }

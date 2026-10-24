@@ -1,24 +1,29 @@
 .login-panel {
-  width: min(520px, 100%);
+  width: min(420px, 100%);
   display: grid;
-  gap: 28px;
-  padding: 36px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  border-radius: 8px;
-  box-shadow: 0 22px 56px var(--shadow-login);
+  justify-items: start;
+  gap: 16px;
 }
 
-.login-panel h1 {
+.login-wordmark {
   margin: 0;
-  font-size: 28px;
-  line-height: 1.15;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  font-stretch: 80%;
+  line-height: 1.1;
+}
+
+.wordmark-star {
+  color: var(--accent);
 }
 
 .login-copy {
-  margin: 12px 0 0;
-  color: var(--muted);
-  line-height: 1.55;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-md);
 }
 
 .primary-link {
@@ -31,16 +36,9 @@
   background: var(--primary);
   color: var(--on-primary);
   text-decoration: none;
-  font-weight: 650;
-  box-shadow: 0 8px 18px var(--shadow-button);
-  transition:
-    background 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
+  font-weight: 600;
 }
 
 .primary-link:hover {
   background: var(--primary-hover);
-  box-shadow: 0 10px 22px var(--shadow-button-hover);
-  transform: translateY(-1px);
 }

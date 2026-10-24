@@ -5,6 +5,12 @@
 body {
   margin: 0;
   min-width: 320px;
+  background: var(--page);
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 button,
@@ -21,38 +27,38 @@ select {
   padding: 24px;
 }
 
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--primary-strong);
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
 .summary-grid {
   width: min(1440px, 100%);
   margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--line);
+  overflow: hidden;
 }
 
 .metric {
-  border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px var(--shadow-panel);
-  padding: 18px;
+  padding: 16px 18px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
+}
+
+.project-title {
+  margin: 0 0 12px;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  font-stretch: 78%;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .panel {
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px var(--shadow-panel);
+  border-radius: 10px;
   min-width: 0;
   padding: 18px;
 }
@@ -60,12 +66,15 @@ select {
 .empty-panel {
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px var(--shadow-panel);
+  border-radius: 10px;
   width: min(1440px, 100%);
   margin: 0 auto;
   padding: 28px;
   color: var(--muted);
+}
+
+.metric span {
+  font-size: var(--text-sm);
 }
 
 .metric span,
@@ -75,8 +84,11 @@ select {
 }
 
 .metric strong {
-  font-size: 30px;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  font-stretch: 78%;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .panel h2 {
@@ -105,7 +117,11 @@ select {
 
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--primary), var(--chart));
+  background: var(--primary);
+}
+
+.bar-fill[data-category] {
+  background: var(--cat);
 }
 
 .table-wrap {
@@ -128,16 +144,25 @@ td {
 
 th {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+tbody tr:hover {
+  background: var(--surface-soft);
 }
 
 code {
   display: inline-block;
   margin-top: 6px;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
 
 .nowrap {

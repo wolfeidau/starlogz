@@ -4,9 +4,11 @@ import "./overview.css";
 export function BucketList({
   title,
   buckets,
+  categoryColors = false,
 }: {
   title: string;
   buckets: CountBucket[];
+  categoryColors?: boolean;
 }) {
   const max = Math.max(1, ...buckets.map((b) => b.count));
   return (
@@ -22,6 +24,7 @@ export function BucketList({
               <div className="bar-track">
                 <div
                   className="bar-fill"
+                  data-category={categoryColors ? bucket.name : undefined}
                   style={{
                     width: `${Math.max(8, (bucket.count / max) * 100)}%`,
                   }}

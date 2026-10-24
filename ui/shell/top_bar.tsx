@@ -15,36 +15,42 @@ export function TopBar({
 }) {
   return (
     <header className="topbar">
-      <div>
-        <p className="eyebrow">starlogz</p>
-        <h1>
-          {activeView === "operations" ? "Operations" : "Insights Dashboard"}
-        </h1>
-      </div>
-      <div className="topbar-actions">
-        <nav className="app-nav" aria-label="Primary">
-          <a
-            className={activeView === "insights" ? "active" : undefined}
-            href="/dashboard"
-          >
-            Insights
-          </a>
-          {isOperator && (
+      <div className="topbar-inner">
+        <span className="wordmark">
+          <span className="wordmark-star" aria-hidden="true">
+            ✦
+          </span>
+          starlogz
+        </span>
+        <div className="topbar-actions">
+          <nav className="app-nav" aria-label="Primary">
             <a
-              className={activeView === "operations" ? "active" : undefined}
-              href="/admin/operations"
+              className={activeView === "insights" ? "active" : undefined}
+              href="/dashboard"
             >
-              Operations
+              Insights
             </a>
-          )}
-        </nav>
-        {avatarUrl && <img className="user-avatar" src={avatarUrl} alt="" />}
-        <span>{displayName || login}</span>
-        <form action="/logout" method="post">
-          <button className="logout-button" type="submit">
-            Logout
-          </button>
-        </form>
+            {isOperator && (
+              <a
+                className={activeView === "operations" ? "active" : undefined}
+                href="/admin/operations"
+              >
+                Operations
+              </a>
+            )}
+          </nav>
+          <div className="topbar-user">
+            {avatarUrl && (
+              <img className="user-avatar" src={avatarUrl} alt="" />
+            )}
+            <span>{displayName || login}</span>
+            <form action="/logout" method="post">
+              <button className="logout-button" type="submit">
+                Sign out
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
     </header>
   );

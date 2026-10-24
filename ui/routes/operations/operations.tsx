@@ -294,7 +294,6 @@ function OperationsTelemetry({
         <div className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">MCP activity</p>
               <h2>Tool-call volume</h2>
             </div>
             <span>Hourly, last 24 hours</span>
@@ -304,7 +303,6 @@ function OperationsTelemetry({
         <div className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">MCP activity</p>
               <h2>Calls by tool</h2>
             </div>
           </div>
@@ -333,7 +331,6 @@ function OperationsTelemetry({
         <div className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">OAuth</p>
               <h2>Flow outcomes</h2>
             </div>
           </div>
@@ -368,7 +365,6 @@ function OperationsTelemetry({
         <div className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">OAuth</p>
               <h2>Failure reasons</h2>
             </div>
           </div>
@@ -459,16 +455,25 @@ export function OperationsView({
   };
 
   if (loading) {
-    return <div className="center-state">Loading operations</div>;
+    return (
+      <>
+        <h1 className="project-title">Operations</h1>
+        <div className="center-state">Loading operations</div>
+      </>
+    );
   }
   if (error) {
     return (
-      <section className="empty-panel">Operations data unavailable.</section>
+      <>
+        <h1 className="project-title">Operations</h1>
+        <section className="empty-panel">Operations data unavailable.</section>
+      </>
     );
   }
 
   return (
     <>
+      <h1 className="project-title">Operations</h1>
       <section className="summary-grid operations-summary">
         <Metric
           label="Active dashboard sessions"
@@ -508,7 +513,6 @@ export function OperationsView({
             )
           }
         >
-          <p className="eyebrow">Confirm operator action</p>
           <h2 id="operations-confirmation-title">
             {pendingAction.kind === "web-session"
               ? "Revoke dashboard session?"
@@ -548,7 +552,6 @@ export function OperationsView({
       <section className="panel operations-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Browser access</p>
             <h2 id="operations-sessions-heading" tabIndex={-1}>
               Recent dashboard sessions
             </h2>
@@ -628,7 +631,6 @@ export function OperationsView({
       <section className="panel operations-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">MCP authorization</p>
             <h2 id="operations-grants-heading" tabIndex={-1}>
               Recent OAuth grants
             </h2>
@@ -709,7 +711,6 @@ export function OperationsView({
       <section className="panel operations-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Operator controls</p>
             <h2>Recent operator actions</h2>
           </div>
           <span>Credential-free audit records</span>

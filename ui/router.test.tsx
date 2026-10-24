@@ -10,12 +10,17 @@ import {
   render,
   screen,
   waitFor,
+  waitForElementToBeRemoved,
   within,
 } from "@testing-library/react";
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { UIService } from "../api/gen/proto/es/starlogz/v1/ui_pb";
 import { createAppRouter } from "./router";
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+});
 afterEach(cleanup);
 
 type Call = Record<string, unknown>;
@@ -41,6 +46,7 @@ function setup({
     key: "source",
     category: "fact",
     source: "agent",
+    updatedAt: timestampFromDate(new Date(2026, 5, 7, 12, 0)),
     renderedHtml:
       '<p><a class="insight-link" href="/dashboard/alpha/insights/target" data-starlogz-action="open-insight" data-insight-key="target">target</a></p>',
   };
@@ -49,6 +55,7 @@ function setup({
     key: "",
     category: "decision",
     source: "user",
+    updatedAt: timestampFromDate(new Date(2026, 5, 6, 12, 0)),
     renderedHtml: "<p>keyless body</p>",
   };
   const transport = createRouterTransport((router) => {
@@ -153,8 +160,45 @@ describe("deep links", () => {
 
   test("overview route renders summary tiles", async () => {
     setup({ entries: ["/dashboard/alpha/overview"] });
-    expect(await screen.findByText("Total insights")).toBeTruthy();
+    await screen.findByText("insights");
+    const lead = document.querySelector("p.overview-lead");
+    expect(lead?.textContent).toBe("7 insights");
     expect(screen.queryByText("No matching insights.")).toBeNull();
+  });
+
+  test("list mode nests insight keys under day headings as h4", async () => {
+    setup({ entries: ["/dashboard/alpha"] });
+    expect(
+      await screen.findByRole("heading", { level: 4, name: "source" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { level: 3, name: "source" }),
+    ).toBeNull();
+  });
+
+  test("search mode keeps insight keys at h3", async () => {
+    setup({ entries: ["/dashboard/alpha?q=hi"] });
+    expect(
+      await screen.findByRole("heading", { level: 3, name: "source" }),
+    ).toBeTruthy();
+  });
+
+  test("renders the New since divider in list mode only", async () => {
+    const baseline = new Date(2026, 5, 7, 0, 0);
+    window.sessionStorage.setItem(
+      "starlogz.lastSeen.alpha",
+      baseline.toISOString(),
+    );
+    try {
+      setup({ entries: ["/dashboard/alpha"] });
+      expect(await screen.findByText("New since Jun 7, 00:00")).toBeTruthy();
+      cleanup();
+      setup({ entries: ["/dashboard/alpha?q=hi"] });
+      await screen.findByRole("heading", { level: 3, name: "source" });
+      expect(screen.queryByText(/New since/)).toBeNull();
+    } finally {
+      window.sessionStorage.clear();
+    }
   });
 
   test("unknown paths render the not-found view", async () => {
@@ -238,7 +282,7 @@ describe("search state", () => {
 
     cleanup();
     const searched = setup({ entries: ["/dashboard/alpha?q=123&tag=auth"] });
-    await screen.findByText("Search Results");
+    await screen.findByText("Search results");
     expect(searched.calls.searchInsights.at(-1)).toMatchObject({
       query: "123",
       tags: ["auth"],
@@ -262,7 +306,7 @@ describe("search state", () => {
 
   test("opening, closing, and going back preserve q and tag", async () => {
     const { router } = setup({ entries: ["/dashboard/alpha?q=hi&tag=auth"] });
-    await screen.findByText("Search Results");
+    await screen.findByText("Search results");
 
     await act(() =>
       router.navigate({
@@ -280,7 +324,7 @@ describe("search state", () => {
     await waitFor(() =>
       expect(pathOf(router)).toBe("/dashboard/alpha?q=hi&tag=auth"),
     );
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     const dialogTarget = await screen.findByRole("link", { name: "target" });
     fireEvent.click(dialogTarget, { button: 0, detail: 1 });
@@ -352,7 +396,7 @@ describe("list layout", () => {
     expect(pathOf(router)).toBe("/dashboard/alpha/insights/source?tag=auth");
 
     await act(async () => router.history.back());
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(await screen.findByRole("link", { name: "019fabcd" }));
     await screen.findByRole("dialog");
     expect(pathOf(router)).toBe(
@@ -433,11 +477,11 @@ describe("list layout", () => {
     fireEvent.click(link);
     const dialog = await screen.findByRole("dialog");
     dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
     expect(document.activeElement).toBe(link);
   });
 
-  test("focus lands on the list heading when the insight is not listed", async () => {
+  test("focus lands on the project title when the insight is not listed", async () => {
     const { router } = setup({ entries: ["/dashboard/alpha"] });
     const link = await screen.findByRole("link", { name: "source" });
     fireEvent.click(link);
@@ -451,9 +495,9 @@ describe("list layout", () => {
     );
     const dialog = await screen.findByRole("dialog", { name: "ghost" });
     dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
     expect(document.activeElement).toBe(
-      screen.getByRole("heading", { name: "Insights" }),
+      screen.getByRole("heading", { level: 1, name: "alpha" }),
     );
   });
 

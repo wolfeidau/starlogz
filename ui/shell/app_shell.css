@@ -1,14 +1,23 @@
 .app-shell {
   min-height: 100vh;
-  padding: 24px;
+  padding: 0 24px 24px;
   display: grid;
   align-content: start;
   gap: 18px;
 }
 
+/* Full-bleed bar inside the padded shell. */
+.app-shell > .topbar {
+  margin: 0 -24px;
+}
+
 @media (max-width: 640px) {
   .app-shell {
-    padding: 16px;
+    padding: 0 16px 16px;
+  }
+
+  .app-shell > .topbar {
+    margin: 0 -16px;
   }
 }
 
@@ -17,13 +26,13 @@
 }
 
 .retry-button {
-  min-height: 34px;
-  border: 1px solid var(--line);
+  min-height: 36px;
+  border: 1px solid var(--primary);
   border-radius: 6px;
-  background: var(--surface);
-  padding: 0 12px;
-  color: var(--ink);
-  font-weight: 650;
+  background: transparent;
+  padding: 0 14px;
+  color: var(--primary-strong);
+  font-weight: 600;
   cursor: pointer;
 }
 

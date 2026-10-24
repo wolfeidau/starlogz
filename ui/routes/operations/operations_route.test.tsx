@@ -89,11 +89,18 @@ const openGrantDialog = async () => {
 };
 
 describe("operations revoke dialog", () => {
+  test("renders a level-1 heading", async () => {
+    setup();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Operations" }),
+    ).toBeTruthy();
+  });
+
   test("cancel closes without calling the RPC", async () => {
     const calls = setup();
     const dialog = await openGrantDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.revokeGrant).toEqual([]);
   });
 
@@ -106,7 +113,7 @@ describe("operations revoke dialog", () => {
     );
     await waitFor(() => expect(calls.revokeGrant).toEqual([grantId]));
     await waitFor(() => expect(calls.overview).toBe(2));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.revokeSession).toEqual([]);
   });
 
