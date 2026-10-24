@@ -83,6 +83,8 @@ message ListProjectsResponse {
 
 message GetProjectDashboardRequest {
   string project = 1;
+  // IANA time zone name, e.g. "Australia/Melbourne"; empty means UTC.
+  string time_zone = 2;
 }
 
 message CountBucket {
@@ -101,6 +103,7 @@ message GetProjectDashboardResponse {
   repeated CountBucket category_counts = 3;
   repeated CountBucket source_counts = 4;
   repeated CountBucket top_tags = 5;
+  // Sparse: only days with revisions, ascending, dated YYYY-MM-DD in the requested zone.
   repeated ActivityBucket recent_activity = 6;
   repeated Insight recent_insights = 7;
 }

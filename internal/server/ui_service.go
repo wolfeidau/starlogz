@@ -207,7 +207,14 @@ func (s *uiService) GetProjectDashboard(ctx context.Context, req *connect.Reques
 	if err != nil {
 		return nil, err
 	}
-	dashboard, err := s.store.GetProjectDashboard(ctx, project.ID)
+	loc := time.UTC
+	if tz := req.Msg.GetTimeZone(); tz != "" {
+		// "Local" is a Go alias Postgres does not recognise.
+		if loc, err = time.LoadLocation(tz); err != nil || tz == "Local" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid time_zone %q", tz))
+		}
+	}
+	dashboard, err := s.store.GetProjectDashboard(ctx, project.ID, loc)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get project dashboard: %w", err))
 	}

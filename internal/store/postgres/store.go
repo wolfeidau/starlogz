@@ -1824,7 +1824,7 @@ func (s *Store) ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([
 }
 
 // GetProjectDashboard returns aggregate read models for the project dashboard.
-func (s *Store) GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*store.ProjectDashboard, error) {
+func (s *Store) GetProjectDashboard(ctx context.Context, projectID uuid.UUID, loc *time.Location) (*store.ProjectDashboard, error) {
 	s.logger(ctx).DebugContext(ctx, "loading project dashboard", slog.String("project_id", projectID.String()))
 
 	out := &store.ProjectDashboard{}
@@ -1868,7 +1868,7 @@ func (s *Store) GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*
 		return nil, fmt.Errorf("top tags: %w", err)
 	}
 
-	out.RecentActivity, err = s.activityBuckets(ctx, projectID)
+	out.RecentActivity, err = s.activityBuckets(ctx, projectID, loc)
 	if err != nil {
 		return nil, fmt.Errorf("recent activity: %w", err)
 	}
@@ -2038,20 +2038,21 @@ func (s *Store) countBuckets(ctx context.Context, query string, projectID uuid.U
 	return out, rows.Err()
 }
 
-func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID) ([]store.ActivityBucket, error) {
+func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID, loc *time.Location) ([]store.ActivityBucket, error) {
+	// Window start is the Sunday 52 weeks before this week's Sunday, in the caller's zone.
 	rows, err := s.pool.Query(ctx, `
-		SELECT to_char(days.day::date, 'YYYY-MM-DD') AS day, COALESCE(counts.cnt, 0)::int
-		FROM generate_series(current_date - interval '13 days', current_date, interval '1 day') AS days(day)
-		LEFT JOIN (
-		  SELECT date_trunc('day', updated_at)::date AS day, count(*) AS cnt
-		  FROM insights
-		  WHERE project_id = $1
-		    AND deleted_at IS NULL
-		    AND updated_at >= current_date - interval '13 days'
-		  GROUP BY date_trunc('day', updated_at)::date
-		) counts ON counts.day = days.day::date
-		ORDER BY days.day`,
-		projectID)
+		WITH w AS (
+		  SELECT (now() AT TIME ZONE $2::text)::date - extract(dow FROM (now() AT TIME ZONE $2::text))::int - 364 AS start
+		)
+		SELECT to_char((r.changed_at AT TIME ZONE $2::text)::date, 'YYYY-MM-DD') AS day, count(*)::int
+		FROM insight_revisions r
+		JOIN insights i ON i.id = r.insight_id
+		CROSS JOIN w
+		WHERE i.project_id = $1
+		  AND r.changed_at >= (w.start::timestamp AT TIME ZONE $2::text)
+		GROUP BY 1
+		ORDER BY 1`,
+		projectID, loc.String())
 	if err != nil {
 		return nil, err
 	}

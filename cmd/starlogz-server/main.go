@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"syscall"
 	"time"
+	_ "time/tzdata" // zone lookup on Lambda without system zoneinfo
 
 	"github.com/alecthomas/kong"
 	"github.com/lmittmann/tint"

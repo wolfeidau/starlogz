@@ -10,7 +10,10 @@ import { OverviewCharts, SummaryTiles } from "./summary";
 
 export function OverviewRoute({ project }: { project: string }) {
   const navigate = useNavigate();
-  const dashboard = useQuery(getProjectDashboard, { project });
+  const dashboard = useQuery(getProjectDashboard, {
+    project,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
   const tags = useQuery(listTags, { project, limit: 60 });
   const topTags = tags.data?.tags ?? dashboard.data?.topTags ?? [];
 

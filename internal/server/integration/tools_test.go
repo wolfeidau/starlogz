@@ -577,6 +577,12 @@ func TestUIGetInsightAndRenderedHTML(t *testing.T) {
 		require.Contains(t, fmt.Sprint(body), "renderedHtml", path)
 	}
 
+	resp = f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetProjectDashboard", map[string]any{
+		"project": "render-project", "timeZone": "Not/AZone",
+	})
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
 	for _, input := range []map[string]any{
 		{"project": "render-project"},
 		{"project": "render-project", "key": ""},

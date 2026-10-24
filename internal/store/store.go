@@ -87,7 +87,7 @@ type Store interface {
 	SearchInsights(ctx context.Context, p SearchInsightsParams) (*InsightSearchPage, error)
 	ListInsights(ctx context.Context, p ListInsightsParams) (*InsightPage, error)
 	ListTags(ctx context.Context, projectID uuid.UUID, limit int) ([]TagCount, error)
-	GetProjectDashboard(ctx context.Context, projectID uuid.UUID) (*ProjectDashboard, error)
+	GetProjectDashboard(ctx context.Context, projectID uuid.UUID, loc *time.Location) (*ProjectDashboard, error)
 	GetOperationsOverview(ctx context.Context, limit int) (*OperationsOverview, error)
 
 	SaveClient(ctx context.Context, c OAuthClient) error
@@ -369,7 +369,7 @@ type CountBucket struct {
 	Count int
 }
 
-// ActivityBucket holds a single day's insight update count.
+// ActivityBucket holds a single local day's insight revision count.
 type ActivityBucket struct {
 	Date  string
 	Count int

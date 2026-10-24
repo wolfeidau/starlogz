@@ -307,8 +307,10 @@ func (x *ListProjectsResponse) GetProjects() []*Project {
 }
 
 type GetProjectDashboardRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Project string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	// IANA time zone name, e.g. "Australia/Melbourne"; empty means UTC.
+	TimeZone      string `protobuf:"bytes,2,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -346,6 +348,13 @@ func (*GetProjectDashboardRequest) Descriptor() ([]byte, []int) {
 func (x *GetProjectDashboardRequest) GetProject() string {
 	if x != nil {
 		return x.Project
+	}
+	return ""
+}
+
+func (x *GetProjectDashboardRequest) GetTimeZone() string {
+	if x != nil {
+		return x.TimeZone
 	}
 	return ""
 }
@@ -461,8 +470,9 @@ type GetProjectDashboardResponse struct {
 	CategoryCounts []*CountBucket         `protobuf:"bytes,3,rep,name=category_counts,json=categoryCounts,proto3" json:"category_counts,omitempty"`
 	SourceCounts   []*CountBucket         `protobuf:"bytes,4,rep,name=source_counts,json=sourceCounts,proto3" json:"source_counts,omitempty"`
 	TopTags        []*CountBucket         `protobuf:"bytes,5,rep,name=top_tags,json=topTags,proto3" json:"top_tags,omitempty"`
-	RecentActivity []*ActivityBucket      `protobuf:"bytes,6,rep,name=recent_activity,json=recentActivity,proto3" json:"recent_activity,omitempty"`
-	RecentInsights []*Insight             `protobuf:"bytes,7,rep,name=recent_insights,json=recentInsights,proto3" json:"recent_insights,omitempty"`
+	// Sparse: only days with revisions, ascending, dated YYYY-MM-DD in the requested zone.
+	RecentActivity []*ActivityBucket `protobuf:"bytes,6,rep,name=recent_activity,json=recentActivity,proto3" json:"recent_activity,omitempty"`
+	RecentInsights []*Insight        `protobuf:"bytes,7,rep,name=recent_insights,json=recentInsights,proto3" json:"recent_insights,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2634,9 +2644,10 @@ const file_starlogz_v1_ui_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"H\n" +
 	"\x14ListProjectsResponse\x120\n" +
-	"\bprojects\x18\x01 \x03(\v2\x14.starlogz.v1.ProjectR\bprojects\"6\n" +
+	"\bprojects\x18\x01 \x03(\v2\x14.starlogz.v1.ProjectR\bprojects\"S\n" +
 	"\x1aGetProjectDashboardRequest\x12\x18\n" +
-	"\aproject\x18\x01 \x01(\tR\aproject\"7\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x1b\n" +
+	"\ttime_zone\x18\x02 \x01(\tR\btimeZone\"7\n" +
 	"\vCountBucket\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x05R\x05count\":\n" +
