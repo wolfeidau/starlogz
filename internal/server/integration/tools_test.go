@@ -493,6 +493,42 @@ func TestUIListInsightHistory(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, status)
 }
 
+func TestUIGetProjectDashboardTimeZone(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+	user := f.makeUser(t, ctx, "zone-user")
+	org, err := f.store.GetPersonalOrgByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	_, err = f.store.EnsureProject(ctx, org.ID, user.ID, "zone-project", "Zone Project")
+	require.NoError(t, err)
+
+	rawToken := "zone-browser-session"
+	now := time.Now()
+	_, err = f.store.CreateWebSession(ctx, store.WebSession{
+		TokenHash: store.HashSessionToken(rawToken), UserID: user.ID,
+		IdleExpiresAt: now.Add(time.Hour), ExpiresAt: now.Add(2 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		zone   string
+		status int
+	}{
+		{"", http.StatusOK},
+		{"Australia/Melbourne", http.StatusOK},
+		{"Not/AZone", http.StatusBadRequest},
+		{"Local", http.StatusBadRequest},
+	} {
+		t.Run(tc.zone, func(t *testing.T) {
+			resp := f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetProjectDashboard", map[string]any{
+				"project": "zone-project", "timeZone": tc.zone,
+			})
+			_ = resp.Body.Close()
+			require.Equal(t, tc.status, resp.StatusCode)
+		})
+	}
+}
+
 func TestUIGetInsightAndRenderedHTML(t *testing.T) {
 	ctx := t.Context()
 	f := newToolFixture(t)
@@ -576,12 +612,6 @@ func TestUIGetInsightAndRenderedHTML(t *testing.T) {
 		_ = resp.Body.Close()
 		require.Contains(t, fmt.Sprint(body), "renderedHtml", path)
 	}
-
-	resp = f.uiRequest(t, rawToken, "/starlogz.v1.UIService/GetProjectDashboard", map[string]any{
-		"project": "render-project", "timeZone": "Not/AZone",
-	})
-	_ = resp.Body.Close()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
 	for _, input := range []map[string]any{
 		{"project": "render-project"},

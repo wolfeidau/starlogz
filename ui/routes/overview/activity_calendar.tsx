@@ -3,7 +3,6 @@ import { scaleQuantize } from "d3-scale";
 import { useEffect, useRef, useState } from "react";
 import type { ActivityBucket } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
 import { Metric } from "../../components/metric";
-import { dayKey } from "../../lib/time";
 import "./overview.css";
 
 const CELL = 11;
@@ -41,9 +40,9 @@ function keyOf(ms: number): string {
 
 export function buildCells(
   buckets: ActivityBucket[],
-  today: Date,
+  todayKey: string,
 ): CalendarCell[] {
-  const todayMs = utcNoon(dayKey(today));
+  const todayMs = utcNoon(todayKey);
   const dow = new Date(todayMs).getUTCDay();
   const startMs = todayMs - (dow + 364) * DAY_MS;
   const counts = new Map(buckets.map((b) => [b.date, b.count]));
@@ -69,7 +68,7 @@ export function buildCells(
 
 export function computeStats(
   cells: CalendarCell[],
-  today: Date,
+  todayKey: string,
 ): CalendarStats {
   let total = 0;
   let activeDays = 0;
@@ -82,7 +81,7 @@ export function computeStats(
     }
   }
   const counts = new Map(cells.map((c) => [c.date, c.count]));
-  let ms = utcNoon(dayKey(today));
+  let ms = utcNoon(todayKey);
   if (!counts.get(keyOf(ms))) ms -= DAY_MS;
   let streak = 0;
   while (counts.get(keyOf(ms))) {
@@ -102,15 +101,25 @@ const longDay = dateFormat({
 const shortDay = dateFormat({ month: "short", day: "numeric" });
 const monthName = dateFormat({ month: "short" });
 
-function writes(count: number): string {
-  return `${count} ${count === 1 ? "write" : "writes"}`;
+export function zonedDayKey(date: Date, timeZone: string): string {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function changes(count: number): string {
+  return `${count} ${count === 1 ? "change" : "changes"}`;
 }
 
 export function cellLabel(cell: CalendarCell): string {
   const day = longDay.format(utcNoon(cell.date));
   return cell.count === 0
-    ? `No writes on ${day}`
-    : `${writes(cell.count)} on ${day}`;
+    ? `No changes on ${day}`
+    : `${changes(cell.count)} on ${day}`;
 }
 
 export function monthLabels(
@@ -139,16 +148,18 @@ const DAY_LABELS = [
 
 export function ActivityCalendar({
   buckets,
+  timeZone,
   today = new Date(),
 }: {
   buckets: ActivityBucket[];
+  timeZone: string;
   today?: Date;
 }) {
   const [hovered, setHovered] = useState<CalendarCell | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const cells = buildCells(buckets, today);
-  const stats = computeStats(cells, today);
-  const todayKey = dayKey(today);
+  const todayKey = zonedDayKey(today, timeZone);
+  const cells = buildCells(buckets, todayKey);
+  const stats = computeStats(cells, todayKey);
   const width = LEFT + WEEKS * STEP - GAP;
   const height = TOP + 7 * STEP - GAP;
 
@@ -165,7 +176,7 @@ export function ActivityCalendar({
           <div className="activity-scroll" ref={scroller}>
             <svg
               role="img"
-              aria-label={`Activity calendar: ${writes(stats.total)} in the last year`}
+              aria-label={`Activity calendar: ${changes(stats.total)} in the last year`}
               width={width}
               height={height}
               viewBox={`0 0 ${width} ${height}`}
@@ -231,7 +242,7 @@ export function ActivityCalendar({
           </div>
         </div>
         <div className="activity-stats">
-          <Metric label="Writes (last year)" value={stats.total} />
+          <Metric label="Changes (last year)" value={stats.total} />
           <Metric label="Active days" value={stats.activeDays} />
           <Metric label="Current streak" value={stats.streak} />
           <Metric

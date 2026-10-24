@@ -10,10 +10,8 @@ import { OverviewCharts, SummaryTiles } from "./summary";
 
 export function OverviewRoute({ project }: { project: string }) {
   const navigate = useNavigate();
-  const dashboard = useQuery(getProjectDashboard, {
-    project,
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  });
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const dashboard = useQuery(getProjectDashboard, { project, timeZone });
   const tags = useQuery(listTags, { project, limit: 60 });
   const topTags = tags.data?.tags ?? dashboard.data?.topTags ?? [];
 
@@ -34,7 +32,11 @@ export function OverviewRoute({ project }: { project: string }) {
         <h1 className="project-title">{project}</h1>
         <ViewTabs project={project} active="overview" />
         <SummaryTiles dashboard={dashboard.data} />
-        <OverviewCharts dashboard={dashboard.data} topTags={topTags} />
+        <OverviewCharts
+          dashboard={dashboard.data}
+          topTags={topTags}
+          timeZone={timeZone}
+        />
       </div>
     </div>
   );

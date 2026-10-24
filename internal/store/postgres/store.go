@@ -2054,7 +2054,7 @@ func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID, loc *t
 		ORDER BY 1`,
 		projectID, loc.String())
 	if err != nil {
-		return nil, err
+		return nil, mapTimeZoneError(err)
 	}
 	defer rows.Close()
 
@@ -2066,7 +2066,19 @@ func (s *Store) activityBuckets(ctx context.Context, projectID uuid.UUID, loc *t
 		}
 		out = append(out, b)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, mapTimeZoneError(err)
+	}
+	return out, nil
+}
+
+func mapTimeZoneError(err error) error {
+	var pgErr *pgconn.PgError
+	// 22023 invalid_parameter_value: raised for unrecognised time zone names.
+	if errors.As(err, &pgErr) && pgErr.Code == "22023" {
+		return store.ErrInvalidTimeZone
+	}
+	return err
 }
 
 // UpdateInsight patches content and/or tags on an existing live insight, scoped to orgID.

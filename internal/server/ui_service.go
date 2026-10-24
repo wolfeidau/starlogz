@@ -215,6 +215,9 @@ func (s *uiService) GetProjectDashboard(ctx context.Context, req *connect.Reques
 		}
 	}
 	dashboard, err := s.store.GetProjectDashboard(ctx, project.ID, loc)
+	if errors.Is(err, store.ErrInvalidTimeZone) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid time_zone %q", req.Msg.GetTimeZone()))
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get project dashboard: %w", err))
 	}
