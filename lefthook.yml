@@ -9,3 +9,5 @@ pre-commit:
       run: go mod tidy -diff
     - name: check generated stubs
       run: bun run proto:check
+    - name: typecheck
+      run: bun run typecheck

@@ -1,0 +1,46 @@
+.login-panel {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 28px;
+  padding: 36px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 8px;
+  box-shadow: 0 22px 56px var(--shadow-login);
+}
+
+.login-panel h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.login-copy {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.primary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--on-primary);
+  text-decoration: none;
+  font-weight: 650;
+  box-shadow: 0 8px 18px var(--shadow-button);
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+
+.primary-link:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 10px 22px var(--shadow-button-hover);
+  transform: translateY(-1px);
+}

@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="/public/dashboard.css" />
+    {{ range .Styles }}<link rel="stylesheet" href="/public/{{ . }}" />
+    {{ end }}
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/public/dashboard.js"></script>
+    <script type="module" src="/public/{{ .Script }}"></script>
   </body>
 </html>

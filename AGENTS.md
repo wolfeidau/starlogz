@@ -98,7 +98,7 @@ Tools advertise titles and annotations: read-only tools set `readOnlyHint`, only
 
 ## Build and test
 
-Run project commands through `mise exec --` so the repository's configured tool versions are used. Build the dashboard assets before Go package loading; `internal/server/web.go` embeds `internal/server/public/*`.
+Run project commands through `mise exec --` so the repository's configured tool versions are used. Build the dashboard assets before Go package loading; `internal/server/web.go` embeds `internal/server/public/*`. `bun run build` (`ui/build.ts`) wipes that directory and writes code-split, content-hashed assets plus `internal/server/public/manifest.json` (`{script, styles}`). The manifest is generated, never committed, and the server panics at startup without it. Hashed files are served immutable; the HTML shell and manifest are `no-cache`. Any check comparing deployed dashboard JS/CSS must compare the manifest's hashed file names.
 
 ```bash
 # Install UI dependencies and generate embedded dashboard assets

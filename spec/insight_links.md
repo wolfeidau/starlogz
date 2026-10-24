@@ -1,7 +1,7 @@
 # Linked insights
 
 > Status: Current contract
-> Last reviewed: 2026-07-19
+> Last reviewed: 2026-10-24
 > Authority: Behavioral, compatibility, and security contract; current code, migrations, and tests provide implementation evidence.
 
 Starlogz supports explicit, project-local relationships between insights. Links
@@ -173,14 +173,14 @@ Insight links render as same-origin anchors with a stable action contract:
 ```html
 <a
   class="insight-link"
-  href="?project=starlogz&amp;insight_key=project-workflow"
+  href="/dashboard/starlogz/insights/project-workflow"
   data-starlogz-action="open-insight"
   data-insight-key="project-workflow"
 >the project workflow</a>
 ```
 
-The renderer URL-encodes project slugs and keys and HTML-escapes labels and
-attributes. Raw HTML remains disabled. A narrow allowlist sanitizer removes
+The renderer path-escapes the project slug and key as single URL segments and
+HTML-escapes labels and attributes. Raw HTML remains disabled. A narrow allowlist sanitizer removes
 scripts, styles, embedded objects, event attributes, executable URLs, and
 unknown Starlogz actions.
 
@@ -190,9 +190,12 @@ only unmodified primary-button clicks; keyboard, modified, auxiliary, download,
 and targeted navigation retain browser behavior. Unknown actions are not
 executed.
 
-Detail state uses `project` plus either `insight_key` or `insight_id` in the URL.
-Initial deep links, browser history, close behavior, project changes, outgoing
-navigation, backlinks, unresolved targets, not-found results, totals, and
+Detail state lives in the URL path: `/dashboard/<project>/insights/<key>` for
+keyed insights and `/dashboard/<project>/insights/by-id/<id>` for keyless ones.
+Each path parameter is a single escaped segment, so keys containing `/` or
+spaces round-trip. Legacy `/dashboard?project=<project>&insight_key=<key>` and
+`&insight_id=<id>` URLs redirect to the path routes. Initial deep links,
+browser history, close behavior, project changes, outgoing navigation, backlinks, unresolved targets, not-found results, totals, and
 truncation must remain coherent.
 
 ## Security and privacy

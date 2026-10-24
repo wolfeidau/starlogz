@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -356,15 +357,73 @@ func TestHealth_WrongMethod(t *testing.T) {
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
+type assetManifest struct {
+	Script string   `json:"script"`
+	Styles []string `json:"styles"`
+}
+
+func fetchManifest(t *testing.T, ts *httptest.Server) assetManifest {
+	t.Helper()
+	resp, err := http.Get(ts.URL + "/public/manifest.json")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
+	var m assetManifest
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&m))
+	require.NotEmpty(t, m.Script)
+	require.NotEmpty(t, m.Styles)
+	return m
+}
+
 func TestDashboard_Route(t *testing.T) {
 	ts, _ := testFixture(t)
+	m := fetchManifest(t, ts)
 
 	resp, err := http.Get(ts.URL + "/dashboard")
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+	require.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
+	require.Contains(t, string(body), `src="/public/`+m.Script+`"`)
+	for _, style := range m.Styles {
+		require.Contains(t, string(body), `href="/public/`+style+`"`)
+	}
+}
+
+func TestDashboard_SubtreeRoutes(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	for _, path := range []string{
+		"/dashboard/alpha",
+		"/dashboard/alpha/insights/x",
+		"/dashboard/alpha/insights/by-id/123",
+		"/dashboard/alpha/overview",
+	} {
+		resp, err := http.Get(ts.URL + path)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		require.Contains(t, resp.Header.Get("Content-Type"), "text/html", path)
+	}
+}
+
+func TestRoot_ServesLandingAndUnknownPathsReturn404(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := http.Get(ts.URL + "/")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = http.Get(ts.URL + "/nope")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestOperations_Route(t *testing.T) {
@@ -381,23 +440,27 @@ func TestOperations_Route(t *testing.T) {
 func TestPublicAsset_Route(t *testing.T) {
 	ts, _ := testFixture(t)
 
-	resp, err := http.Get(ts.URL + "/public/dashboard.js")
+	m := fetchManifest(t, ts)
+
+	resp, err := http.Get(ts.URL + "/public/" + m.Script)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Contains(t, resp.Header.Get("Content-Type"), "javascript")
+	require.Equal(t, "public, max-age=31536000, immutable", resp.Header.Get("Cache-Control"))
 }
 
 func TestGlobalSecurityHeadersCoverRoutesAndPreflights(t *testing.T) {
 	ts, _ := testFixture(t)
+	m := fetchManifest(t, ts)
 	tests := []struct {
 		method string
 		path   string
 	}{
 		{method: http.MethodGet, path: "/dashboard"},
 		{method: http.MethodGet, path: "/health"},
-		{method: http.MethodGet, path: "/public/dashboard.js"},
+		{method: http.MethodGet, path: "/public/" + m.Script},
 		{method: http.MethodGet, path: "/missing"},
 		{method: http.MethodOptions, path: "/oauth2/token"},
 	}

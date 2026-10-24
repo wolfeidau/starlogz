@@ -549,7 +549,7 @@ func TestUIGetInsightAndRenderedHTML(t *testing.T) {
 	require.Equal(t, source.ID.String(), got.Insight.ID)
 	require.Equal(t, source.Content, got.Insight.Content)
 	require.Contains(t, got.Insight.RenderedHTML, "<h1>Source</h1>")
-	require.Contains(t, got.Insight.RenderedHTML, `href="?project=render-project&amp;insight_key=target"`)
+	require.Contains(t, got.Insight.RenderedHTML, `href="/dashboard/render-project/insights/target"`)
 	require.Contains(t, got.Insight.RenderedHTML, "Target &lt;safe&gt;")
 	require.NotContains(t, got.Insight.RenderedHTML, "<script")
 	require.Equal(t, 1, got.LinkCount)
