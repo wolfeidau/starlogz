@@ -249,6 +249,14 @@ Do not mock the database. Tests that touch Postgres use a real database via
 from a migrated template via `newTestStore(t)` in
 `internal/store/postgres/store_test.go`.
 
+Dashboard tests run under `bun test` with happy-dom. Do not wrap an element
+assertion in `waitFor`, such as
+`waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())`: every failed
+attempt makes Bun serialize the happy-dom element graph, which can use
+gigabytes and get the CI job SIGKILLed (exit 137). Use
+`waitForElementToBeRemoved` when removal is asynchronous, or a synchronous
+`expect` when the element is already gone.
+
 ### End-to-end (MCP Inspector)
 
 Use the MCP Inspector (`npx @modelcontextprotocol/inspector`) to validate the full OAuth2 + MCP flow interactively. This is the primary tool for validating the browser-interactive GitHub OAuth2 leg. Point it at `http://localhost:8088/mcp`.
