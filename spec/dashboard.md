@@ -100,7 +100,7 @@ Insight detail is a modal drawer on the native `<dialog>` element.
   navigation has replaced the focused element.
 - Closing it navigates to the list route with `q` and `tag` preserved.
 - Focus returns to the list row of the insight being shown when that row is
-  loaded, otherwise to the list heading.
+  loaded, otherwise to the project title.
 - Detail and history are read-only; see
   [insight_revisions.md](insight_revisions.md).
 
