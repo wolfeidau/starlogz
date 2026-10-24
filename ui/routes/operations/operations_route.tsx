@@ -1,4 +1,9 @@
-import { useMutation, useQuery } from "@connectrpc/connect-query";
+import {
+  createConnectQueryKey,
+  useMutation,
+  useQuery,
+} from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   getOperationsOverview,
   getOperationsTelemetry,
@@ -21,8 +26,21 @@ export function OperationsRoute() {
     {},
     { enabled: isOperator },
   );
-  const revokeWebSession = useMutation(revokeOperationsWebSession);
-  const revokeOAuthGrant = useMutation(revokeOperationsOAuthGrant);
+  const queryClient = useQueryClient();
+  // Returning the promise makes mutateAsync wait for the refreshed table.
+  const onSuccess = () =>
+    queryClient.invalidateQueries({
+      queryKey: createConnectQueryKey({
+        schema: getOperationsOverview,
+        cardinality: "finite",
+      }),
+    });
+  const revokeWebSession = useMutation(revokeOperationsWebSession, {
+    onSuccess,
+  });
+  const revokeOAuthGrant = useMutation(revokeOperationsOAuthGrant, {
+    onSuccess,
+  });
 
   if (!isOperator) {
     return (
@@ -43,11 +61,9 @@ export function OperationsRoute() {
       currentWebSessionId={session.data?.webSessionId}
       onRevokeWebSession={async (id) => {
         await revokeWebSession.mutateAsync({ id });
-        await operations.refetch();
       }}
       onRevokeOAuthGrant={async (id) => {
         await revokeOAuthGrant.mutateAsync({ id });
-        await operations.refetch();
       }}
     />
   );

@@ -7,6 +7,7 @@ import type {
   GetOperationsTelemetryResponse,
   OperationsTimeBucket,
 } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
+import { Dialog } from "../../components/dialog";
 import { Metric } from "../../components/metric";
 import { formatTimestamp, timestampToDate } from "../../lib/time";
 import "./operations.css";
@@ -451,6 +452,12 @@ export function OperationsView({
     }
   };
 
+  const cancelAction = () => {
+    if (submittingAction) return;
+    setPendingAction(null);
+    setActionError("");
+  };
+
   if (loading) {
     return <div className="center-state">Loading operations</div>;
   }
@@ -488,36 +495,41 @@ export function OperationsView({
       />
 
       {pendingAction && (
-        <section
-          className="panel operations-confirmation"
-          aria-labelledby="operations-confirmation-title"
-          aria-live="polite"
+        <Dialog
+          labelledBy="operations-confirmation-title"
+          className="operations-dialog"
+          initialFocusSelector=".operations-secondary-button"
+          onClose={cancelAction}
+          returnFocusFallback={() =>
+            document.getElementById(
+              pendingAction.kind === "web-session"
+                ? "operations-sessions-heading"
+                : "operations-grants-heading",
+            )
+          }
         >
-          <div>
-            <p className="eyebrow">Confirm operator action</p>
-            <h2 id="operations-confirmation-title">
-              {pendingAction.kind === "web-session"
-                ? "Revoke dashboard session?"
-                : "Revoke OAuth grant?"}
-            </h2>
-            <p>
-              {pendingAction.kind === "web-session"
-                ? `This immediately signs out ${pendingAction.subject}.`
-                : `This revokes Starlogz access for ${pendingAction.subject}. The client must authorize again.`}
+          <p className="eyebrow">Confirm operator action</p>
+          <h2 id="operations-confirmation-title">
+            {pendingAction.kind === "web-session"
+              ? "Revoke dashboard session?"
+              : "Revoke OAuth grant?"}
+          </h2>
+          <p className="operations-dialog-copy">
+            {pendingAction.kind === "web-session"
+              ? `This immediately signs out ${pendingAction.subject}.`
+              : `This revokes Starlogz access for ${pendingAction.subject}. The client must authorize again.`}
+          </p>
+          {actionError && (
+            <p className="operations-action-error" role="alert">
+              {actionError}
             </p>
-            {actionError && (
-              <p className="operations-action-error">{actionError}</p>
-            )}
-          </div>
+          )}
           <div className="operations-confirmation-actions">
             <button
               className="operations-secondary-button"
               type="button"
               disabled={submittingAction}
-              onClick={() => {
-                setPendingAction(null);
-                setActionError("");
-              }}
+              onClick={cancelAction}
             >
               Cancel
             </button>
@@ -530,14 +542,16 @@ export function OperationsView({
               {submittingAction ? "Revoking" : "Confirm revocation"}
             </button>
           </div>
-        </section>
+        </Dialog>
       )}
 
       <section className="panel operations-panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Browser access</p>
-            <h2>Recent dashboard sessions</h2>
+            <h2 id="operations-sessions-heading" tabIndex={-1}>
+              Recent dashboard sessions
+            </h2>
           </div>
           <span>Credential-free lifecycle data</span>
         </div>
@@ -615,7 +629,9 @@ export function OperationsView({
         <div className="panel-heading">
           <div>
             <p className="eyebrow">MCP authorization</p>
-            <h2>Recent OAuth grants</h2>
+            <h2 id="operations-grants-heading" tabIndex={-1}>
+              Recent OAuth grants
+            </h2>
           </div>
           <span>Refresh-capable grants only</span>
         </div>

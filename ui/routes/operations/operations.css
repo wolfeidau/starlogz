@@ -4,28 +4,35 @@
   margin: 0 auto;
 }
 
-.operations-confirmation {
-  width: min(1440px, 100%);
-  margin: 0 auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 24px;
-  border-color: #fecaca;
-  background: #fffafa;
+.operations-dialog {
+  width: min(480px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 20px;
+  color: var(--ink);
 }
 
-.operations-confirmation h2,
-.operations-confirmation p {
+.operations-dialog::backdrop {
+  background: var(--overlay);
+}
+
+.operations-dialog h2 {
   margin: 0;
 }
 
-.operations-confirmation p:not(.eyebrow) {
-  margin-top: 8px;
+.operations-dialog-copy,
+.operations-action-error {
+  margin: 8px 0 0;
+}
+
+.operations-dialog-copy {
   color: var(--muted);
 }
 
 .operations-confirmation-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
@@ -48,9 +55,9 @@
   padding: 0 12px;
   font-weight: 650;
   cursor: pointer;
-  border: 1px solid var(--failure);
-  background: var(--failure);
-  color: #ffffff;
+  border: 1px solid var(--danger-solid);
+  background: var(--danger-solid);
+  color: var(--on-primary);
 }
 
 .operations-row-action {
@@ -59,9 +66,9 @@
   padding: 0 12px;
   font-weight: 650;
   cursor: pointer;
-  border: 1px solid #fca5a5;
-  background: #fff7f7;
-  color: #b91c1c;
+  border: 1px solid var(--danger-line);
+  background: var(--danger-bg);
+  color: var(--danger-ink);
 }
 
 .operations-secondary-button:disabled,
@@ -71,7 +78,7 @@
   opacity: 0.6;
 }
 
-.operations-confirmation p.operations-action-error {
+.operations-action-error {
   color: var(--failure);
   font-weight: 650;
 }
@@ -118,7 +125,7 @@
 }
 
 .chart-area-success {
-  fill: var(--primary);
+  fill: var(--chart-success);
   opacity: 0.08;
 }
 
@@ -131,7 +138,7 @@
 }
 
 .chart-line-success {
-  stroke: var(--primary);
+  stroke: var(--chart-success);
 }
 
 .chart-line-failure {
@@ -146,7 +153,7 @@
 }
 
 .chart-point-success {
-  stroke: var(--primary);
+  stroke: var(--chart-success);
 }
 
 .chart-point-failure {
@@ -173,7 +180,7 @@
 }
 
 .legend-success {
-  background: var(--primary);
+  background: var(--chart-success);
 }
 
 .chart-legend .legend-failure {
@@ -228,13 +235,13 @@
 }
 
 .status-active {
-  color: #166534;
-  background: #dcfce7;
+  color: var(--success-ink);
+  background: var(--success-bg);
 }
 
 .status-inactive {
-  color: #64748b;
-  background: #e2e8f0;
+  color: var(--neutral-ink);
+  background: var(--neutral-bg);
 }
 
 .operations-next {
@@ -265,10 +272,5 @@
 @media (max-width: 640px) {
   .operations-telemetry-grid {
     grid-template-columns: 1fr;
-  }
-
-  .operations-confirmation {
-    align-items: stretch;
-    flex-direction: column;
   }
 }

@@ -10,3 +10,23 @@
     padding: 16px;
   }
 }
+
+.app-shell .empty-panel p {
+  margin: 0 0 12px;
+}
+
+.retry-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0 12px;
+  color: var(--ink);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.retry-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

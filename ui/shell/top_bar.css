@@ -51,12 +51,12 @@
 }
 
 .app-nav a.active {
-  color: #ffffff;
+  color: var(--on-primary);
   background: var(--primary);
 }
 
 .app-nav a:focus-visible {
-  outline: 3px solid rgb(37 99 235 / 24%);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

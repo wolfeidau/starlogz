@@ -10,11 +10,11 @@
 }
 
 .pill {
-  background: #eef6ff;
-  color: #1d4ed8;
+  background: var(--pill-bg);
+  color: var(--pill-ink);
 }
 
 .tag {
   background: var(--accent-soft);
-  color: #92400e;
+  color: var(--tag-ink);
 }

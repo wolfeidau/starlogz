@@ -3,20 +3,83 @@
   --surface-soft: #f8fbff;
   --page: #f3f6fb;
   --ink: #122033;
+  --ink-soft: #475569;
   --muted: #5c6b7d;
   --line: #d7e1ec;
   --line-soft: #e6edf5;
   --primary: #2563eb;
   --primary-strong: #1d4ed8;
+  --primary-hover: #1d4ed8;
   --primary-soft: #eff6ff;
+  --on-primary: #ffffff;
   --accent: #f59e0b;
   --accent-soft: #fff7ed;
   --chart: #0ea5e9;
+  --chart-success: #2563eb;
   --failure: #dc2626;
-  color-scheme: light;
+  --danger-solid: #dc2626;
+  --danger-ink: #b91c1c;
+  --danger-line: #fca5a5;
+  --danger-bg: #fff7f7;
+  --success-ink: #166534;
+  --success-bg: #dcfce7;
+  --neutral-ink: #64748b;
+  --neutral-bg: #e2e8f0;
+  --pill-bg: #eef6ff;
+  --pill-ink: #1d4ed8;
+  --tag-ink: #92400e;
+  --code-ink: #1e3a8a;
+  --shadow-panel: rgb(37 99 235 / 6%);
+  --shadow-login: rgb(37 99 235 / 12%);
+  --shadow-button: rgb(37 99 235 / 18%);
+  --shadow-button-hover: rgb(37 99 235 / 24%);
+  --focus-ring: rgb(37 99 235 / 24%);
+  --overlay: rgb(15 23 42 / 42%);
+  color-scheme: light dark;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
   background: var(--page);
   color: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #121c2c;
+    --surface-soft: #0e1726;
+    --page: #0a111c;
+    --ink: #e6edf6;
+    --ink-soft: #cbd5e1;
+    --muted: #a3b1c4;
+    --line: #2a3b52;
+    --line-soft: #1c2b3f;
+    --primary: #2563eb;
+    --primary-strong: #93c5fd;
+    --primary-hover: #1d4ed8;
+    --primary-soft: #172a4d;
+    --on-primary: #ffffff;
+    --accent: #f59e0b;
+    --accent-soft: #3a2a10;
+    --chart: #38bdf8;
+    --chart-success: #60a5fa;
+    --failure: #f87171;
+    --danger-solid: #dc2626;
+    --danger-ink: #fca5a5;
+    --danger-line: #7f1d1d;
+    --danger-bg: #2a1517;
+    --success-ink: #86efac;
+    --success-bg: #14341f;
+    --neutral-ink: #cbd5e1;
+    --neutral-bg: #2a3b52;
+    --pill-bg: #172a4d;
+    --pill-ink: #93c5fd;
+    --tag-ink: #fcd34d;
+    --code-ink: #bfdbfe;
+    --shadow-panel: rgb(0 0 0 / 30%);
+    --shadow-login: rgb(0 0 0 / 40%);
+    --shadow-button: rgb(0 0 0 / 30%);
+    --shadow-button-hover: rgb(0 0 0 / 40%);
+    --focus-ring: rgb(147 197 253 / 50%);
+    --overlay: rgb(0 0 0 / 60%);
+  }
 }
