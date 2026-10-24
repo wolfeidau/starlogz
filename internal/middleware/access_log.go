@@ -66,8 +66,9 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				reqLogger = reqLogger.With(slog.String("edge_request_id", edgeRequestID))
 				ctx = ctxlog.WithEdgeRequestID(ctx, edgeRequestID)
 			}
-			ctx = ctxlog.WithLogger(ctx, reqLogger)
-			req, holder := withRouteHolder(r.WithContext(ctx))
+			holder := &routeHolder{}
+			ctx = context.WithValue(ctxlog.WithLogger(ctx, reqLogger), routeHolderKey{}, holder)
+			req := r.WithContext(ctx)
 
 			start := time.Now()
 			rw := &responseWriter{ResponseWriter: w}
@@ -110,11 +111,6 @@ func validEdgeRequestID(value string) string {
 type routeHolderKey struct{}
 
 type routeHolder struct{ pattern string }
-
-func withRouteHolder(r *http.Request) (*http.Request, *routeHolder) {
-	holder := &routeHolder{}
-	return r.WithContext(context.WithValue(r.Context(), routeHolderKey{}, holder)), holder
-}
 
 // Route records the mux-matched pattern for AccessLog. Wrap the mux directly:
 // ServeMux sets Pattern on the request it receives, which is a copy when an
