@@ -522,7 +522,7 @@ func TestMCP_ValidJWT_PassesAuth(t *testing.T) {
 	require.NotEqual(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
-func TestMCP_Delete_Returns200(t *testing.T) {
+func TestMCP_Delete_NoAuth_Returns401(t *testing.T) {
 	ts, _ := testFixture(t)
 
 	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/mcp", nil)
@@ -532,8 +532,27 @@ func TestMCP_Delete_Returns200(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 
-	// Special-cased DELETE bypasses auth and returns 200 (not 204) for Service Worker compat
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("WWW-Authenticate"), "Bearer")
+}
+
+func TestMCP_Delete_ValidJWT_Returns405(t *testing.T) {
+	ts, oidcSrv := testFixture(t)
+
+	tokenString, err := oidcSrv.IssueJWT("12345678", "test-client", "insights:read", uuid.New().String(), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/mcp", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	// Stateless SDK has no session to terminate
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+	require.Equal(t, "POST", resp.Header.Get("Allow"))
 }
 
 func TestMCP_WrongToken_Returns401(t *testing.T) {
