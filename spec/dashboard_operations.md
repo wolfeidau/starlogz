@@ -1,7 +1,7 @@
 # Dashboard operations view
 
 > Status: Current contract
-> Last reviewed: 2026-07-29
+> Last reviewed: 2026-10-24
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Authorization boundary
@@ -39,9 +39,10 @@ search queries, emails, or raw audit-log JSON.
 
 ## UI
 
-`/dashboard` and `/admin/operations` use one React application shell. Operator
-navigation is shown only when `is_operator` is true. The operations route
-displays active counts and recent browser-session and OAuth-grant tables.
+`/dashboard` and `/admin/operations` use one React application shell, defined
+in [dashboard.md](dashboard.md). Operator navigation is shown only when
+`is_operator` is true. The operations route is loaded lazily and displays
+active counts and recent browser-session and OAuth-grant tables.
 
 Tool-call and OAuth outcome aggregates are supplied by a separate, optional
 CloudWatch read model so query failures do not affect PostgreSQL-backed session
@@ -54,6 +55,7 @@ credential-free operator-action records are defined in
 
 ## Related contracts
 
+- [Dashboard application](dashboard.md)
 - [OAuth2 authentication and authorization](auth.md)
 - [OAuth2 refresh-token grant](refresh_tokens.md)
 - [Web UI sessions](web_sessions.md)

@@ -1,7 +1,7 @@
 # Dashboard operations controls
 
 > Status: Current contract
-> Last reviewed: 2026-07-30
+> Last reviewed: 2026-10-24
 > Authority: Behavioral and security contract; current code, migrations, and tests provide implementation evidence.
 
 ## Authorization and scope
@@ -22,8 +22,10 @@ the opaque session cookie unusable. Repeating the mutation for an already
 revoked session succeeds without creating another operator-action record.
 
 The server rejects revocation of the operator's current session, and the UI
-does not offer it as an action. Every other active session requires an explicit
-inline confirmation.
+does not offer it as an action. Every other active session, and every active
+grant, requires explicit confirmation in a modal dialog. A failed revocation
+keeps the dialog open with the error, and success refreshes the overview before
+the dialog closes.
 
 ## OAuth grants
 
