@@ -3,18 +3,53 @@
   display: inline-flex;
   min-height: 24px;
   align-items: center;
-  border-radius: 999px;
-  padding: 0 9px;
-  font-size: 12px;
-  font-weight: 650;
 }
 
 .pill {
-  background: var(--pill-bg);
-  color: var(--pill-ink);
+  --cat: var(--cat-general);
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.pill::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cat);
+}
+
+.pill[data-category="fact"] {
+  --cat: var(--cat-fact);
+}
+
+.pill[data-category="decision"] {
+  --cat: var(--cat-decision);
+}
+
+.pill[data-category="insight"] {
+  --cat: var(--cat-insight);
+}
+
+.pill[data-category="preference"] {
+  --cat: var(--cat-preference);
+}
+
+.pill[data-category="context"] {
+  --cat: var(--cat-context);
+}
+
+.pill[data-category="general"] {
+  --cat: var(--cat-general);
 }
 
 .tag {
-  background: var(--accent-soft);
-  color: var(--tag-ink);
+  border-radius: 999px;
+  padding: 0 9px;
+  background: var(--line-soft);
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  font-weight: 500;
 }

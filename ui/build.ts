@@ -6,12 +6,38 @@ const outdir = "./internal/server/public";
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 
+// Bun inlines CSS url() fonts as data: URIs, which CSP font-src 'self' blocks.
+// Emit hashed font files and point fonts.css at them with absolute URLs.
+const fontPlugin: Bun.BunPlugin = {
+  name: "font-files",
+  setup(build) {
+    build.onLoad({ filter: /styles[\\/]fonts\.css$/ }, async (args) => {
+      let css = await Bun.file(args.path).text();
+      for (const match of [...css.matchAll(/url\("([^"]+\.woff2)"\)/g)]) {
+        const source = path.resolve(path.dirname(args.path), match[1]);
+        const data = await Bun.file(source).bytes();
+        const hash = new Bun.CryptoHasher("sha256")
+          .update(data)
+          .digest("hex")
+          .slice(0, 8);
+        const name = `${path.basename(source, ".woff2")}-${hash}.woff2`;
+        await mkdir(path.join(outdir, "fonts"), { recursive: true });
+        await Bun.write(path.join(outdir, "fonts", name), data);
+        css = css.replace(match[0], `url("/public/fonts/${name}")`);
+      }
+      return { contents: css, loader: "css" };
+    });
+  },
+};
+
 const result = await Bun.build({
   entrypoints: ["./ui/dashboard.tsx"],
   outdir,
   target: "browser",
   format: "esm",
   splitting: true,
+  plugins: [fontPlugin],
+  external: ["/public/*"],
   minify: true,
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
   naming: {

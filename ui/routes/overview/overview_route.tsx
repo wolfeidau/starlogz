@@ -28,6 +28,7 @@ export function OverviewRoute({ project }: { project: string }) {
         }
       />
       <div className="project-main">
+        <h1 className="project-title">{project}</h1>
         <ViewTabs project={project} active="overview" />
         <SummaryTiles dashboard={dashboard.data} />
         <OverviewCharts dashboard={dashboard.data} topTags={topTags} />

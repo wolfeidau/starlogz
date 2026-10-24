@@ -153,7 +153,7 @@ describe("deep links", () => {
 
   test("overview route renders summary tiles", async () => {
     setup({ entries: ["/dashboard/alpha/overview"] });
-    expect(await screen.findByText("Total insights")).toBeTruthy();
+    expect(await screen.findByText("insights")).toBeTruthy();
     expect(screen.queryByText("No matching insights.")).toBeNull();
   });
 
@@ -238,7 +238,7 @@ describe("search state", () => {
 
     cleanup();
     const searched = setup({ entries: ["/dashboard/alpha?q=123&tag=auth"] });
-    await screen.findByText("Search Results");
+    await screen.findByText("Search results");
     expect(searched.calls.searchInsights.at(-1)).toMatchObject({
       query: "123",
       tags: ["auth"],
@@ -262,7 +262,7 @@ describe("search state", () => {
 
   test("opening, closing, and going back preserve q and tag", async () => {
     const { router } = setup({ entries: ["/dashboard/alpha?q=hi&tag=auth"] });
-    await screen.findByText("Search Results");
+    await screen.findByText("Search results");
 
     await act(() =>
       router.navigate({

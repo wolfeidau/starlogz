@@ -1,97 +1,120 @@
 .topbar {
-  width: min(1440px, 100%);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.topbar-inner {
+  width: min(1488px, 100%);
   margin: 0 auto;
+  padding: 0 24px;
+  min-height: 56px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 18px;
 }
 
-.topbar h1 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.15;
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  font-stretch: 80%;
+  line-height: 1;
+}
+
+.wordmark-star {
+  color: var(--accent);
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 20px;
   color: var(--muted);
+  font-size: var(--text-sm);
 }
 
 .app-nav {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
-  margin-right: 8px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface);
 }
 
 .app-nav a {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  border-radius: 5px;
-  padding: 7px 10px;
-  background: transparent;
+  min-height: 56px;
+  padding: 0 10px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: 600;
   text-decoration: none;
 }
 
 .app-nav a:hover {
   color: var(--primary-strong);
-  background: var(--primary-soft);
 }
 
 .app-nav a.active {
-  color: var(--on-primary);
-  background: var(--primary);
+  color: var(--primary-strong);
+  border-bottom-color: var(--primary);
 }
 
-.app-nav a:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .user-avatar {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
 }
 
-.topbar-actions form {
+.topbar-user form {
   margin: 0;
 }
 
 .logout-button {
-  border: 0;
-  padding: 0;
-  color: inherit;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--ink-soft);
   background: transparent;
   font: inherit;
-  text-decoration: underline;
   cursor: pointer;
 }
 
-@media (max-width: 640px) {
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
+.logout-button:hover {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+}
 
-  .topbar-actions {
+@media (max-width: 640px) {
+  .topbar-inner {
+    width: min(1472px, 100%);
+    padding: 8px 16px;
     flex-wrap: wrap;
   }
 
-  .app-nav {
+  .topbar-actions {
     width: 100%;
-    order: -1;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px 16px;
+  }
+
+  .app-nav a {
+    min-height: 44px;
+  }
+
+  .logout-button {
+    min-height: 40px;
   }
 }

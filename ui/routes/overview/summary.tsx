@@ -2,7 +2,6 @@ import type {
   CountBucket,
   GetProjectDashboardResponse,
 } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
-import { Metric } from "../../components/metric";
 import { ActivityStrip } from "./activity_strip";
 import { BucketList } from "./bucket_list";
 import "./overview.css";
@@ -12,10 +11,11 @@ export function SummaryTiles({
 }: {
   dashboard?: GetProjectDashboardResponse;
 }) {
+  const total = dashboard?.totalInsights ?? 0;
   return (
-    <section className="summary-grid">
-      <Metric label="Total insights" value={dashboard?.totalInsights ?? 0} />
-    </section>
+    <p className="overview-lead">
+      <strong>{total}</strong> {total === 1 ? "insight" : "insights"}
+    </p>
   );
 }
 
@@ -31,9 +31,10 @@ export function OverviewCharts({
       <BucketList
         title="Categories"
         buckets={dashboard?.categoryCounts ?? []}
+        categoryColors
       />
       <BucketList title="Sources" buckets={dashboard?.sourceCounts ?? []} />
-      <BucketList title="Top Tags" buckets={topTags.slice(0, 8)} />
+      <BucketList title="Top tags" buckets={topTags.slice(0, 8)} />
       <ActivityStrip buckets={dashboard?.recentActivity ?? []} />
     </section>
   );

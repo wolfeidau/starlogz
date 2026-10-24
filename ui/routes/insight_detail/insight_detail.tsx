@@ -71,7 +71,7 @@ function RelationshipSection({
     <section className="relationship-section">
       <div className="relationship-heading">
         <h3>{title}</h3>
-        <span>{total}</span>
+        <span className="relationship-count">{total}</span>
       </div>
       {references.length === 0 ? (
         <p className="muted">No {title.toLowerCase()}.</p>
@@ -169,10 +169,9 @@ export function InsightDetail({
     >
       <div className="detail-content">
         <header className="detail-header">
-          <div>
-            <p className="eyebrow">Insight detail</p>
-            <h2 id="insight-detail-title">{insight?.key || selector.value}</h2>
-          </div>
+          <h2 className="mono" id="insight-detail-title">
+            {insight?.key || selector.value}
+          </h2>
           <button
             aria-label="Close insight detail"
             className="detail-close"

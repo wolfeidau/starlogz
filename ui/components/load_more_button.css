@@ -9,10 +9,15 @@
   min-height: 38px;
   border: 1px solid var(--primary);
   border-radius: 6px;
-  background: var(--surface);
+  background: transparent;
   padding: 0 18px;
   color: var(--primary-strong);
+  font-weight: 600;
   cursor: pointer;
+}
+
+.load-more-button:hover:not(:disabled) {
+  background: var(--primary-soft);
 }
 
 .load-more-button:disabled {

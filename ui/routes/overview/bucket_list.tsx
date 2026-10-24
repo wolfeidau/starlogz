@@ -1,12 +1,23 @@
 import type { CountBucket } from "../../../api/gen/proto/es/starlogz/v1/ui_pb";
 import "./overview.css";
 
+const categories = new Set([
+  "fact",
+  "decision",
+  "insight",
+  "preference",
+  "context",
+  "general",
+]);
+
 export function BucketList({
   title,
   buckets,
+  categoryColors = false,
 }: {
   title: string;
   buckets: CountBucket[];
+  categoryColors?: boolean;
 }) {
   const max = Math.max(1, ...buckets.map((b) => b.count));
   return (
@@ -24,6 +35,9 @@ export function BucketList({
                   className="bar-fill"
                   style={{
                     width: `${Math.max(8, (bucket.count / max) * 100)}%`,
+                    ...(categoryColors && {
+                      background: `var(--cat-${categories.has(bucket.name) ? bucket.name : "general"})`,
+                    }),
                   }}
                 />
               </div>

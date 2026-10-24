@@ -35,7 +35,7 @@ function RevisionPreview({
     >
       <header className="history-preview-header">
         <div>
-          <p className="eyebrow">Read-only snapshot</p>
+          <p className="muted">Read-only snapshot</p>
           <h4 id={`revision-${revision.revision}-title`}>
             Revision {revision.revision}
           </h4>
@@ -130,6 +130,7 @@ export function InsightHistory({
                   <button
                     aria-pressed={selected?.revision === revision.revision}
                     className="history-revision-button"
+                    data-selected={selected?.revision === revision.revision}
                     onClick={() => setSelectedRevision(revision.revision)}
                     type="button"
                   >
