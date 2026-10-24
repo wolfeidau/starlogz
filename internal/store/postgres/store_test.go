@@ -2337,6 +2337,9 @@ func TestGetProjectDashboardActivityWindowAndZone(t *testing.T) {
 		{Date: date(day.AddDate(0, 0, -1)), Count: 1},
 		{Date: date(day.AddDate(0, 0, 1)), Count: 2},
 	}, mel.RecentActivity)
+
+	_, err = st.GetProjectDashboard(ctx, p.ID, time.FixedZone("Not/AZone", 0))
+	require.ErrorIs(t, err, store.ErrInvalidTimeZone)
 }
 
 func TestGetOperationsOverview(t *testing.T) {

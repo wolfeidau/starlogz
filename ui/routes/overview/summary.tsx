@@ -22,13 +22,18 @@ export function SummaryTiles({
 export function OverviewCharts({
   dashboard,
   topTags,
+  timeZone,
 }: {
   dashboard?: GetProjectDashboardResponse;
   topTags: CountBucket[];
+  timeZone: string;
 }) {
   return (
     <section className="dashboard-grid">
-      <ActivityCalendar buckets={dashboard?.recentActivity ?? []} />
+      <ActivityCalendar
+        buckets={dashboard?.recentActivity ?? []}
+        timeZone={timeZone}
+      />
       <BucketList
         title="Categories"
         buckets={dashboard?.categoryCounts ?? []}

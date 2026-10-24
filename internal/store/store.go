@@ -13,6 +13,9 @@ import (
 // ErrNotFound is returned when a queried row does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrInvalidTimeZone is returned when PostgreSQL does not recognise a requested time zone.
+var ErrInvalidTimeZone = errors.New("invalid time zone")
+
 // ErrInvalidExpectedRevision is returned for a precondition that cannot apply to the mutation.
 var ErrInvalidExpectedRevision = errors.New("invalid expected revision")
 

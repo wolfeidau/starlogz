@@ -89,11 +89,15 @@ caller's previous visit from older ones.
 
 ## Overview
 
-- The activity calendar counts insight revisions (all operations, including
-  soft-deleted insights) per day over 53 Sunday-start weeks ending today, in
-  the browser's time zone.
+- The activity calendar counts changes (every insight revision operation,
+  including soft-deleted insights) per day over 53 Sunday-start weeks ending
+  today, in the browser's time zone.
+- Insights from before revision tracking (migration 19) each show as a single
+  baseline change on their last update or delete day, until the 53-week window
+  passes the migration.
 - The dashboard request sends that zone as `time_zone` (IANA name; empty means
-  UTC). An invalid zone returns `InvalidArgument`.
+  UTC). `InvalidArgument` is returned for any zone that Go or PostgreSQL does
+  not recognise.
 - `recent_activity` is sparse: only days with a nonzero count, ascending, dated
   `YYYY-MM-DD` in the requested zone.
 - The view also shows category, source, and top-tag distributions.
