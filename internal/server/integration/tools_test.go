@@ -899,6 +899,52 @@ func TestWhoami_ReturnsIdentityAndScopes(t *testing.T) {
 	require.ElementsMatch(t, []string{"insights:read", "insights:write"}, got.Scopes)
 }
 
+func TestToolMetadata_AnnotationsAndServerInfo(t *testing.T) {
+	ctx := t.Context()
+	f := newToolFixture(t)
+
+	user := f.makeUser(t, ctx, "alice")
+	sess := f.connect(t, ctx, f.tokenFor(t, user.ID, "insights:read insights:write"))
+
+	init := sess.InitializeResult()
+	require.Equal(t, "starlogz-mcp-server", init.ServerInfo.Name)
+	require.Equal(t, "Starlogz", init.ServerInfo.Title)
+	require.Equal(t, "devel", init.ServerInfo.Version)
+	require.NotEmpty(t, init.Instructions)
+
+	type hints struct{ readOnly, destructive, idempotent bool }
+	want := map[string]hints{
+		"whoami":            {true, false, false},
+		"project_list":      {true, false, false},
+		"insight_get":       {true, false, false},
+		"insight_history":   {true, false, false},
+		"insight_search":    {true, false, false},
+		"insight_list":      {true, false, false},
+		"insight_list_tags": {true, false, false},
+		"project_ensure":    {false, false, true},
+		"insight_write":     {false, false, false},
+		"insight_update":    {false, false, false},
+		"insight_restore":   {false, false, false},
+		"insight_delete":    {false, true, false},
+	}
+
+	list, err := sess.ListTools(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, list.Tools, len(want))
+	for _, tool := range list.Tools {
+		exp, ok := want[tool.Name]
+		require.True(t, ok, "unexpected tool %s", tool.Name)
+		require.NotEmpty(t, tool.Title, tool.Name)
+		require.NotNil(t, tool.Annotations, tool.Name)
+		require.NotNil(t, tool.Annotations.DestructiveHint, tool.Name)
+		require.NotNil(t, tool.Annotations.OpenWorldHint, tool.Name)
+		require.False(t, *tool.Annotations.OpenWorldHint, tool.Name)
+		require.Equal(t, exp.readOnly, tool.Annotations.ReadOnlyHint, tool.Name)
+		require.Equal(t, exp.destructive, *tool.Annotations.DestructiveHint, tool.Name)
+		require.Equal(t, exp.idempotent, tool.Annotations.IdempotentHint, tool.Name)
+	}
+}
+
 func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
 	ctx := t.Context()
 	f := newToolFixture(t)
