@@ -89,6 +89,13 @@ const openGrantDialog = async () => {
 };
 
 describe("operations revoke dialog", () => {
+  test("renders a level-1 heading", async () => {
+    setup();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Operations" }),
+    ).toBeTruthy();
+  });
+
   test("cancel closes without calling the RPC", async () => {
     const calls = setup();
     const dialog = await openGrantDialog();

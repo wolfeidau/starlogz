@@ -455,16 +455,25 @@ export function OperationsView({
   };
 
   if (loading) {
-    return <div className="center-state">Loading operations</div>;
+    return (
+      <>
+        <h1 className="project-title">Operations</h1>
+        <div className="center-state">Loading operations</div>
+      </>
+    );
   }
   if (error) {
     return (
-      <section className="empty-panel">Operations data unavailable.</section>
+      <>
+        <h1 className="project-title">Operations</h1>
+        <section className="empty-panel">Operations data unavailable.</section>
+      </>
     );
   }
 
   return (
     <>
+      <h1 className="project-title">Operations</h1>
       <section className="summary-grid operations-summary">
         <Metric
           label="Active dashboard sessions"

@@ -6,7 +6,6 @@
 }
 
 .pill {
-  --cat: var(--cat-general);
   gap: 6px;
   color: var(--ink-soft);
   font-size: var(--text-sm);
@@ -21,27 +20,27 @@
   background: var(--cat);
 }
 
-.pill[data-category="fact"] {
+[data-category="fact"] {
   --cat: var(--cat-fact);
 }
 
-.pill[data-category="decision"] {
+[data-category="decision"] {
   --cat: var(--cat-decision);
 }
 
-.pill[data-category="insight"] {
+[data-category="insight"] {
   --cat: var(--cat-insight);
 }
 
-.pill[data-category="preference"] {
+[data-category="preference"] {
   --cat: var(--cat-preference);
 }
 
-.pill[data-category="context"] {
+[data-category="context"] {
   --cat: var(--cat-context);
 }
 
-.pill[data-category="general"] {
+[data-category="general"] {
   --cat: var(--cat-general);
 }
 
