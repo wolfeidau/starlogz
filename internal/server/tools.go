@@ -19,6 +19,13 @@ import (
 	"github.com/wolfeidau/starlogz/internal/wideevent"
 )
 
+const serverInstructions = `Starlogz stores persistent project insights.
+Search or list before writing to avoid duplicates, and call insight_list_tags before choosing tags.
+Supply key for single authoritative values (upsert); omit it for append-only entries.
+Search returns snippets; use insight_get for full content.
+Pass expected_revision on mutations for optimistic concurrency.
+Every call requires telemetry.context: 15-25 words, third person, no personal data.`
+
 type mcpServer struct {
 	server *mcp.Server
 	store  store.Store
@@ -29,76 +36,108 @@ type toolEventMetadata struct {
 	resultCount int
 }
 
-func newMCPServer(st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
+func newMCPServer(version string, st store.Store, eventEmitter *wideevent.Emitter) *mcpServer {
 	if eventEmitter == nil {
 		eventEmitter = wideevent.NewNoopEmitter()
 	}
 	ms := &mcpServer{
-		server: mcp.NewServer(&mcp.Implementation{Name: name}, &mcp.ServerOptions{}),
+		server: mcp.NewServer(&mcp.Implementation{Name: name, Title: "Starlogz", Version: version}, &mcp.ServerOptions{Instructions: serverInstructions}),
 		store:  st,
 		events: eventEmitter,
 	}
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "whoami",
+		Title:       "Who Am I",
 		Description: "Returns identity and token scopes. Call this first to verify access.",
 		InputSchema: whoamiSchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolWhoami, ms.whoami))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_ensure",
+		Title:       "Ensure Project",
 		Description: "Creates a project if it does not exist and returns it. Use when you need a custom display name; insight_write auto-creates projects.",
 		InputSchema: projectEnsureSchema,
+		Annotations: mutatingTool(false, true),
 	}, trackTool(ms, wideevent.ToolProjectEnsure, ms.projectEnsure))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_write",
+		Title:       "Write Insight",
 		Description: "Writes an insight to a project. Auto-creates the project if needed. Supply a key to upsert by stable identifier and expected_revision for optimistic concurrency. Requires category and source.",
 		InputSchema: insightWriteSchema,
+		Annotations: mutatingTool(false, false),
 	}, trackTool(ms, wideevent.ToolInsightWrite, ms.insightWrite))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_get",
+		Title:       "Get Insight",
 		Description: "Retrieves one insight by ID or key with bounded outgoing links and backlinks.",
 		InputSchema: insightGetSchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolInsightGet, ms.insightGet))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_history",
+		Title:       "Insight History",
 		Description: "Lists immutable revisions for an insight, newest first, with opaque cursor continuation. Includes soft-deleted insights.",
 		InputSchema: insightHistorySchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolInsightHistory, ms.insightHistory))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_restore",
+		Title:       "Restore Insight",
 		Description: "Restores an insight from an immutable revision as a new live revision. Requires optimistic concurrency.",
 		InputSchema: insightRestoreSchema,
+		Annotations: mutatingTool(false, false),
 	}, trackTool(ms, wideevent.ToolInsightRestore, ms.insightRestore))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_search",
+		Title:       "Search Insights",
 		Description: "Full-text search over live insights in a project. Returns bounded snippets and metadata; use insight_get for full content. Use detail=brief for progressive discovery and exclude_ids to omit insights already surfaced in the current recall. query_mode=all requires every term. query_mode=web supports explicit OR, quoted phrases, and -excluded terms. tag_mode controls whether all or any supplied tags must match. Results are ordered by relevance and support opaque cursor continuation.",
 		InputSchema: insightSearchSchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolInsightSearch, ms.insightSearch))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list",
+		Title:       "List Insights",
 		Description: "Lists live insights in a project, newest first. Optionally filter by a single tag or continue with an opaque cursor.",
 		InputSchema: insightListSchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolInsightList, ms.insightList))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_delete",
+		Title:       "Delete Insight",
 		Description: "Soft-deletes an insight by ID. Supply expected_revision for optimistic concurrency. The insight no longer appears in list or search results.",
 		InputSchema: insightDeleteSchema,
+		Annotations: mutatingTool(true, false),
 	}, trackTool(ms, wideevent.ToolInsightDelete, ms.insightDelete))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "project_list",
+		Title:       "List Projects",
 		Description: "Lists all projects in the caller's personal org.",
 		InputSchema: projectListSchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolProjectList, ms.projectList))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_list_tags",
+		Title:       "List Tags",
 		Description: "Returns tags for a project ordered by usage frequency. Call before writing tags to avoid fragmentation.",
 		InputSchema: insightListTagsSchema,
+		Annotations: readOnlyTool(),
 	}, trackTool(ms, wideevent.ToolInsightListTags, ms.insightListTags))
 	mcp.AddTool(ms.server, &mcp.Tool{
 		Name:        "insight_update",
+		Title:       "Update Insight",
 		Description: "Updates the content and/or tags of an existing insight. Supply only the fields you want to change and expected_revision for optimistic concurrency.",
 		InputSchema: insightUpdateSchema,
+		Annotations: mutatingTool(false, false),
 	}, trackTool(ms, wideevent.ToolInsightUpdate, ms.insightUpdate))
 	return ms
+}
+
+func readOnlyTool() *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), OpenWorldHint: new(false)}
+}
+
+func mutatingTool(destructive, idempotent bool) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{DestructiveHint: &destructive, IdempotentHint: idempotent, OpenWorldHint: new(false)}
 }
 
 func trackTool[Input any](ms *mcpServer, tool string, handler func(context.Context, *mcp.CallToolRequest, Input) (*mcp.CallToolResult, any, error)) func(context.Context, *mcp.CallToolRequest, Input) (*mcp.CallToolResult, any, error) {

@@ -45,6 +45,7 @@ type Config struct {
 	OperationsTelemetry          operations.Provider
 	SentryHandler                func(http.Handler) http.Handler
 	Events                       *wideevent.Emitter
+	Version                      string // defaults to "devel"
 }
 
 // Server is the configured HTTP server ready to serve requests.
@@ -112,7 +113,11 @@ func New(cfg Config) (*Server, error) {
 		events: eventEmitter,
 	}
 
-	mcpSrv := newMCPServer(cfg.Store, eventEmitter)
+	version := cfg.Version
+	if version == "" {
+		version = "devel"
+	}
+	mcpSrv := newMCPServer(version, cfg.Store, eventEmitter)
 
 	jwtAuth := auth.RequireBearerToken(oidcServer.VerifyJWT, &auth.RequireBearerTokenOptions{
 		Scopes:              []string{"insights:read"},

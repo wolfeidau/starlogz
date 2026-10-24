@@ -75,6 +75,8 @@ All tools require `insights:read`. Write tools also require `insights:write`.
 | `insight_delete`   | `insights:write` | Soft-deletes an insight. Accepts optional `expected_revision` and returns the deletion revision. |
 | `insight_list_tags`| `insights:read`  | Returns tags ordered by usage frequency |
 
+Tools advertise titles and annotations: read-only tools set `readOnlyHint`, only `insight_delete` is destructive, and none are open-world. The server sends usage instructions on initialize.
+
 ---
 
 ## Key dependencies
