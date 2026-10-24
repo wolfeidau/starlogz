@@ -194,9 +194,10 @@ Detail state lives in the URL path: `/dashboard/<project>/insights/<key>` for
 keyed insights and `/dashboard/<project>/insights/by-id/<id>` for keyless ones.
 Each path parameter is a single escaped segment, so keys containing `/` or
 spaces round-trip. Legacy `/dashboard?project=<project>&insight_key=<key>` and
-`&insight_id=<id>` URLs redirect to the path routes. Initial deep links,
-browser history, close behavior, project changes, outgoing navigation, backlinks, unresolved targets, not-found results, totals, and
-truncation must remain coherent.
+`&insight_id=<id>` URLs redirect to the path routes; the full route contract is
+in [dashboard.md](dashboard.md). Initial deep links, browser history, close
+behavior, project changes, outgoing navigation, backlinks, unresolved targets,
+not-found results, totals, and truncation must remain coherent.
 
 ## Security and privacy
 
