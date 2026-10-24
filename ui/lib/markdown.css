@@ -32,7 +32,7 @@
   margin: 0;
   border-left: 3px solid var(--primary);
   padding-left: 10px;
-  color: #475569;
+  color: var(--ink-soft);
 }
 
 .markdown-preview pre {
@@ -50,7 +50,7 @@
   border-radius: 4px;
   background: var(--primary-soft);
   padding: 2px 5px;
-  color: #1e3a8a;
+  color: var(--code-ink);
   font-size: 12px;
 }
 

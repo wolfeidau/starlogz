@@ -211,7 +211,7 @@ describe("operations view", () => {
 
     expect(revokeWebSession).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("region", { name: "Revoke dashboard session?" }),
+      screen.getByRole("dialog", { name: "Revoke dashboard session?" }),
     ).toBeTruthy();
     expect(
       screen.getByText("This immediately signs out Service Operator."),

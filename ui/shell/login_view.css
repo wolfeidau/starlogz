@@ -6,7 +6,7 @@
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: 8px;
-  box-shadow: 0 22px 56px rgb(37 99 235 / 12%);
+  box-shadow: 0 22px 56px var(--shadow-login);
 }
 
 .login-panel h1 {
@@ -29,10 +29,10 @@
   padding: 0 16px;
   border-radius: 6px;
   background: var(--primary);
-  color: #ffffff;
+  color: var(--on-primary);
   text-decoration: none;
   font-weight: 650;
-  box-shadow: 0 8px 18px rgb(37 99 235 / 18%);
+  box-shadow: 0 8px 18px var(--shadow-button);
   transition:
     background 120ms ease,
     box-shadow 120ms ease,
@@ -40,7 +40,7 @@
 }
 
 .primary-link:hover {
-  background: var(--primary-strong);
-  box-shadow: 0 10px 22px rgb(37 99 235 / 24%);
+  background: var(--primary-hover);
+  box-shadow: 0 10px 22px var(--shadow-button-hover);
   transform: translateY(-1px);
 }
