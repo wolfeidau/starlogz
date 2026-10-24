@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -911,6 +912,8 @@ func TestToolMetadata_AnnotationsAndServerInfo(t *testing.T) {
 	require.Equal(t, "Starlogz", init.ServerInfo.Title)
 	require.Equal(t, "devel", init.ServerInfo.Version)
 	require.NotEmpty(t, init.Instructions)
+	require.NotNil(t, init.Capabilities.Tools)
+	require.False(t, init.Capabilities.Tools.ListChanged)
 
 	type hints struct{ readOnly, destructive, idempotent bool }
 	want := map[string]hints{
@@ -943,6 +946,41 @@ func TestToolMetadata_AnnotationsAndServerInfo(t *testing.T) {
 		require.Equal(t, exp.destructive, *tool.Annotations.DestructiveHint, tool.Name)
 		require.Equal(t, exp.idempotent, tool.Annotations.IdempotentHint, tool.Name)
 	}
+}
+
+// A stateless server cannot push list-changed notifications, so a listen
+// request must complete instead of holding the connection until Lambda times out.
+func TestSubscriptionsListen_ReturnsPromptly(t *testing.T) {
+	f := newToolFixture(t)
+	user := f.makeUser(t, t.Context(), "alice")
+	token := f.tokenFor(t, user.ID, "insights:read")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","params":{` +
+		`"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",` +
+		`"io.modelcontextprotocol/clientInfo":{"name":"listen-test","version":"1"},` +
+		`"io.modelcontextprotocol/clientCapabilities":{}},` +
+		`"notifications":{"toolsListChanged":true}}}`
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.ts.URL+"/mcp", strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", "2026-07-28")
+	req.Header.Set("Mcp-Method", "subscriptions/listen")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	var out strings.Builder
+	_, err = io.Copy(&out, resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, out.String())
+	require.Contains(t, out.String(), "notifications/subscriptions/acknowledged")
+	require.NotContains(t, out.String(), "toolsListChanged")
 }
 
 func TestToolInputSchemas_AdvertiseValidationHints(t *testing.T) {
