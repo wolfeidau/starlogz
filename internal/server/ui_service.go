@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
 	starlogzv1 "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1"
 	"github.com/wolfeidau/starlogz/internal/insightlinks"
@@ -46,12 +46,12 @@ func newUIService(st store.Store, operators operatorAuthorizer, telemetry operat
 	return &uiService{store: st, operators: operators, telemetry: telemetry, events: events, retention: retention}
 }
 
-func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv1.GetSessionRequest]) (*connect.Response[starlogzv1.GetSessionResponse], error) {
+func (s *uiService) GetSession(ctx context.Context, _ *starlogzv1.GetSessionRequest) (*starlogzv1.GetSessionResponse, error) {
 	session, user, _, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&starlogzv1.GetSessionResponse{
+	return &starlogzv1.GetSessionResponse{
 		UserId:       user.ID.String(),
 		Login:        user.Login,
 		Email:        user.Email,
@@ -60,56 +60,56 @@ func (s *uiService) GetSession(ctx context.Context, _ *connect.Request[starlogzv
 		ProfileUrl:   user.ProfileURL,
 		IsOperator:   s.operators.Allows(user),
 		WebSessionId: session.ID.String(),
-	}), nil
+	}, nil
 }
 
-func (s *uiService) GetOperationsOverview(ctx context.Context, req *connect.Request[starlogzv1.GetOperationsOverviewRequest]) (*connect.Response[starlogzv1.GetOperationsOverviewResponse], error) {
+func (s *uiService) GetOperationsOverview(ctx context.Context, req *starlogzv1.GetOperationsOverviewRequest) (*starlogzv1.GetOperationsOverviewResponse, error) {
 	_, user, _, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !s.operators.Allows(user) {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+		return nil, connect.NewError(connect.CodePermissionDenied, "operator access required")
 	}
-	limit := int(req.Msg.GetLimit())
+	limit := int(req.GetLimit())
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	overview, err := s.store.GetOperationsOverview(ctx, limit)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get operations overview: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("get operations overview: %w", err))
 	}
-	return connect.NewResponse(&starlogzv1.GetOperationsOverviewResponse{
+	return &starlogzv1.GetOperationsOverviewResponse{
 		ActiveWebSessions: int32Count(overview.ActiveWebSessions),
 		ActiveOauthGrants: int32Count(overview.ActiveOAuthGrants),
 		RecentWebSessions: toProtoWebSessionSummaries(overview.RecentWebSessions),
 		RecentOauthGrants: toProtoOAuthGrantSummaries(overview.RecentOAuthGrants),
 		RecentActions:     toProtoOperatorActionSummaries(overview.RecentActions),
-	}), nil
+	}, nil
 }
 
-func (s *uiService) GetOperationsTelemetry(ctx context.Context, _ *connect.Request[starlogzv1.GetOperationsTelemetryRequest]) (*connect.Response[starlogzv1.GetOperationsTelemetryResponse], error) {
+func (s *uiService) GetOperationsTelemetry(ctx context.Context, _ *starlogzv1.GetOperationsTelemetryRequest) (*starlogzv1.GetOperationsTelemetryResponse, error) {
 	_, user, _, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !s.operators.Allows(user) {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+		return nil, connect.NewError(connect.CodePermissionDenied, "operator access required")
 	}
 	if s.telemetry == nil {
-		return connect.NewResponse(&starlogzv1.GetOperationsTelemetryResponse{}), nil
+		return &starlogzv1.GetOperationsTelemetryResponse{}, nil
 	}
 	snapshot, err := s.telemetry.Get(ctx)
 	if errors.Is(err, operations.ErrUnavailable) {
-		return connect.NewResponse(&starlogzv1.GetOperationsTelemetryResponse{}), nil
+		return &starlogzv1.GetOperationsTelemetryResponse{}, nil
 	}
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get operations telemetry: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("get operations telemetry: %w", err))
 	}
-	return connect.NewResponse(toProtoOperationsTelemetry(snapshot)), nil
+	return toProtoOperationsTelemetry(snapshot), nil
 }
 
-func (s *uiService) RevokeOperationsWebSession(ctx context.Context, req *connect.Request[starlogzv1.RevokeOperationsWebSessionRequest]) (_ *connect.Response[starlogzv1.RevokeOperationsWebSessionResponse], retErr error) {
+func (s *uiService) RevokeOperationsWebSession(ctx context.Context, req *starlogzv1.RevokeOperationsWebSessionRequest) (_ *starlogzv1.RevokeOperationsWebSessionResponse, retErr error) {
 	started := time.Now()
 	defer func() {
 		s.emitOperatorAction(ctx, wideevent.OperatorWebSessionRevokeCompleted, started, retErr)
@@ -120,22 +120,22 @@ func (s *uiService) RevokeOperationsWebSession(ctx context.Context, req *connect
 		return nil, err
 	}
 	if !s.operators.Allows(user) {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+		return nil, connect.NewError(connect.CodePermissionDenied, "operator access required")
 	}
-	id, err := uuid.Parse(req.Msg.GetId())
+	id, err := uuid.Parse(req.GetId())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("valid web session ID required"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, "valid web session ID required")
 	}
 	if id == session.ID {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("current web session cannot be revoked"))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "current web session cannot be revoked")
 	}
 	if err := s.store.RevokeWebSessionByID(ctx, id, user.ID); err != nil {
 		return nil, operatorMutationError("revoke web session", err)
 	}
-	return connect.NewResponse(&starlogzv1.RevokeOperationsWebSessionResponse{}), nil
+	return &starlogzv1.RevokeOperationsWebSessionResponse{}, nil
 }
 
-func (s *uiService) RevokeOperationsOAuthGrant(ctx context.Context, req *connect.Request[starlogzv1.RevokeOperationsOAuthGrantRequest]) (_ *connect.Response[starlogzv1.RevokeOperationsOAuthGrantResponse], retErr error) {
+func (s *uiService) RevokeOperationsOAuthGrant(ctx context.Context, req *starlogzv1.RevokeOperationsOAuthGrantRequest) (_ *starlogzv1.RevokeOperationsOAuthGrantResponse, retErr error) {
 	started := time.Now()
 	defer func() {
 		s.emitOperatorAction(ctx, wideevent.OperatorOAuthGrantRevokeCompleted, started, retErr)
@@ -146,23 +146,23 @@ func (s *uiService) RevokeOperationsOAuthGrant(ctx context.Context, req *connect
 		return nil, err
 	}
 	if !s.operators.Allows(user) {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("operator access required"))
+		return nil, connect.NewError(connect.CodePermissionDenied, "operator access required")
 	}
-	id, err := uuid.Parse(req.Msg.GetId())
+	id, err := uuid.Parse(req.GetId())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("valid OAuth grant ID required"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, "valid OAuth grant ID required")
 	}
 	if err := s.store.RevokeOAuthGrantByID(ctx, id, user.ID, time.Now().Add(s.retention)); err != nil {
 		return nil, operatorMutationError("revoke OAuth grant", err)
 	}
-	return connect.NewResponse(&starlogzv1.RevokeOperationsOAuthGrantResponse{}), nil
+	return &starlogzv1.RevokeOperationsOAuthGrantResponse{}, nil
 }
 
 func operatorMutationError(action string, err error) error {
 	if errors.Is(err, store.ErrNotFound) {
-		return connect.NewError(connect.CodeNotFound, fmt.Errorf("%s: %w", action, err))
+		return connect.NewError(connect.CodeNotFound, action+": not found").WithCause(err)
 	}
-	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", action, err))
+	return connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("%s: %w", action, err))
 }
 
 func (s *uiService) emitOperatorAction(ctx context.Context, name wideevent.Name, started time.Time, err error) {
@@ -186,46 +186,46 @@ func (s *uiService) emitOperatorAction(ctx context.Context, name wideevent.Name,
 	s.events.Completion(ctx, name, wideevent.OutcomeFailure, reason, started, nil)
 }
 
-func (s *uiService) ListProjects(ctx context.Context, _ *connect.Request[starlogzv1.ListProjectsRequest]) (*connect.Response[starlogzv1.ListProjectsResponse], error) {
+func (s *uiService) ListProjects(ctx context.Context, _ *starlogzv1.ListProjectsRequest) (*starlogzv1.ListProjectsResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
 	projects, err := s.store.ListProjects(ctx, org.ID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list projects: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("list projects: %w", err))
 	}
-	return connect.NewResponse(&starlogzv1.ListProjectsResponse{Projects: toProtoProjects(projects)}), nil
+	return &starlogzv1.ListProjectsResponse{Projects: toProtoProjects(projects)}, nil
 }
 
-func (s *uiService) GetProjectDashboard(ctx context.Context, req *connect.Request[starlogzv1.GetProjectDashboardRequest]) (*connect.Response[starlogzv1.GetProjectDashboardResponse], error) {
+func (s *uiService) GetProjectDashboard(ctx context.Context, req *starlogzv1.GetProjectDashboardRequest) (*starlogzv1.GetProjectDashboardResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	project, err := s.projectBySlug(ctx, org.ID, req.GetProject())
 	if err != nil {
 		return nil, err
 	}
 	loc := time.UTC
-	if tz := req.Msg.GetTimeZone(); tz != "" {
+	if tz := req.GetTimeZone(); tz != "" {
 		// "Local" is a Go alias Postgres does not recognise.
 		if loc, err = time.LoadLocation(tz); err != nil || tz == "Local" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid time_zone %q", tz))
+			return nil, connect.Errorf(connect.CodeInvalidArgument, "invalid time_zone %q", tz)
 		}
 	}
 	dashboard, err := s.store.GetProjectDashboard(ctx, project.ID, loc)
 	if errors.Is(err, store.ErrInvalidTimeZone) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid time_zone %q", req.Msg.GetTimeZone()))
+		return nil, connect.Errorf(connect.CodeInvalidArgument, "invalid time_zone %q", req.GetTimeZone())
 	}
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get project dashboard: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("get project dashboard: %w", err))
 	}
 	recentInsights, err := toProtoInsights(dashboard.RecentInsights, project.Slug)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
-	return connect.NewResponse(&starlogzv1.GetProjectDashboardResponse{
+	return &starlogzv1.GetProjectDashboardResponse{
 		Project:        toProtoProject(project),
 		TotalInsights:  int32Count(dashboard.TotalInsights),
 		CategoryCounts: toProtoCountBuckets(dashboard.CategoryCounts),
@@ -233,75 +233,75 @@ func (s *uiService) GetProjectDashboard(ctx context.Context, req *connect.Reques
 		TopTags:        toProtoCountBuckets(dashboard.TopTags),
 		RecentActivity: toProtoActivityBuckets(dashboard.RecentActivity),
 		RecentInsights: recentInsights,
-	}), nil
+	}, nil
 }
 
-func (s *uiService) ListInsights(ctx context.Context, req *connect.Request[starlogzv1.ListInsightsRequest]) (*connect.Response[starlogzv1.ListInsightsResponse], error) {
+func (s *uiService) ListInsights(ctx context.Context, req *starlogzv1.ListInsightsRequest) (*starlogzv1.ListInsightsResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	project, err := s.projectBySlug(ctx, org.ID, req.GetProject())
 	if err != nil {
 		return nil, err
 	}
-	limit := int(req.Msg.GetLimit())
+	limit := int(req.GetLimit())
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	after, err := decodeInsightListCursor(req.Msg.GetCursor(), project.ID, req.Msg.GetTag())
+	after, err := decodeInsightListCursor(req.GetCursor(), project.ID, req.GetTag())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor.Error())
 	}
-	page, err := s.store.ListInsights(ctx, store.ListInsightsParams{ProjectID: project.ID, Tag: req.Msg.GetTag(), Limit: limit, After: after})
+	page, err := s.store.ListInsights(ctx, store.ListInsightsParams{ProjectID: project.ID, Tag: req.GetTag(), Limit: limit, After: after})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list insights: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("list insights: %w", err))
 	}
 	protoInsights, err := toProtoInsights(page.Insights, project.Slug)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
 	response := &starlogzv1.ListInsightsResponse{Insights: protoInsights}
 	if page.NextCursor != nil {
-		response.NextCursor, err = encodeInsightListCursor(project.ID, req.Msg.GetTag(), page.NextCursor)
+		response.NextCursor, err = encodeInsightListCursor(project.ID, req.GetTag(), page.NextCursor)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
+			return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("encode next cursor: %w", err))
 		}
 	}
-	return connect.NewResponse(response), nil
+	return response, nil
 }
 
-func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[starlogzv1.SearchInsightsRequest]) (*connect.Response[starlogzv1.SearchInsightsResponse], error) {
+func (s *uiService) SearchInsights(ctx context.Context, req *starlogzv1.SearchInsightsRequest) (*starlogzv1.SearchInsightsResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	project, err := s.projectBySlug(ctx, org.ID, req.GetProject())
 	if err != nil {
 		return nil, err
 	}
-	query := req.Msg.GetQuery()
+	query := req.GetQuery()
 	if query == "" {
-		if req.Msg.GetCursor() != "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+		if req.GetCursor() != "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor.Error())
 		}
-		return connect.NewResponse(&starlogzv1.SearchInsightsResponse{}), nil
+		return &starlogzv1.SearchInsightsResponse{}, nil
 	}
-	limit := int(req.Msg.GetLimit())
+	limit := int(req.GetLimit())
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	tags := canonicalSearchTags(req.Msg.GetTags())
-	after, err := decodeInsightSearchCursor(req.Msg.GetCursor(), project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, nil)
+	tags := canonicalSearchTags(req.GetTags())
+	after, err := decodeInsightSearchCursor(req.GetCursor(), project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, nil)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor.Error())
 	}
 	page, err := s.store.SearchInsights(ctx, store.SearchInsightsParams{
 		ProjectID: project.ID, Query: query, QueryMode: store.SearchQueryModeAll,
 		Tags: tags, TagMode: store.SearchTagModeAll, Limit: limit, After: after,
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("search insights: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("search insights: %w", err))
 	}
 	insights := make([]*store.Insight, len(page.Hits))
 	for i, hit := range page.Hits {
@@ -309,63 +309,63 @@ func (s *uiService) SearchInsights(ctx context.Context, req *connect.Request[sta
 	}
 	protoInsights, err := toProtoInsights(insights, project.Slug)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
 	response := &starlogzv1.SearchInsightsResponse{Insights: protoInsights}
 	if page.NextCursor != nil {
 		response.NextCursor, err = encodeInsightSearchCursor(project.ID, query, store.SearchQueryModeAll, tags, store.SearchTagModeAll, nil, page.NextCursor)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
+			return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("encode next cursor: %w", err))
 		}
 	}
-	return connect.NewResponse(response), nil
+	return response, nil
 }
 
-func (s *uiService) GetInsight(ctx context.Context, req *connect.Request[starlogzv1.GetInsightRequest]) (*connect.Response[starlogzv1.GetInsightResponse], error) {
+func (s *uiService) GetInsight(ctx context.Context, req *starlogzv1.GetInsightRequest) (*starlogzv1.GetInsightResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
 	relationLimit := 50
-	if req.Msg.RelationLimit != nil {
-		relationLimit = int(req.Msg.GetRelationLimit())
+	if req.RelationLimit != nil {
+		relationLimit = int(req.GetRelationLimit())
 		if relationLimit < 1 || relationLimit > 100 {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("relation_limit must be between 1 and 100"))
+			return nil, connect.NewError(connect.CodeInvalidArgument, "relation_limit must be between 1 and 100")
 		}
 	}
 	params := store.GetInsightParams{RelationLimit: relationLimit}
-	switch selector := req.Msg.GetSelector().(type) {
+	switch selector := req.GetSelector().(type) {
 	case *starlogzv1.GetInsightRequest_Id:
 		if selector.Id == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id must not be empty"))
+			return nil, connect.NewError(connect.CodeInvalidArgument, "id must not be empty")
 		}
 		params.InsightID, err = uuid.Parse(selector.Id)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid insight ID: %w", err))
+			return nil, connect.Errorf(connect.CodeInvalidArgument, "invalid insight ID: %v", err)
 		}
 	case *starlogzv1.GetInsightRequest_Key:
 		if selector.Key == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("key must not be empty"))
+			return nil, connect.NewError(connect.CodeInvalidArgument, "key must not be empty")
 		}
 		params.Key = selector.Key
 	default:
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("exactly one of id or key is required"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, "exactly one of id or key is required")
 	}
-	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	project, err := s.projectBySlug(ctx, org.ID, req.GetProject())
 	if err != nil {
 		return nil, err
 	}
 	params.ProjectID = project.ID
 	detail, err := s.store.GetInsight(ctx, params)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("insight not found"))
+		return nil, connect.NewError(connect.CodeNotFound, "insight not found")
 	}
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get insight: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("get insight: %w", err))
 	}
 	insight, err := toProtoInsight(detail.Insight, project.Slug)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
 	links := make([]*starlogzv1.InsightReference, len(detail.Links))
 	for i, link := range detail.Links {
@@ -383,46 +383,46 @@ func (s *uiService) GetInsight(ctx context.Context, req *connect.Request[starlog
 			UpdatedAt: timestamppb.New(backlink.UpdatedAt),
 		}
 	}
-	return connect.NewResponse(&starlogzv1.GetInsightResponse{
+	return &starlogzv1.GetInsightResponse{
 		Insight: insight, Links: links, Backlinks: backlinks,
 		LinkCount: int32Count(detail.LinkCount), BacklinkCount: int32Count(detail.BacklinkCount),
 		LinksTruncated: detail.LinksTruncated, BacklinksTruncated: detail.BacklinksTruncated,
-	}), nil
+	}, nil
 }
 
-func (s *uiService) ListInsightHistory(ctx context.Context, req *connect.Request[starlogzv1.ListInsightHistoryRequest]) (*connect.Response[starlogzv1.ListInsightHistoryResponse], error) {
+func (s *uiService) ListInsightHistory(ctx context.Context, req *starlogzv1.ListInsightHistoryRequest) (*starlogzv1.ListInsightHistoryResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	project, err := s.projectBySlug(ctx, org.ID, req.GetProject())
 	if err != nil {
 		return nil, err
 	}
-	insightID, err := uuid.Parse(req.Msg.GetId())
+	insightID, err := uuid.Parse(req.GetId())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid insight ID: %w", err))
+		return nil, connect.Errorf(connect.CodeInvalidArgument, "invalid insight ID: %v", err)
 	}
-	limit := int(req.Msg.GetLimit())
+	limit := int(req.GetLimit())
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	after, err := decodeInsightHistoryCursor(req.Msg.GetCursor(), project.ID, insightID)
+	after, err := decodeInsightHistoryCursor(req.GetCursor(), project.ID, insightID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor)
+		return nil, connect.NewError(connect.CodeInvalidArgument, errInvalidCursor.Error())
 	}
 	page, err := s.store.ListInsightHistory(ctx, store.ListInsightHistoryParams{
 		ProjectID: project.ID, InsightID: insightID, Limit: limit, After: after,
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("insight not found"))
+		return nil, connect.NewError(connect.CodeNotFound, "insight not found")
 	}
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list insight history: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("list insight history: %w", err))
 	}
 	revisions, err := toProtoInsightRevisions(page.Revisions, project.Slug)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
 	response := &starlogzv1.ListInsightHistoryResponse{
 		InsightId: page.InsightID.String(), Key: page.Key, CurrentRevision: int32Count(page.CurrentRevision),
@@ -431,61 +431,61 @@ func (s *uiService) ListInsightHistory(ctx context.Context, req *connect.Request
 	if page.NextCursor != nil {
 		response.NextCursor, err = encodeInsightHistoryCursor(project.ID, insightID, page.NextCursor)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encode next cursor: %w", err))
+			return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("encode next cursor: %w", err))
 		}
 	}
-	return connect.NewResponse(response), nil
+	return response, nil
 }
 
-func (s *uiService) ListTags(ctx context.Context, req *connect.Request[starlogzv1.ListTagsRequest]) (*connect.Response[starlogzv1.ListTagsResponse], error) {
+func (s *uiService) ListTags(ctx context.Context, req *starlogzv1.ListTagsRequest) (*starlogzv1.ListTagsResponse, error) {
 	_, _, org, err := s.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	project, err := s.projectBySlug(ctx, org.ID, req.Msg.GetProject())
+	project, err := s.projectBySlug(ctx, org.ID, req.GetProject())
 	if err != nil {
 		return nil, err
 	}
-	limit := int(req.Msg.GetLimit())
+	limit := int(req.GetLimit())
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	tags, err := s.store.ListTags(ctx, project.ID, limit)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list tags: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("list tags: %w", err))
 	}
-	return connect.NewResponse(&starlogzv1.ListTagsResponse{Tags: toProtoTagCounts(tags)}), nil
+	return &starlogzv1.ListTagsResponse{Tags: toProtoTagCounts(tags)}, nil
 }
 
 func (s *uiService) resolve(ctx context.Context) (*store.WebSession, *store.User, *store.Org, error) {
 	if s.store == nil {
-		return nil, nil, nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("database not configured"))
+		return nil, nil, nil, connect.NewError(connect.CodeFailedPrecondition, "database not configured")
 	}
 	session, ok := webSessionFromContext(ctx)
 	if !ok {
-		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, errors.New("missing session"))
+		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, "missing session")
 	}
 	user, err := s.store.GetUserByID(ctx, session.UserID)
 	if err != nil {
-		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user not found: %w", err))
+		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, "session invalid").WithCause(fmt.Errorf("user not found: %w", err))
 	}
 	org, err := s.store.GetPersonalOrgByUserID(ctx, user.ID)
 	if err != nil {
-		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("personal org not found: %w", err))
+		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, "session invalid").WithCause(fmt.Errorf("personal org not found: %w", err))
 	}
 	return session, user, org, nil
 }
 
 func (s *uiService) projectBySlug(ctx context.Context, orgID uuid.UUID, slug string) (*store.Project, error) {
 	if slug == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("project is required"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, "project is required")
 	}
 	project, err := s.store.GetProjectBySlug(ctx, orgID, slug)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("project not found"))
+		return nil, connect.NewError(connect.CodeNotFound, "project not found")
 	}
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get project: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(fmt.Errorf("get project: %w", err))
 	}
 	return project, nil
 }

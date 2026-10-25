@@ -5,443 +5,506 @@
 package starlogzv1connect
 
 import (
-	connect "connectrpc.com/connect"
+	connect "connectrpc.com/connect/v2"
 	context "context"
-	errors "errors"
 	v1 "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1"
-	http "net/http"
-	strings "strings"
+	sync "sync"
 )
-
-// This is a compile-time assertion to ensure that this generated file and the connect package are
-// compatible. If you get a compiler error that this constant is not defined, this code was
-// generated with a version of connect newer than the one compiled into your binary. You can fix the
-// problem by either regenerating this code with an older version of connect or updating the connect
-// version compiled into your binary.
-const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// UIServiceName is the fully-qualified name of the UIService service.
 	UIServiceName = "starlogz.v1.UIService"
 )
 
-// These constants are the fully-qualified names of the RPCs defined in this package. They're
-// exposed at runtime as Spec.Procedure and as the final two segments of the HTTP route.
+// These constants are the procedure names of the RPCs defined in this package. They're exposed at
+// runtime as Spec.Procedure and as the final two segments of the HTTP route.
 //
 // Note that these are different from the fully-qualified method names used by
 // google.golang.org/protobuf/reflect/protoreflect. To convert from these constants to
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// UIServiceGetSessionProcedure is the fully-qualified name of the UIService's GetSession RPC.
+	// UIServiceGetSessionProcedure is the procedure name of the UIService's GetSession RPC.
 	UIServiceGetSessionProcedure = "/starlogz.v1.UIService/GetSession"
-	// UIServiceListProjectsProcedure is the fully-qualified name of the UIService's ListProjects RPC.
+	// UIServiceListProjectsProcedure is the procedure name of the UIService's ListProjects RPC.
 	UIServiceListProjectsProcedure = "/starlogz.v1.UIService/ListProjects"
-	// UIServiceGetProjectDashboardProcedure is the fully-qualified name of the UIService's
+	// UIServiceGetProjectDashboardProcedure is the procedure name of the UIService's
 	// GetProjectDashboard RPC.
 	UIServiceGetProjectDashboardProcedure = "/starlogz.v1.UIService/GetProjectDashboard"
-	// UIServiceListInsightsProcedure is the fully-qualified name of the UIService's ListInsights RPC.
+	// UIServiceListInsightsProcedure is the procedure name of the UIService's ListInsights RPC.
 	UIServiceListInsightsProcedure = "/starlogz.v1.UIService/ListInsights"
-	// UIServiceSearchInsightsProcedure is the fully-qualified name of the UIService's SearchInsights
-	// RPC.
+	// UIServiceSearchInsightsProcedure is the procedure name of the UIService's SearchInsights RPC.
 	UIServiceSearchInsightsProcedure = "/starlogz.v1.UIService/SearchInsights"
-	// UIServiceGetInsightProcedure is the fully-qualified name of the UIService's GetInsight RPC.
+	// UIServiceGetInsightProcedure is the procedure name of the UIService's GetInsight RPC.
 	UIServiceGetInsightProcedure = "/starlogz.v1.UIService/GetInsight"
-	// UIServiceListInsightHistoryProcedure is the fully-qualified name of the UIService's
-	// ListInsightHistory RPC.
+	// UIServiceListInsightHistoryProcedure is the procedure name of the UIService's ListInsightHistory
+	// RPC.
 	UIServiceListInsightHistoryProcedure = "/starlogz.v1.UIService/ListInsightHistory"
-	// UIServiceListTagsProcedure is the fully-qualified name of the UIService's ListTags RPC.
+	// UIServiceListTagsProcedure is the procedure name of the UIService's ListTags RPC.
 	UIServiceListTagsProcedure = "/starlogz.v1.UIService/ListTags"
-	// UIServiceGetOperationsOverviewProcedure is the fully-qualified name of the UIService's
+	// UIServiceGetOperationsOverviewProcedure is the procedure name of the UIService's
 	// GetOperationsOverview RPC.
 	UIServiceGetOperationsOverviewProcedure = "/starlogz.v1.UIService/GetOperationsOverview"
-	// UIServiceGetOperationsTelemetryProcedure is the fully-qualified name of the UIService's
+	// UIServiceGetOperationsTelemetryProcedure is the procedure name of the UIService's
 	// GetOperationsTelemetry RPC.
 	UIServiceGetOperationsTelemetryProcedure = "/starlogz.v1.UIService/GetOperationsTelemetry"
-	// UIServiceRevokeOperationsWebSessionProcedure is the fully-qualified name of the UIService's
+	// UIServiceRevokeOperationsWebSessionProcedure is the procedure name of the UIService's
 	// RevokeOperationsWebSession RPC.
 	UIServiceRevokeOperationsWebSessionProcedure = "/starlogz.v1.UIService/RevokeOperationsWebSession"
-	// UIServiceRevokeOperationsOAuthGrantProcedure is the fully-qualified name of the UIService's
+	// UIServiceRevokeOperationsOAuthGrantProcedure is the procedure name of the UIService's
 	// RevokeOperationsOAuthGrant RPC.
 	UIServiceRevokeOperationsOAuthGrantProcedure = "/starlogz.v1.UIService/RevokeOperationsOAuthGrant"
 )
 
+var (
+	uIServiceGetSessionSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("GetSession"),
+			Procedure:        UIServiceGetSessionProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceListProjectsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("ListProjects"),
+			Procedure:        UIServiceListProjectsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceGetProjectDashboardSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("GetProjectDashboard"),
+			Procedure:        UIServiceGetProjectDashboardProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceListInsightsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("ListInsights"),
+			Procedure:        UIServiceListInsightsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceSearchInsightsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("SearchInsights"),
+			Procedure:        UIServiceSearchInsightsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceGetInsightSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("GetInsight"),
+			Procedure:        UIServiceGetInsightProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceListInsightHistorySpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("ListInsightHistory"),
+			Procedure:        UIServiceListInsightHistoryProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceListTagsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("ListTags"),
+			Procedure:        UIServiceListTagsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceGetOperationsOverviewSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("GetOperationsOverview"),
+			Procedure:        UIServiceGetOperationsOverviewProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceGetOperationsTelemetrySpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("GetOperationsTelemetry"),
+			Procedure:        UIServiceGetOperationsTelemetryProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	uIServiceRevokeOperationsWebSessionSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("RevokeOperationsWebSession"),
+			Procedure:        UIServiceRevokeOperationsWebSessionProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+	uIServiceRevokeOperationsOAuthGrantSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods().ByName("RevokeOperationsOAuthGrant"),
+			Procedure:        UIServiceRevokeOperationsOAuthGrantProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+)
+
 // UIServiceClient is a client for the starlogz.v1.UIService service.
 type UIServiceClient interface {
-	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
-	ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error)
-	GetProjectDashboard(context.Context, *connect.Request[v1.GetProjectDashboardRequest]) (*connect.Response[v1.GetProjectDashboardResponse], error)
-	ListInsights(context.Context, *connect.Request[v1.ListInsightsRequest]) (*connect.Response[v1.ListInsightsResponse], error)
-	SearchInsights(context.Context, *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error)
-	GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error)
-	ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error)
-	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
-	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
-	GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error)
-	RevokeOperationsWebSession(context.Context, *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error)
-	RevokeOperationsOAuthGrant(context.Context, *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error)
+	GetSession(context.Context, *v1.GetSessionRequest) (*v1.GetSessionResponse, error)
+	ListProjects(context.Context, *v1.ListProjectsRequest) (*v1.ListProjectsResponse, error)
+	GetProjectDashboard(context.Context, *v1.GetProjectDashboardRequest) (*v1.GetProjectDashboardResponse, error)
+	ListInsights(context.Context, *v1.ListInsightsRequest) (*v1.ListInsightsResponse, error)
+	SearchInsights(context.Context, *v1.SearchInsightsRequest) (*v1.SearchInsightsResponse, error)
+	GetInsight(context.Context, *v1.GetInsightRequest) (*v1.GetInsightResponse, error)
+	ListInsightHistory(context.Context, *v1.ListInsightHistoryRequest) (*v1.ListInsightHistoryResponse, error)
+	ListTags(context.Context, *v1.ListTagsRequest) (*v1.ListTagsResponse, error)
+	GetOperationsOverview(context.Context, *v1.GetOperationsOverviewRequest) (*v1.GetOperationsOverviewResponse, error)
+	GetOperationsTelemetry(context.Context, *v1.GetOperationsTelemetryRequest) (*v1.GetOperationsTelemetryResponse, error)
+	RevokeOperationsWebSession(context.Context, *v1.RevokeOperationsWebSessionRequest) (*v1.RevokeOperationsWebSessionResponse, error)
+	RevokeOperationsOAuthGrant(context.Context, *v1.RevokeOperationsOAuthGrantRequest) (*v1.RevokeOperationsOAuthGrantResponse, error)
 }
 
-// NewUIServiceClient constructs a client for the starlogz.v1.UIService service. By default, it uses
-// the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
-// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
-// connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewUIServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) UIServiceClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	uIServiceMethods := v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods()
-	return &uIServiceClient{
-		getSession: connect.NewClient[v1.GetSessionRequest, v1.GetSessionResponse](
-			httpClient,
-			baseURL+UIServiceGetSessionProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("GetSession")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		listProjects: connect.NewClient[v1.ListProjectsRequest, v1.ListProjectsResponse](
-			httpClient,
-			baseURL+UIServiceListProjectsProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("ListProjects")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		getProjectDashboard: connect.NewClient[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse](
-			httpClient,
-			baseURL+UIServiceGetProjectDashboardProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("GetProjectDashboard")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		listInsights: connect.NewClient[v1.ListInsightsRequest, v1.ListInsightsResponse](
-			httpClient,
-			baseURL+UIServiceListInsightsProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("ListInsights")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		searchInsights: connect.NewClient[v1.SearchInsightsRequest, v1.SearchInsightsResponse](
-			httpClient,
-			baseURL+UIServiceSearchInsightsProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("SearchInsights")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		getInsight: connect.NewClient[v1.GetInsightRequest, v1.GetInsightResponse](
-			httpClient,
-			baseURL+UIServiceGetInsightProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("GetInsight")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		listInsightHistory: connect.NewClient[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse](
-			httpClient,
-			baseURL+UIServiceListInsightHistoryProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("ListInsightHistory")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		listTags: connect.NewClient[v1.ListTagsRequest, v1.ListTagsResponse](
-			httpClient,
-			baseURL+UIServiceListTagsProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("ListTags")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		getOperationsOverview: connect.NewClient[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse](
-			httpClient,
-			baseURL+UIServiceGetOperationsOverviewProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("GetOperationsOverview")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		getOperationsTelemetry: connect.NewClient[v1.GetOperationsTelemetryRequest, v1.GetOperationsTelemetryResponse](
-			httpClient,
-			baseURL+UIServiceGetOperationsTelemetryProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("GetOperationsTelemetry")),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithClientOptions(opts...),
-		),
-		revokeOperationsWebSession: connect.NewClient[v1.RevokeOperationsWebSessionRequest, v1.RevokeOperationsWebSessionResponse](
-			httpClient,
-			baseURL+UIServiceRevokeOperationsWebSessionProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsWebSession")),
-			connect.WithIdempotency(connect.IdempotencyIdempotent),
-			connect.WithClientOptions(opts...),
-		),
-		revokeOperationsOAuthGrant: connect.NewClient[v1.RevokeOperationsOAuthGrantRequest, v1.RevokeOperationsOAuthGrantResponse](
-			httpClient,
-			baseURL+UIServiceRevokeOperationsOAuthGrantProcedure,
-			connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsOAuthGrant")),
-			connect.WithIdempotency(connect.IdempotencyIdempotent),
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// uIServiceClient implements UIServiceClient.
-type uIServiceClient struct {
-	getSession                 *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listProjects               *connect.Client[v1.ListProjectsRequest, v1.ListProjectsResponse]
-	getProjectDashboard        *connect.Client[v1.GetProjectDashboardRequest, v1.GetProjectDashboardResponse]
-	listInsights               *connect.Client[v1.ListInsightsRequest, v1.ListInsightsResponse]
-	searchInsights             *connect.Client[v1.SearchInsightsRequest, v1.SearchInsightsResponse]
-	getInsight                 *connect.Client[v1.GetInsightRequest, v1.GetInsightResponse]
-	listInsightHistory         *connect.Client[v1.ListInsightHistoryRequest, v1.ListInsightHistoryResponse]
-	listTags                   *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
-	getOperationsOverview      *connect.Client[v1.GetOperationsOverviewRequest, v1.GetOperationsOverviewResponse]
-	getOperationsTelemetry     *connect.Client[v1.GetOperationsTelemetryRequest, v1.GetOperationsTelemetryResponse]
-	revokeOperationsWebSession *connect.Client[v1.RevokeOperationsWebSessionRequest, v1.RevokeOperationsWebSessionResponse]
-	revokeOperationsOAuthGrant *connect.Client[v1.RevokeOperationsOAuthGrantRequest, v1.RevokeOperationsOAuthGrantResponse]
-}
-
-// GetSession calls starlogz.v1.UIService.GetSession.
-func (c *uIServiceClient) GetSession(ctx context.Context, req *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error) {
-	return c.getSession.CallUnary(ctx, req)
-}
-
-// ListProjects calls starlogz.v1.UIService.ListProjects.
-func (c *uIServiceClient) ListProjects(ctx context.Context, req *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error) {
-	return c.listProjects.CallUnary(ctx, req)
-}
-
-// GetProjectDashboard calls starlogz.v1.UIService.GetProjectDashboard.
-func (c *uIServiceClient) GetProjectDashboard(ctx context.Context, req *connect.Request[v1.GetProjectDashboardRequest]) (*connect.Response[v1.GetProjectDashboardResponse], error) {
-	return c.getProjectDashboard.CallUnary(ctx, req)
-}
-
-// ListInsights calls starlogz.v1.UIService.ListInsights.
-func (c *uIServiceClient) ListInsights(ctx context.Context, req *connect.Request[v1.ListInsightsRequest]) (*connect.Response[v1.ListInsightsResponse], error) {
-	return c.listInsights.CallUnary(ctx, req)
-}
-
-// SearchInsights calls starlogz.v1.UIService.SearchInsights.
-func (c *uIServiceClient) SearchInsights(ctx context.Context, req *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error) {
-	return c.searchInsights.CallUnary(ctx, req)
-}
-
-// GetInsight calls starlogz.v1.UIService.GetInsight.
-func (c *uIServiceClient) GetInsight(ctx context.Context, req *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error) {
-	return c.getInsight.CallUnary(ctx, req)
-}
-
-// ListInsightHistory calls starlogz.v1.UIService.ListInsightHistory.
-func (c *uIServiceClient) ListInsightHistory(ctx context.Context, req *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error) {
-	return c.listInsightHistory.CallUnary(ctx, req)
-}
-
-// ListTags calls starlogz.v1.UIService.ListTags.
-func (c *uIServiceClient) ListTags(ctx context.Context, req *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error) {
-	return c.listTags.CallUnary(ctx, req)
-}
-
-// GetOperationsOverview calls starlogz.v1.UIService.GetOperationsOverview.
-func (c *uIServiceClient) GetOperationsOverview(ctx context.Context, req *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error) {
-	return c.getOperationsOverview.CallUnary(ctx, req)
-}
-
-// GetOperationsTelemetry calls starlogz.v1.UIService.GetOperationsTelemetry.
-func (c *uIServiceClient) GetOperationsTelemetry(ctx context.Context, req *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error) {
-	return c.getOperationsTelemetry.CallUnary(ctx, req)
-}
-
-// RevokeOperationsWebSession calls starlogz.v1.UIService.RevokeOperationsWebSession.
-func (c *uIServiceClient) RevokeOperationsWebSession(ctx context.Context, req *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error) {
-	return c.revokeOperationsWebSession.CallUnary(ctx, req)
-}
-
-// RevokeOperationsOAuthGrant calls starlogz.v1.UIService.RevokeOperationsOAuthGrant.
-func (c *uIServiceClient) RevokeOperationsOAuthGrant(ctx context.Context, req *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error) {
-	return c.revokeOperationsOAuthGrant.CallUnary(ctx, req)
+// NewUIServiceClient constructs a client for the starlogz.v1.UIService service. Multiple service
+// clients may share a single connect.Client.
+func NewUIServiceClient(client *connect.Client) UIServiceClient {
+	return &uIServiceClient{client: client}
 }
 
 // UIServiceHandler is an implementation of the starlogz.v1.UIService service.
 type UIServiceHandler interface {
-	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
-	ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error)
-	GetProjectDashboard(context.Context, *connect.Request[v1.GetProjectDashboardRequest]) (*connect.Response[v1.GetProjectDashboardResponse], error)
-	ListInsights(context.Context, *connect.Request[v1.ListInsightsRequest]) (*connect.Response[v1.ListInsightsResponse], error)
-	SearchInsights(context.Context, *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error)
-	GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error)
-	ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error)
-	ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error)
-	GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error)
-	GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error)
-	RevokeOperationsWebSession(context.Context, *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error)
-	RevokeOperationsOAuthGrant(context.Context, *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error)
+	GetSession(context.Context, *v1.GetSessionRequest) (*v1.GetSessionResponse, error)
+	ListProjects(context.Context, *v1.ListProjectsRequest) (*v1.ListProjectsResponse, error)
+	GetProjectDashboard(context.Context, *v1.GetProjectDashboardRequest) (*v1.GetProjectDashboardResponse, error)
+	ListInsights(context.Context, *v1.ListInsightsRequest) (*v1.ListInsightsResponse, error)
+	SearchInsights(context.Context, *v1.SearchInsightsRequest) (*v1.SearchInsightsResponse, error)
+	GetInsight(context.Context, *v1.GetInsightRequest) (*v1.GetInsightResponse, error)
+	ListInsightHistory(context.Context, *v1.ListInsightHistoryRequest) (*v1.ListInsightHistoryResponse, error)
+	ListTags(context.Context, *v1.ListTagsRequest) (*v1.ListTagsResponse, error)
+	GetOperationsOverview(context.Context, *v1.GetOperationsOverviewRequest) (*v1.GetOperationsOverviewResponse, error)
+	GetOperationsTelemetry(context.Context, *v1.GetOperationsTelemetryRequest) (*v1.GetOperationsTelemetryResponse, error)
+	RevokeOperationsWebSession(context.Context, *v1.RevokeOperationsWebSessionRequest) (*v1.RevokeOperationsWebSessionResponse, error)
+	RevokeOperationsOAuthGrant(context.Context, *v1.RevokeOperationsOAuthGrantRequest) (*v1.RevokeOperationsOAuthGrantResponse, error)
 }
 
-// NewUIServiceHandler builds an HTTP handler from the service implementation. It returns the path
-// on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewUIServiceHandler(svc UIServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	uIServiceMethods := v1.File_starlogz_v1_ui_proto.Services().ByName("UIService").Methods()
-	uIServiceGetSessionHandler := connect.NewUnaryHandler(
-		UIServiceGetSessionProcedure,
-		svc.GetSession,
-		connect.WithSchema(uIServiceMethods.ByName("GetSession")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
+// RegisterUIServiceHandler registers svc as the starlogz.v1.UIService implementation on server.
+func RegisterUIServiceHandler(server *connect.Server, svc UIServiceHandler) {
+	adapter := uIServiceHandler{svc: svc}
+	server.Register(
+		connect.Method{Spec: uIServiceGetSessionSpec(), Handler: adapter.getSession},
+		connect.Method{Spec: uIServiceListProjectsSpec(), Handler: adapter.listProjects},
+		connect.Method{Spec: uIServiceGetProjectDashboardSpec(), Handler: adapter.getProjectDashboard},
+		connect.Method{Spec: uIServiceListInsightsSpec(), Handler: adapter.listInsights},
+		connect.Method{Spec: uIServiceSearchInsightsSpec(), Handler: adapter.searchInsights},
+		connect.Method{Spec: uIServiceGetInsightSpec(), Handler: adapter.getInsight},
+		connect.Method{Spec: uIServiceListInsightHistorySpec(), Handler: adapter.listInsightHistory},
+		connect.Method{Spec: uIServiceListTagsSpec(), Handler: adapter.listTags},
+		connect.Method{Spec: uIServiceGetOperationsOverviewSpec(), Handler: adapter.getOperationsOverview},
+		connect.Method{Spec: uIServiceGetOperationsTelemetrySpec(), Handler: adapter.getOperationsTelemetry},
+		connect.Method{Spec: uIServiceRevokeOperationsWebSessionSpec(), Handler: adapter.revokeOperationsWebSession},
+		connect.Method{Spec: uIServiceRevokeOperationsOAuthGrantSpec(), Handler: adapter.revokeOperationsOAuthGrant},
 	)
-	uIServiceListProjectsHandler := connect.NewUnaryHandler(
-		UIServiceListProjectsProcedure,
-		svc.ListProjects,
-		connect.WithSchema(uIServiceMethods.ByName("ListProjects")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceGetProjectDashboardHandler := connect.NewUnaryHandler(
-		UIServiceGetProjectDashboardProcedure,
-		svc.GetProjectDashboard,
-		connect.WithSchema(uIServiceMethods.ByName("GetProjectDashboard")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceListInsightsHandler := connect.NewUnaryHandler(
-		UIServiceListInsightsProcedure,
-		svc.ListInsights,
-		connect.WithSchema(uIServiceMethods.ByName("ListInsights")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceSearchInsightsHandler := connect.NewUnaryHandler(
-		UIServiceSearchInsightsProcedure,
-		svc.SearchInsights,
-		connect.WithSchema(uIServiceMethods.ByName("SearchInsights")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceGetInsightHandler := connect.NewUnaryHandler(
-		UIServiceGetInsightProcedure,
-		svc.GetInsight,
-		connect.WithSchema(uIServiceMethods.ByName("GetInsight")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceListInsightHistoryHandler := connect.NewUnaryHandler(
-		UIServiceListInsightHistoryProcedure,
-		svc.ListInsightHistory,
-		connect.WithSchema(uIServiceMethods.ByName("ListInsightHistory")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceListTagsHandler := connect.NewUnaryHandler(
-		UIServiceListTagsProcedure,
-		svc.ListTags,
-		connect.WithSchema(uIServiceMethods.ByName("ListTags")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceGetOperationsOverviewHandler := connect.NewUnaryHandler(
-		UIServiceGetOperationsOverviewProcedure,
-		svc.GetOperationsOverview,
-		connect.WithSchema(uIServiceMethods.ByName("GetOperationsOverview")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceGetOperationsTelemetryHandler := connect.NewUnaryHandler(
-		UIServiceGetOperationsTelemetryProcedure,
-		svc.GetOperationsTelemetry,
-		connect.WithSchema(uIServiceMethods.ByName("GetOperationsTelemetry")),
-		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceRevokeOperationsWebSessionHandler := connect.NewUnaryHandler(
-		UIServiceRevokeOperationsWebSessionProcedure,
-		svc.RevokeOperationsWebSession,
-		connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsWebSession")),
-		connect.WithIdempotency(connect.IdempotencyIdempotent),
-		connect.WithHandlerOptions(opts...),
-	)
-	uIServiceRevokeOperationsOAuthGrantHandler := connect.NewUnaryHandler(
-		UIServiceRevokeOperationsOAuthGrantProcedure,
-		svc.RevokeOperationsOAuthGrant,
-		connect.WithSchema(uIServiceMethods.ByName("RevokeOperationsOAuthGrant")),
-		connect.WithIdempotency(connect.IdempotencyIdempotent),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/starlogz.v1.UIService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case UIServiceGetSessionProcedure:
-			uIServiceGetSessionHandler.ServeHTTP(w, r)
-		case UIServiceListProjectsProcedure:
-			uIServiceListProjectsHandler.ServeHTTP(w, r)
-		case UIServiceGetProjectDashboardProcedure:
-			uIServiceGetProjectDashboardHandler.ServeHTTP(w, r)
-		case UIServiceListInsightsProcedure:
-			uIServiceListInsightsHandler.ServeHTTP(w, r)
-		case UIServiceSearchInsightsProcedure:
-			uIServiceSearchInsightsHandler.ServeHTTP(w, r)
-		case UIServiceGetInsightProcedure:
-			uIServiceGetInsightHandler.ServeHTTP(w, r)
-		case UIServiceListInsightHistoryProcedure:
-			uIServiceListInsightHistoryHandler.ServeHTTP(w, r)
-		case UIServiceListTagsProcedure:
-			uIServiceListTagsHandler.ServeHTTP(w, r)
-		case UIServiceGetOperationsOverviewProcedure:
-			uIServiceGetOperationsOverviewHandler.ServeHTTP(w, r)
-		case UIServiceGetOperationsTelemetryProcedure:
-			uIServiceGetOperationsTelemetryHandler.ServeHTTP(w, r)
-		case UIServiceRevokeOperationsWebSessionProcedure:
-			uIServiceRevokeOperationsWebSessionHandler.ServeHTTP(w, r)
-		case UIServiceRevokeOperationsOAuthGrantProcedure:
-			uIServiceRevokeOperationsOAuthGrantHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
 }
 
 // UnimplementedUIServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedUIServiceHandler struct{}
 
-func (UnimplementedUIServiceHandler) GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetSession is not implemented"))
+func (UnimplementedUIServiceHandler) GetSession(context.Context, *v1.GetSessionRequest) (*v1.GetSessionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.GetSession is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.ListProjects is not implemented"))
+func (UnimplementedUIServiceHandler) ListProjects(context.Context, *v1.ListProjectsRequest) (*v1.ListProjectsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.ListProjects is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) GetProjectDashboard(context.Context, *connect.Request[v1.GetProjectDashboardRequest]) (*connect.Response[v1.GetProjectDashboardResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetProjectDashboard is not implemented"))
+func (UnimplementedUIServiceHandler) GetProjectDashboard(context.Context, *v1.GetProjectDashboardRequest) (*v1.GetProjectDashboardResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.GetProjectDashboard is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) ListInsights(context.Context, *connect.Request[v1.ListInsightsRequest]) (*connect.Response[v1.ListInsightsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.ListInsights is not implemented"))
+func (UnimplementedUIServiceHandler) ListInsights(context.Context, *v1.ListInsightsRequest) (*v1.ListInsightsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.ListInsights is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) SearchInsights(context.Context, *connect.Request[v1.SearchInsightsRequest]) (*connect.Response[v1.SearchInsightsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.SearchInsights is not implemented"))
+func (UnimplementedUIServiceHandler) SearchInsights(context.Context, *v1.SearchInsightsRequest) (*v1.SearchInsightsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.SearchInsights is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) GetInsight(context.Context, *connect.Request[v1.GetInsightRequest]) (*connect.Response[v1.GetInsightResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetInsight is not implemented"))
+func (UnimplementedUIServiceHandler) GetInsight(context.Context, *v1.GetInsightRequest) (*v1.GetInsightResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.GetInsight is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) ListInsightHistory(context.Context, *connect.Request[v1.ListInsightHistoryRequest]) (*connect.Response[v1.ListInsightHistoryResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.ListInsightHistory is not implemented"))
+func (UnimplementedUIServiceHandler) ListInsightHistory(context.Context, *v1.ListInsightHistoryRequest) (*v1.ListInsightHistoryResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.ListInsightHistory is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) ListTags(context.Context, *connect.Request[v1.ListTagsRequest]) (*connect.Response[v1.ListTagsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.ListTags is not implemented"))
+func (UnimplementedUIServiceHandler) ListTags(context.Context, *v1.ListTagsRequest) (*v1.ListTagsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.ListTags is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) GetOperationsOverview(context.Context, *connect.Request[v1.GetOperationsOverviewRequest]) (*connect.Response[v1.GetOperationsOverviewResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetOperationsOverview is not implemented"))
+func (UnimplementedUIServiceHandler) GetOperationsOverview(context.Context, *v1.GetOperationsOverviewRequest) (*v1.GetOperationsOverviewResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.GetOperationsOverview is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) GetOperationsTelemetry(context.Context, *connect.Request[v1.GetOperationsTelemetryRequest]) (*connect.Response[v1.GetOperationsTelemetryResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.GetOperationsTelemetry is not implemented"))
+func (UnimplementedUIServiceHandler) GetOperationsTelemetry(context.Context, *v1.GetOperationsTelemetryRequest) (*v1.GetOperationsTelemetryResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.GetOperationsTelemetry is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) RevokeOperationsWebSession(context.Context, *connect.Request[v1.RevokeOperationsWebSessionRequest]) (*connect.Response[v1.RevokeOperationsWebSessionResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.RevokeOperationsWebSession is not implemented"))
+func (UnimplementedUIServiceHandler) RevokeOperationsWebSession(context.Context, *v1.RevokeOperationsWebSessionRequest) (*v1.RevokeOperationsWebSessionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.RevokeOperationsWebSession is not implemented")
 }
 
-func (UnimplementedUIServiceHandler) RevokeOperationsOAuthGrant(context.Context, *connect.Request[v1.RevokeOperationsOAuthGrantRequest]) (*connect.Response[v1.RevokeOperationsOAuthGrantResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("starlogz.v1.UIService.RevokeOperationsOAuthGrant is not implemented"))
+func (UnimplementedUIServiceHandler) RevokeOperationsOAuthGrant(context.Context, *v1.RevokeOperationsOAuthGrantRequest) (*v1.RevokeOperationsOAuthGrantResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "starlogz.v1.UIService.RevokeOperationsOAuthGrant is not implemented")
+}
+
+type uIServiceClient struct {
+	client *connect.Client
+}
+
+func (c *uIServiceClient) GetSession(ctx context.Context, req *v1.GetSessionRequest) (*v1.GetSessionResponse, error) {
+	var res v1.GetSessionResponse
+	if err := c.client.CallUnary(ctx, uIServiceGetSessionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) ListProjects(ctx context.Context, req *v1.ListProjectsRequest) (*v1.ListProjectsResponse, error) {
+	var res v1.ListProjectsResponse
+	if err := c.client.CallUnary(ctx, uIServiceListProjectsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) GetProjectDashboard(ctx context.Context, req *v1.GetProjectDashboardRequest) (*v1.GetProjectDashboardResponse, error) {
+	var res v1.GetProjectDashboardResponse
+	if err := c.client.CallUnary(ctx, uIServiceGetProjectDashboardSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) ListInsights(ctx context.Context, req *v1.ListInsightsRequest) (*v1.ListInsightsResponse, error) {
+	var res v1.ListInsightsResponse
+	if err := c.client.CallUnary(ctx, uIServiceListInsightsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) SearchInsights(ctx context.Context, req *v1.SearchInsightsRequest) (*v1.SearchInsightsResponse, error) {
+	var res v1.SearchInsightsResponse
+	if err := c.client.CallUnary(ctx, uIServiceSearchInsightsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) GetInsight(ctx context.Context, req *v1.GetInsightRequest) (*v1.GetInsightResponse, error) {
+	var res v1.GetInsightResponse
+	if err := c.client.CallUnary(ctx, uIServiceGetInsightSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) ListInsightHistory(ctx context.Context, req *v1.ListInsightHistoryRequest) (*v1.ListInsightHistoryResponse, error) {
+	var res v1.ListInsightHistoryResponse
+	if err := c.client.CallUnary(ctx, uIServiceListInsightHistorySpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) ListTags(ctx context.Context, req *v1.ListTagsRequest) (*v1.ListTagsResponse, error) {
+	var res v1.ListTagsResponse
+	if err := c.client.CallUnary(ctx, uIServiceListTagsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) GetOperationsOverview(ctx context.Context, req *v1.GetOperationsOverviewRequest) (*v1.GetOperationsOverviewResponse, error) {
+	var res v1.GetOperationsOverviewResponse
+	if err := c.client.CallUnary(ctx, uIServiceGetOperationsOverviewSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) GetOperationsTelemetry(ctx context.Context, req *v1.GetOperationsTelemetryRequest) (*v1.GetOperationsTelemetryResponse, error) {
+	var res v1.GetOperationsTelemetryResponse
+	if err := c.client.CallUnary(ctx, uIServiceGetOperationsTelemetrySpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) RevokeOperationsWebSession(ctx context.Context, req *v1.RevokeOperationsWebSessionRequest) (*v1.RevokeOperationsWebSessionResponse, error) {
+	var res v1.RevokeOperationsWebSessionResponse
+	if err := c.client.CallUnary(ctx, uIServiceRevokeOperationsWebSessionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *uIServiceClient) RevokeOperationsOAuthGrant(ctx context.Context, req *v1.RevokeOperationsOAuthGrantRequest) (*v1.RevokeOperationsOAuthGrantResponse, error) {
+	var res v1.RevokeOperationsOAuthGrantResponse
+	if err := c.client.CallUnary(ctx, uIServiceRevokeOperationsOAuthGrantSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+type uIServiceHandler struct{ svc UIServiceHandler }
+
+func (h uIServiceHandler) getSession(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetSessionRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetSession(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) listProjects(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListProjectsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListProjects(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) getProjectDashboard(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetProjectDashboardRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetProjectDashboard(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) listInsights(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListInsightsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListInsights(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) searchInsights(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.SearchInsightsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SearchInsights(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) getInsight(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetInsightRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetInsight(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) listInsightHistory(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListInsightHistoryRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListInsightHistory(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) listTags(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListTagsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListTags(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) getOperationsOverview(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetOperationsOverviewRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetOperationsOverview(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) getOperationsTelemetry(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetOperationsTelemetryRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetOperationsTelemetry(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) revokeOperationsWebSession(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.RevokeOperationsWebSessionRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RevokeOperationsWebSession(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h uIServiceHandler) revokeOperationsOAuthGrant(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.RevokeOperationsOAuthGrantRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RevokeOperationsOAuthGrant(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
 }

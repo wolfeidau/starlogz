@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"time"
 
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -136,13 +138,15 @@ func New(cfg Config) (*Server, error) {
 	if cfg.RetiredRefreshTokenRetention != nil {
 		retiredRefreshTokenRetention = *cfg.RetiredRefreshTokenRetention
 	}
-	uiPath, uiHandler := starlogzv1connect.NewUIServiceHandler(
-		newUIService(
-			cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs), cfg.OperationsTelemetry,
-			eventEmitter, retiredRefreshTokenRetention,
-		),
-	)
-	mux.Handle(uiPath, srv.uiAuthMiddleware(uiHandler))
+	uiServer := connect.NewServer(uiErrorLogInterceptor())
+	starlogzv1connect.RegisterUIServiceHandler(uiServer, newUIService(
+		cfg.Store, newOperatorAuthorizer(cfg.OperatorGitHubIDs), cfg.OperationsTelemetry,
+		eventEmitter, retiredRefreshTokenRetention,
+	))
+	// Separate mux keeps the session middleware scoped to UI RPC routes only.
+	uiMux := http.NewServeMux()
+	connecthttp.Mount(uiMux, uiServer)
+	mux.Handle("/"+starlogzv1connect.UIServiceName+"/", srv.uiAuthMiddleware(uiMux))
 	mux.Handle("/public/", publicHandler())
 	mux.HandleFunc("/{$}", srv.redirectIfSession(pageHandler("starlogz")).ServeHTTP)
 	mux.HandleFunc("/dashboard", pageHandler("starlogz dashboard"))
