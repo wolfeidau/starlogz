@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Local testing/validation only: exercises the adapter paths against `infra/sam/run`.
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+BASE=${BASE:-http://127.0.0.1:3000}
+fail=0
+
+check() {
+  local name=$1 want=$2 got=$3
+  if [[ "${got}" == *"${want}"* ]]; then
+    echo "ok    ${name}"
+  else
+    echo "FAIL  ${name}: want '${want}', got '${got}'"
+    fail=1
+  fi
+}
+
+check "health" '"status":"healthy"' "$(curl -s "${BASE}/health")"
+
+check "oauth metadata" '"issuer"' "$(curl -s "${BASE}/.well-known/oauth-authorization-server")"
+
+script=$(jq -r .script internal/server/public/manifest.json)
+asset_status=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "${BASE}/public/${script}")
+check "dashboard asset" "200 text/javascript" "${asset_status}"
+
+font=$(cd internal/server/public && ls fonts/*.woff2 | head -1)
+want_sum=$(shasum -a 256 "internal/server/public/${font}" | cut -d' ' -f1)
+got_sum=$(curl -s "${BASE}/public/${font}" | shasum -a 256 | cut -d' ' -f1)
+check "binary font round-trips" "${want_sum}" "${got_sum}"
+
+mcp_status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/mcp" \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}')
+check "mcp requires bearer token" "401" "${mcp_status}"
+
+check "mcp resource metadata header" "resource_metadata" \
+  "$(curl -s -D - -o /dev/null -X POST "${BASE}/mcp" -H 'content-type: application/json' -d '{}' | tr -d '\r')"
+
+cookies=$(curl -s -D - -o /dev/null "${BASE}/login" | tr -d '\r' | grep -ci '^set-cookie:' || true)
+check "login sets state and verifier cookies" "2" "${cookies}"
+
+exit "${fail}"
