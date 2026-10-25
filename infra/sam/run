@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Local testing/validation only: builds the Lambda package and serves it with `sam local start-api`.
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+SAM_DIR=infra/sam
+BUILD_DIR="${SAM_DIR}/.build"
+PORT=${PORT:-3000}
+
+for v in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET TOKEN_ENCRYPTION_KEY DATABASE_URL; do
+  if [[ -z "${!v:-}" ]]; then
+    echo "error: ${v} is not set (load .envrc first)"
+    exit 1
+  fi
+done
+if [[ ! -f key.jwk ]]; then
+  go run ./cmd/starlogz-server keygen --output key.jwk
+fi
+
+case "$(uname -m)" in
+  arm64 | aarch64) ARCH=arm64 GOARCH=arm64 ;;
+  *) ARCH=x86_64 GOARCH=amd64 ;;
+esac
+
+echo "==> building (${ARCH})"
+bun run build
+rm -rf "${BUILD_DIR}"
+mkdir -p "${BUILD_DIR}"
+CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build -o "${BUILD_DIR}/starlogz-server" ./cmd/starlogz-server
+cp infra/lambda/bootstrap "${BUILD_DIR}/bootstrap"
+
+# The function runs in Docker, so loopback database hosts must point at the Docker host.
+DB_URL=${DATABASE_URL//localhost/host.docker.internal}
+DB_URL=${DB_URL//127.0.0.1/host.docker.internal}
+
+jq -n \
+  --arg server_url "http://127.0.0.1:${PORT}" \
+  --arg db "${DB_URL}" \
+  --arg jwk "$(cat key.jwk)" \
+  --arg gh_id "${GITHUB_CLIENT_ID}" \
+  --arg gh_secret "${GITHUB_CLIENT_SECRET}" \
+  --arg enc "${TOKEN_ENCRYPTION_KEY}" \
+  --arg ops "${OPERATOR_GITHUB_IDS:-}" \
+  '{Starlogz: {SERVER_URL: $server_url, DATABASE_URL: $db, JWK_CONTENT: $jwk,
+    GITHUB_CLIENT_ID: $gh_id, GITHUB_CLIENT_SECRET: $gh_secret, TOKEN_ENCRYPTION_KEY: $enc,
+    OPERATOR_GITHUB_IDS: $ops, CIMD_ENABLED: "true", LOG_LEVEL: "DEBUG"}}' \
+  > "${BUILD_DIR}/env.json"
+
+echo "==> serving on http://127.0.0.1:${PORT}"
+exec sam local start-api \
+  --template "${SAM_DIR}/template.yaml" \
+  --parameter-overrides "Arch=${ARCH}" \
+  --env-vars "${BUILD_DIR}/env.json" \
+  --port "${PORT}" \
+  --warm-containers EAGER

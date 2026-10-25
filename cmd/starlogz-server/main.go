@@ -26,6 +26,7 @@ var (
 	version = "devel"
 	cli     struct {
 		HTTP        commands.HTTPCmd    `cmd:"" help:"http mcp server using streamable HTTP transport."`
+		Lambda      commands.LambdaCmd  `cmd:"" help:"serve API Gateway HTTP API events from the Lambda runtime."`
 		Migrate     commands.MigrateCmd `cmd:"" help:"run database migrations and exit."`
 		Keygen      commands.KeyGenCmd  `cmd:"" help:"generate json web key to sign auth tokens."`
 		Development bool

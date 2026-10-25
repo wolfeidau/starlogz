@@ -17,8 +17,9 @@ Read `spec/auth.md` before changing the OAuth2 flow or adding related endpoints.
 
 ```
 cmd/starlogz-server/              binary entry point, signal handling, logger init
-internal/commands/                kong command structs (HTTPCmd, KeyGenCmd)
+internal/commands/                kong command structs (HTTPCmd, LambdaCmd, KeyGenCmd)
 internal/middleware/              HTTP middleware (access log, CORS)
+internal/lambdahttp/              API Gateway HTTP API (payload v2) event ↔ net/http adapter for the Lambda runtime
 internal/oidc/                    OAuth2/OIDC server — JWKS, discovery, DCR, JWT verify, logout
 internal/server/                  HTTP mux, MCP tool handlers, health endpoint
 internal/server/public/           generated dashboard assets embedded in the server binary
@@ -129,7 +130,7 @@ bin/psql
 
 Docker must be running for store integration tests.
 
-Deploy Lambda changes with `mise exec -- bin/deploy`; Terraform consumes the artifact uploaded by that script and does not build or upload application code itself.
+Deploy Lambda changes with `mise exec -- bin/deploy`; Terraform consumes the artifact uploaded by that script and does not build or upload application code itself. Lambda runs `starlogz-server lambda` (native runtime API, no web adapter layer); use `http` for local and self-hosted listeners.
 
 Generated protobuf clients under `api/gen/proto/` are checked in as exact
 generator output. Do not format or lint them. After changing a proto or generator

@@ -81,11 +81,6 @@ variable "operator_github_ids" {
   }
 }
 
-variable "lambda_web_adapter_layer_arn" {
-  description = "ARN of the AWS Lambda Web Adapter layer for the target region and architecture. See https://github.com/awslabs/aws-lambda-web-adapter#lwa-arn"
-  type        = string
-}
-
 variable "alarm_email_endpoints" {
   description = "Email addresses subscribed to operational alarm notifications. Recipients must confirm their subscriptions."
   type        = set(string)
