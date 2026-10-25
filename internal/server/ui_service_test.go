@@ -28,7 +28,9 @@ func TestToProtoInsightIncludesRevision(t *testing.T) {
 type operationsServiceStore struct {
 	store.Store
 	user        *store.User
+	userErr     error
 	org         *store.Org
+	orgErr      error
 	overview    *store.OperationsOverview
 	overviewErr error
 	called      bool
@@ -50,11 +52,11 @@ func (p *operationsTelemetryProvider) Get(context.Context) (*operations.Snapshot
 }
 
 func (s *operationsServiceStore) GetUserByID(context.Context, uuid.UUID) (*store.User, error) {
-	return s.user, nil
+	return s.user, s.userErr
 }
 
 func (s *operationsServiceStore) GetPersonalOrgByUserID(context.Context, uuid.UUID) (*store.Org, error) {
-	return s.org, nil
+	return s.org, s.orgErr
 }
 
 func (s *operationsServiceStore) GetOperationsOverview(context.Context, int) (*store.OperationsOverview, error) {
@@ -215,4 +217,40 @@ func TestUIServiceStoreFailureIsInternalWithoutLeak(t *testing.T) {
 	require.NotContains(t, connectErr.Message(), storeErr.Error())
 	require.NotContains(t, connectErr.Error(), storeErr.Error())
 	require.ErrorIs(t, err, storeErr)
+}
+
+func TestUIServiceResolveErrorCodes(t *testing.T) {
+	storeErr := errors.New("pq: connection refused")
+	tests := []struct {
+		name    string
+		userErr error
+		orgErr  error
+		code    connect.Code
+		cause   error
+	}{
+		{name: "missing user", userErr: store.ErrNotFound, code: connect.CodeUnauthenticated, cause: store.ErrNotFound},
+		{name: "missing org", orgErr: store.ErrNotFound, code: connect.CodeUnauthenticated, cause: store.ErrNotFound},
+		{name: "user lookup failure", userErr: storeErr, code: connect.CodeInternal, cause: storeErr},
+		{name: "org lookup failure", orgErr: storeErr, code: connect.CodeInternal, cause: storeErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userID := uuid.New()
+			st := &operationsServiceStore{
+				user:    &store.User{ID: userID},
+				userErr: tt.userErr,
+				org:     &store.Org{ID: uuid.New()},
+				orgErr:  tt.orgErr,
+			}
+			ctx := contextWithWebSession(t.Context(), &store.WebSession{ID: uuid.New(), UserID: userID})
+			service := newUIService(st, newOperatorAuthorizer(nil), nil, nil, time.Hour)
+
+			_, err := service.GetSession(ctx, &starlogzv1.GetSessionRequest{})
+			require.Equal(t, tt.code, connect.CodeOf(err))
+			require.ErrorIs(t, err, tt.cause)
+			var connectErr *connect.Error
+			require.ErrorAs(t, err, &connectErr)
+			require.NotContains(t, connectErr.Message(), storeErr.Error())
+		})
+	}
 }

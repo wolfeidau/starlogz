@@ -467,13 +467,21 @@ func (s *uiService) resolve(ctx context.Context) (*store.WebSession, *store.User
 	}
 	user, err := s.store.GetUserByID(ctx, session.UserID)
 	if err != nil {
-		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, "session invalid").WithCause(fmt.Errorf("user not found: %w", err))
+		return nil, nil, nil, sessionLookupError(fmt.Errorf("get user: %w", err))
 	}
 	org, err := s.store.GetPersonalOrgByUserID(ctx, user.ID)
 	if err != nil {
-		return nil, nil, nil, connect.NewError(connect.CodeUnauthenticated, "session invalid").WithCause(fmt.Errorf("personal org not found: %w", err))
+		return nil, nil, nil, sessionLookupError(fmt.Errorf("get personal org: %w", err))
 	}
 	return session, user, org, nil
+}
+
+// Only a missing user or org invalidates the session; other store failures must surface as internal.
+func sessionLookupError(err error) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return connect.NewError(connect.CodeUnauthenticated, "session invalid").WithCause(err)
+	}
+	return connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 }
 
 func (s *uiService) projectBySlug(ctx context.Context, orgID uuid.UUID, slug string) (*store.Project, error) {
