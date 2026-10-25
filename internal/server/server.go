@@ -146,7 +146,7 @@ func New(cfg Config) (*Server, error) {
 	// Separate mux keeps the session middleware scoped to UI RPC routes only.
 	uiMux := http.NewServeMux()
 	connecthttp.Mount(uiMux, uiServer)
-	mux.Handle("/"+starlogzv1connect.UIServiceName+"/", srv.uiAuthMiddleware(uiMux))
+	mux.Handle("/"+starlogzv1connect.UIServiceName+"/", srv.uiAuthMiddleware(middleware.Route(uiMux)))
 	mux.Handle("/public/", publicHandler())
 	mux.HandleFunc("/{$}", srv.redirectIfSession(pageHandler("starlogz")).ServeHTTP)
 	mux.HandleFunc("/dashboard", pageHandler("starlogz dashboard"))

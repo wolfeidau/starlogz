@@ -102,6 +102,36 @@ func TestAccessLogRecordsRouteBehindRequestCopyingMiddleware(t *testing.T) {
 	}
 }
 
+func TestAccessLogRecordsInnermostRouteForNestedMuxes(t *testing.T) {
+	inner := http.NewServeMux()
+	inner.HandleFunc("/svc.v1.Service/Method", func(http.ResponseWriter, *http.Request) {})
+	inner.HandleFunc("/svc.v1.Service/", func(http.ResponseWriter, *http.Request) {})
+	outer := http.NewServeMux()
+	outer.Handle("/svc.v1.Service/", Route(inner))
+	outer.HandleFunc("/denied/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) })
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/svc.v1.Service/Method", want: "/svc.v1.Service/Method"},
+		{path: "/svc.v1.Service/Unknown", want: "/svc.v1.Service/"},
+		{path: "/denied/x", want: "/denied/"},
+	}
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			var output bytes.Buffer
+			handler := AccessLog(slog.New(slog.NewJSONHandler(&output, nil)))(Route(outer))
+
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, test.path, nil))
+
+			var event map[string]any
+			require.NoError(t, json.Unmarshal(output.Bytes(), &event))
+			require.Equal(t, test.want, event["route"])
+		})
+	}
+}
+
 func TestAccessLogClassifiesUserAgentWithoutLoggingRawValue(t *testing.T) {
 	var output bytes.Buffer
 	mux := http.NewServeMux()
