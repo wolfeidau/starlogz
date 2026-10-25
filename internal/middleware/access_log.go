@@ -114,11 +114,12 @@ type routeHolder struct{ pattern string }
 
 // Route records the mux-matched pattern for AccessLog. Wrap the mux directly:
 // ServeMux sets Pattern on the request it receives, which is a copy when an
-// outer middleware (e.g. Sentry) calls WithContext.
+// outer middleware (e.g. Sentry) calls WithContext. When Route wraps nested
+// muxes, the innermost matched pattern wins because it runs first.
 func Route(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r)
-		if holder, ok := r.Context().Value(routeHolderKey{}).(*routeHolder); ok {
+		if holder, ok := r.Context().Value(routeHolderKey{}).(*routeHolder); ok && holder.pattern == "" {
 			holder.pattern = r.Pattern
 		}
 	})
