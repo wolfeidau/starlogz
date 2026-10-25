@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	connectrpc.com/connect/v2 v2.0.1
 	github.com/alecthomas/kong v1.16.1
+	github.com/aws/aws-lambda-go v1.55.1
 	github.com/aws/aws-sdk-go-v2 v1.47.4
 	github.com/aws/aws-sdk-go-v2/config v1.33.9
 	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.90.0

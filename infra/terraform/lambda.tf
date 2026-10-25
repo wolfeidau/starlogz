@@ -9,24 +9,21 @@ resource "aws_lambda_function" "starlogz" {
   role          = aws_iam_role.lambda.arn
   memory_size   = var.lambda_memory_mb
   timeout       = var.lambda_timeout_sec
-  layers        = [var.lambda_web_adapter_layer_arn]
 
   environment {
     variables = {
-      PORT                         = "8088"
-      LOG_LEVEL                    = "INFO"
-      AWS_LWA_READINESS_CHECK_PATH = "/health"
-      EVENT_BUS_NAME               = aws_cloudwatch_event_bus.wide_events.name
-      OPERATIONS_LOG_GROUP_NAME    = aws_cloudwatch_log_group.wide_events.name
-      ENVIRONMENT                  = var.env
-      SERVER_URL                   = local.server_url
-      CIMD_ENABLED                 = tostring(var.cimd_enabled)
-      GITHUB_CLIENT_ID             = var.github_client_id
-      OPERATOR_GITHUB_IDS          = join(",", var.operator_github_ids)
-      MIGRATE_ON_START             = "false"
-      SSM_SECRETS_PATH             = local.ssm_secrets_path
-      SECRETS_REVISION             = var.secrets_revision
-      SENTRY_ENVIRONMENT           = var.sentry_environment
+      LOG_LEVEL                 = "INFO"
+      EVENT_BUS_NAME            = aws_cloudwatch_event_bus.wide_events.name
+      OPERATIONS_LOG_GROUP_NAME = aws_cloudwatch_log_group.wide_events.name
+      ENVIRONMENT               = var.env
+      SERVER_URL                = local.server_url
+      CIMD_ENABLED              = tostring(var.cimd_enabled)
+      GITHUB_CLIENT_ID          = var.github_client_id
+      OPERATOR_GITHUB_IDS       = join(",", var.operator_github_ids)
+      MIGRATE_ON_START          = "false"
+      SSM_SECRETS_PATH          = local.ssm_secrets_path
+      SECRETS_REVISION          = var.secrets_revision
+      SENTRY_ENVIRONMENT        = var.sentry_environment
     }
   }
 }

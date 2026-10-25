@@ -1,3 +1,3 @@
 #!/bin/bash
 set -euo pipefail
-exec /var/task/starlogz-server http
+exec /var/task/starlogz-server lambda

@@ -16,9 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/stretchr/testify/require"
+	"github.com/wolfeidau/starlogz/internal/lambdahttp"
 	"github.com/wolfeidau/starlogz/internal/oidc"
 	"github.com/wolfeidau/starlogz/internal/server"
 	"github.com/wolfeidau/starlogz/internal/store"
@@ -287,6 +289,24 @@ func TestHealth_OK(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.Equal(t, "healthy", body["status"])
 	require.NotEmpty(t, body["time"])
+}
+
+func TestHealth_ThroughLambdaAdapter(t *testing.T) {
+	ts, _ := testFixture(t)
+
+	resp, err := lambdahttp.Handler(ts.Config.Handler)(t.Context(), events.APIGatewayV2HTTPRequest{
+		RawPath: "/health",
+		Headers: map[string]string{"host": "localhost"},
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodGet, SourceIP: "203.0.113.1"},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body map[string]string
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &body))
+	require.Equal(t, "healthy", body["status"])
 }
 
 func TestSentryHandler_ConfiguredWrapsRequests(t *testing.T) {

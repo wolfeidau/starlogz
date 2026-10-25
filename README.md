@@ -162,7 +162,7 @@ When `EVENT_BUS_NAME` is configured, the server publishes one bounded, privacy-s
 
 ## Deploy to AWS
 
-The server runs as an AWS Lambda function fronted by API Gateway HTTP API, using the [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) layer. Infrastructure is managed by Terraform.
+The server runs as an AWS Lambda function fronted by API Gateway HTTP API, as a native Go Lambda (`starlogz-server lambda`) with an in-process API Gateway v2 to `net/http` adapter. Infrastructure is managed by Terraform.
 
 ### Prerequisites
 
