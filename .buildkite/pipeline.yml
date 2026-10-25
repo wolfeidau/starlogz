@@ -49,6 +49,8 @@ steps:
 
   - label: ":rocket: deploy dev"
     trigger: starlogz-deploy
+    # Async so main CI finishes while the deploy waits for approval.
+    async: true
     depends_on: quality_checks
     if: build.branch == "main" && build.pull_request.id == null
     build:

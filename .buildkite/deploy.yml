@@ -10,9 +10,15 @@ steps:
       - git fetch origin main
       - git merge-base --is-ancestor "$$BUILDKITE_COMMIT" FETCH_HEAD
 
+  - block: ":rocket: deploy to dev?"
+    key: approve
+    depends_on: verify
+    if: build.source == "trigger_job" && build.branch == "main"
+    prompt: "Deploys this commit to dev, including any pending database migrations."
+
   - label: ":rocket: deploy dev"
     key: deploy
-    depends_on: verify
+    depends_on: approve
     if: build.source == "trigger_job" && build.branch == "main"
     agents:
       queue: hosted

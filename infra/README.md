@@ -3,14 +3,18 @@
 ## How CI deploys dev
 
 A passing `main` build of the `starlogz` pipeline triggers the `starlogz-deploy`
-pipeline (`.buildkite/pipeline.yml` trigger step, pull requests excluded). The
+pipeline (`.buildkite/pipeline.yml` async trigger step, pull requests excluded). The
 deploy pipeline is defined in `.buildkite/deploy.yml` and runs one build at a
 time (`concurrency_group: starlogz-deploy-dev`):
 
 1. `verify` fetches `main` from `origin` and fails unless the triggering commit is an
    ancestor of it. The `starlogz` pipeline is public, so a pull request could
    otherwise edit `pipeline.yml` to deploy an unmerged commit.
-2. `deploy` assumes `starlogz-dev-buildkite-deploy` through Buildkite OIDC,
+2. `approve` is a block step: someone must click it in Buildkite before
+   anything deploys. The trigger is async, so the `starlogz` build finishes
+   without waiting. Approve only the newest pending deploy; approving an older
+   one after a newer one ships rolls the Lambda back.
+3. `deploy` assumes `starlogz-dev-buildkite-deploy` through Buildkite OIDC,
    writes `infra/terraform/terraform.tfvars` from the `STARLOGZ_DEV_TFVARS`
    secret, takes `DATABASE_URL` from `STARLOGZ_MIGRATE_DATABASE_URL`, and runs
    `bin/deploy dev`.
