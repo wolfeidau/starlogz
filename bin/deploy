@@ -53,6 +53,10 @@ terraform -chdir="${TF_DIR}" plan \
   -var "function_version=${VERSION}" \
   -out output.tfplan
 
+confirm "Run database migrations (env=${ENV})"
+echo "==> migrating"
+SSM_SECRETS_PATH="${SSM_SECRETS_PATH:-/config/${ENV}/main/starlogz}" go run ./cmd/starlogz-server migrate
+
 confirm "Apply the plan?"
 echo "==> applying"
 terraform -chdir="${TF_DIR}" apply "output.tfplan"

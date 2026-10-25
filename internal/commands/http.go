@@ -39,6 +39,7 @@ type HTTPCmd struct {
 	OperatorGitHubIDs            []int64       `help:"GitHub numeric IDs allowed to access service operations." env:"OPERATOR_GITHUB_IDS" sep:","`
 	EventBusName                 string        `help:"EventBridge bus for privacy-safe wide events; empty disables publishing." env:"EVENT_BUS_NAME"`
 	OperationsLogGroupName       string        `help:"CloudWatch log group queried for operator telemetry; empty disables telemetry." env:"OPERATIONS_LOG_GROUP_NAME"`
+	Migrate                      bool          `help:"Run database migrations on start; when disabled, verify the schema is current instead." default:"true" negatable:"" env:"MIGRATE_ON_START"`
 	Environment                  string        `help:"Deployment environment included in wide events." default:"local" env:"ENVIRONMENT"`
 }
 
@@ -79,9 +80,13 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 	defer st.Close()
 
-	err = st.Migrate(ctx, globals.Logger)
-	if err != nil {
-		return fmt.Errorf("failed to migrate database: %w", err)
+	if c.Migrate {
+		err = st.Migrate(ctx, globals.Logger)
+		if err != nil {
+			return fmt.Errorf("failed to migrate database: %w", err)
+		}
+	} else if err = st.CheckSchema(ctx, globals.Logger); err != nil {
+		return fmt.Errorf("failed to check database schema: %w", err)
 	}
 
 	var awsCfg aws.Config

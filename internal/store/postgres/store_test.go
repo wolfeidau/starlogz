@@ -102,6 +102,24 @@ func TestPing(t *testing.T) {
 	require.NoError(t, st.Ping(t.Context()))
 }
 
+func TestCheckSchemaCurrent(t *testing.T) {
+	st := newTestStore(t)
+	require.NoError(t, st.CheckSchema(t.Context(), slog.Default()))
+}
+
+func TestCheckSchemaBehind(t *testing.T) {
+	st, dsn := newTestStoreAndDSN(t)
+	ctx := t.Context()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)`)
+	require.NoError(t, err)
+
+	require.ErrorContains(t, st.CheckSchema(ctx, slog.Default()), "run starlogz-server migrate")
+}
+
 func TestMigrateRepairsInvalidConcurrentIndex(t *testing.T) {
 	st, dsn := newTestStoreAndDSN(t)
 	ctx := t.Context()
