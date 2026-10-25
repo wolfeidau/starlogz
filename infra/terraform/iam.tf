@@ -44,6 +44,19 @@ resource "aws_iam_role_policy" "lambda_wide_events" {
   policy = data.aws_iam_policy_document.lambda_wide_events.json
 }
 
+data "aws_iam_policy_document" "lambda_ssm_secrets" {
+  statement {
+    actions   = ["ssm:GetParametersByPath"]
+    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_secrets_path}"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_ssm_secrets" {
+  name   = "ssm-secrets"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.lambda_ssm_secrets.json
+}
+
 data "aws_iam_policy_document" "lambda_operations_telemetry" {
   statement {
     actions   = ["logs:StartQuery", "logs:GetQueryResults"]
