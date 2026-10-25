@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Backend blocks cannot read data sources, so resolve the CloudFormation-owned bucket here.
+BUCKET_PARAM=${TF_STATE_BUCKET_PARAM:-/config/dev/master/terraform_bucket}
+
+BUCKET=$(aws ssm get-parameter --region us-west-2 --name "${BUCKET_PARAM}" \
+  --query Parameter.Value --output text)
+
+terraform -chdir=infra/terraform init -backend-config="bucket=${BUCKET}" "$@"

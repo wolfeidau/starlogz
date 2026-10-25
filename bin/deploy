@@ -45,6 +45,8 @@ echo "==> uploading"
 aws s3 cp dist/function.zip "s3://${BUCKET}/${S3_KEY}"
 
 confirm "Run terraform plan (env=${ENV}, version=${VERSION})"
+echo "==> initialising"
+bin/tf-init -input=false
 echo "==> planning"
 terraform -chdir="${TF_DIR}" plan \
   -var "function_s3_key=${S3_KEY}" \
