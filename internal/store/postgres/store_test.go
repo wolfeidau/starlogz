@@ -3677,3 +3677,41 @@ func TestDeleteGrant_NotFound(t *testing.T) {
 	err := st.DeleteGrant(t.Context(), "no-such-jti", nil)
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestGetGrantByRefreshToken_KeyRotation(t *testing.T) {
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
+	ctx := t.Context()
+
+	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 201, Email: "rotateuser@example.com", Login: "rotateuser"})
+	require.NoError(t, err)
+
+	now := databaseNow(t, dsn).UTC()
+	require.NoError(t, st.UpsertGrant(ctx, store.Grant{
+		JTI:                "rotation-jti",
+		UserID:             u.ID,
+		OurRefreshToken:    "rotation-refresh-token",
+		ClientID:           "client-A",
+		AccessToken:        "gh-access",
+		RefreshToken:       "gh-refresh",
+		AccessTokenExpiry:  now.Add(time.Hour),
+		RefreshTokenExpiry: now.Add(24 * time.Hour),
+		JWTExpiry:          now.Add(15 * time.Minute),
+	}))
+
+	var otherKey [32]byte
+	copy(otherKey[:], "rotated-encryption-key-012345678")
+
+	stB, err := postgres.New(ctx, dsn, store.NewEncryptor(otherKey, nil))
+	require.NoError(t, err)
+	t.Cleanup(stB.Close)
+	_, err = stB.GetGrantByRefreshToken(ctx, "rotation-refresh-token")
+	require.ErrorIs(t, err, store.ErrDecryptionFailed)
+
+	stC, err := postgres.New(ctx, dsn, store.NewEncryptor(otherKey, &testEncKey))
+	require.NoError(t, err)
+	t.Cleanup(stC.Close)
+	got, err := stC.GetGrantByRefreshToken(ctx, "rotation-refresh-token")
+	require.NoError(t, err)
+	require.Equal(t, "gh-access", got.AccessToken)
+	require.Equal(t, "gh-refresh", got.RefreshToken)
+}

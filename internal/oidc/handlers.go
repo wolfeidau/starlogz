@@ -355,6 +355,15 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 		s.handleRetiredRefreshGrant(ctx, w, refreshToken, clientID)
 		return
 	}
+	if errors.Is(err, storepkg.ErrDecryptionFailed) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "grant_undecryptable")
+		log.WarnContext(ctx, "refresh grant undecryptable; reauthorization required",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "grant_undecryptable"),
+		)
+		writeOAuthError(w, "invalid_grant", "grant requires reauthorization", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "server_error")
 		log.ErrorContext(ctx, "lookup grant by refresh token failed", slog.Any("error", err), slog.String("outcome", "failure"), slog.String("reason", "server_error"))
@@ -598,6 +607,15 @@ func (s *Server) handleRetiredRefreshGrant(ctx context.Context, w http.ResponseW
 		telemetry.RecordRefreshTokenGrant(ctx, "failure", "recently_removed")
 		log.WarnContext(ctx, "replacement grant not found for grace retry", slog.String("outcome", "failure"), slog.String("reason", "recently_removed"))
 		writeOAuthError(w, "invalid_grant", "refresh token already used", http.StatusBadRequest)
+		return
+	}
+	if errors.Is(err, storepkg.ErrDecryptionFailed) {
+		telemetry.RecordRefreshTokenGrant(ctx, "failure", "grant_undecryptable")
+		log.WarnContext(ctx, "refresh grant undecryptable; reauthorization required",
+			slog.String("outcome", "failure"),
+			slog.String("reason", "grant_undecryptable"),
+		)
+		writeOAuthError(w, "invalid_grant", "grant requires reauthorization", http.StatusBadRequest)
 		return
 	}
 	if err != nil {

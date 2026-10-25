@@ -1884,6 +1884,68 @@ func TestTokenHandler_RefreshGrant_UnknownToken(t *testing.T) {
 	require.Equal(t, "invalid_grant", errResp["error"])
 }
 
+func postRefreshGrant(t *testing.T, srv *Server, token string) (*httptest.ResponseRecorder, map[string]string) {
+	t.Helper()
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {token},
+		"client_id":     {"test-client"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.TokenHandler().ServeHTTP(w, req)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	return w, errResp
+}
+
+func TestTokenHandler_RefreshGrant_UndecryptableGrant(t *testing.T) {
+	gs := &testGrantStore{getErr: fmt.Errorf("decrypt access token: %w", store.ErrDecryptionFailed)}
+	gh := &mockGitHubConnector{}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	w, errResp := postRefreshGrant(t, srv, "some-refresh-token")
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Equal(t, "invalid_grant", errResp["error"])
+	require.Empty(t, gh.refreshCalls)
+	require.Empty(t, gs.rotateCalls)
+	require.Empty(t, gs.deleteCalls)
+}
+
+func TestTokenHandler_RefreshGrant_GraceRetryUndecryptableReplacement(t *testing.T) {
+	gs := &testGrantStore{getByJTIErr: fmt.Errorf("decrypt access token: %w", store.ErrDecryptionFailed)}
+	gh := &mockGitHubConnector{}
+	srv := newRefreshTestServer(t, gs, gh)
+
+	gs.retired = append(gs.retired, store.RetiredRefreshToken{
+		TokenHash:      store.HashRefreshToken("old-refresh-token"),
+		Reason:         store.RetiredRefreshTokenReasonRotated,
+		ReplacementJTI: uuid.New().String(),
+		GraceExpiresAt: time.Now().Add(DefaultRefreshTokenGracePeriod),
+		RetainedUntil:  time.Now().Add(24 * time.Hour),
+	})
+
+	w, errResp := postRefreshGrant(t, srv, "old-refresh-token")
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Equal(t, "invalid_grant", errResp["error"])
+	require.Empty(t, gh.refreshCalls)
+	require.Empty(t, gs.rotateCalls)
+	require.Empty(t, gs.deleteCalls)
+}
+
+func TestTokenHandler_RefreshGrant_LookupErrorIsServerError(t *testing.T) {
+	gs := &testGrantStore{getErr: errors.New("connection reset")}
+	srv := newRefreshTestServer(t, gs, &mockGitHubConnector{})
+
+	w, errResp := postRefreshGrant(t, srv, "some-refresh-token")
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.Equal(t, "server_error", errResp["error"])
+}
+
 func TestTokenHandler_RefreshGrant_GraceRetry(t *testing.T) {
 	gs := &testGrantStore{}
 	gh := &mockGitHubConnector{}
@@ -3024,6 +3086,9 @@ type testGrantStore struct {
 	deleteCalls []string
 	retired     []store.RetiredRefreshToken
 	rotateErr   error
+	// getErr fails both lookups; getByJTIErr fails only GetGrant.
+	getErr      error
+	getByJTIErr error
 	// revocation, when set, receives the old jti atomically with the rotation —
 	// mirrors the postgres tx-based rotate+revoke.
 	revocation RevocationStore
@@ -3062,6 +3127,9 @@ func (s *testGrantStore) UpsertGrant(_ context.Context, g store.Grant) error {
 func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, token string) (*store.Grant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	g, ok := s.byRefresh[token]
 	if !ok {
 		return nil, store.ErrNotFound
@@ -3072,6 +3140,12 @@ func (s *testGrantStore) GetGrantByRefreshToken(_ context.Context, token string)
 func (s *testGrantStore) GetGrant(_ context.Context, jti string) (*store.Grant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getByJTIErr != nil {
+		return nil, s.getByJTIErr
+	}
 	for _, g := range s.byRefresh {
 		if g.JTI == jti {
 			return &g, nil
