@@ -1,5 +1,6 @@
 terraform {
-  required_version = ">= 1.5.7"
+  # use_lockfile (S3-native state locking) requires 1.10.
+  required_version = ">= 1.10.0"
 
   required_providers {
     aws = {
@@ -8,13 +9,13 @@ terraform {
     }
   }
 
-  # backend "s3" {
-  #   bucket         = "your-tfstate-bucket"
-  #   key            = "starlogz/${var.env}/terraform.tfstate"
-  #   region         = "ap-southeast-2"
-  #   dynamodb_table = "terraform-locks"
-  #   encrypt        = true
-  # }
+  # bucket is supplied by bin/tf-init from SSM.
+  backend "s3" {
+    key          = "dev/main/starlogz.tfstate"
+    region       = "us-west-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {

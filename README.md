@@ -165,15 +165,23 @@ The server runs as an AWS Lambda function fronted by API Gateway HTTP API, using
 
 - [goreleaser](https://goreleaser.com) — builds the Lambda binary
 - AWS CLI — authenticated to the target account
-- Terraform >= 1.5.7
+- Terraform >= 1.10
 - A [PlanetScale Postgres database cluster](https://planetscale.com/postgres)
 - `infra/terraform/terraform.tfvars` populated with all required variables (see `variables.tf`; sensitive values go here and are gitignored)
+- An existing S3 bucket for Terraform state, with its name stored in an SSM parameter
+
+### Terraform state
+
+State is stored in S3 with S3-native locking (`use_lockfile`). The bucket is not managed by this configuration. Initialise with `bin/tf-init` instead of `terraform init`. It reads the bucket name from the SSM parameter `/config/dev/master/terraform_bucket` (override with `TF_STATE_BUCKET_PARAM`) and passes it as `-backend-config`. Extra arguments are forwarded to `terraform init`. `bin/deploy` runs it before every plan.
 
 ### First deploy
 
 The deployment S3 bucket is created by Terraform, so bootstrap in two steps:
 
 ```bash
+# 0. Initialise the state backend
+./bin/tf-init
+
 # 1. Create the S3 bucket only
 terraform -chdir=infra/terraform apply -target=aws_s3_bucket.deploy
 
