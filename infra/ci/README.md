@@ -12,11 +12,12 @@ root's state. Only an admin applies this root.
 
 The repository is public, so identifiers stay out of it. Create the gitignored
 `infra/ci/terraform.tfvars` with the Buildkite organization and `starlogz-deploy`
-pipeline UUIDs (Buildkite API or pipeline settings):
+pipeline UUIDs and the organization slug (Buildkite API or pipeline settings):
 
 ```hcl
-buildkite_organization_id = "<org uuid>"
-buildkite_pipeline_id     = "<starlogz-deploy pipeline uuid>"
+buildkite_organization_id   = "<org uuid>"
+buildkite_organization_slug = "<org slug>"
+buildkite_pipeline_id       = "<starlogz-deploy pipeline uuid>"
 ```
 
 ```bash
