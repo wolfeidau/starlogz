@@ -152,6 +152,9 @@ All configuration is via environment variables.
 | `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
 | `SENTRY_ENVIRONMENT` | (none) | No | Sentry environment tag, e.g. `production`, `staging`. |
 | `CIMD_ENABLED` | `false` locally; `true` in Terraform deploys | No | Enables OAuth Client ID Metadata Document support. Set to `false` to disable CIMD quickly without code rollback. |
+| `SSM_SECRETS_PATH` | (none) | No | SSM Parameter Store path whose parameters are loaded into environment variables at startup (parameter basename upper-cased). Existing environment variables win. Omit to disable. |
+| `JWK_CONTENT` | (none) | One of `--jwk-path` or `JWK_CONTENT` | JSON web key content used to sign auth tokens; alternative to `--jwk-path`. |
+| `TOKEN_ENCRYPTION_KEY_PREVIOUS` | (none) | No | Previous base64-encoded 32-byte token encryption key, used only for decryption during key rotation. |
 
 ## Observability events
 

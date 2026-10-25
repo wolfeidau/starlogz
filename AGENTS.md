@@ -149,6 +149,9 @@ Key env vars:
 | `GITHUB_CLIENT_SECRET` | _(required)_ | GitHub App client secret |
 | `DATABASE_URL` | _(required)_ | PostgreSQL connection string (pgx DSN) |
 | `TOKEN_ENCRYPTION_KEY` | _(required)_ | Base64-encoded 32-byte key for encrypting stored GitHub tokens (`openssl rand -base64 32`) |
+| `TOKEN_ENCRYPTION_KEY_PREVIOUS` | _(optional)_ | Previous encryption key; decrypt-only fallback during key rotation |
+| `JWK_CONTENT` | _(unset)_ | JSON web key content; alternative to `--jwk-path` (exactly one required) |
+| `SSM_SECRETS_PATH` | _(unset = disabled)_ | SSM path whose parameters are loaded into env vars at startup (basename upper-cased); existing env vars win |
 | `REFRESH_TOKEN_GRACE_PERIOD` | `30s` | How long a rotated refresh token remains accepted for retry; `0s` to disable |
 | `RETIRED_REFRESH_TOKEN_RETENTION` | `24h` | How long hashed retired refresh tokens are retained for refresh diagnostics |
 | `UI_SESSION_IDLE_TTL` | `168h` | How long an inactive dashboard session remains valid |

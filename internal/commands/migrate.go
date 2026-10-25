@@ -13,7 +13,7 @@ type MigrateCmd struct {
 }
 
 func (c *MigrateCmd) Run(ctx context.Context, globals *Globals) error {
-	st, err := postgres.New(ctx, c.DatabaseURL, store.NewEncryptor([32]byte{}))
+	st, err := postgres.New(ctx, c.DatabaseURL, store.NewEncryptor([32]byte{}, nil))
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
