@@ -28,6 +28,8 @@ steps:
       DATABASE_URL: STARLOGZ_MIGRATE_DATABASE_URL
       STARLOGZ_DEV_TFVARS: STARLOGZ_DEV_TFVARS
     commands:
+      # The mise plugin may rewrite mise.lock depending on its version; deploy the committed tree.
+      - git checkout -- mise.lock
       - umask 077
       - printf '%s\n' "$$STARLOGZ_DEV_TFVARS" > infra/terraform/terraform.tfvars
       - unset STARLOGZ_DEV_TFVARS
