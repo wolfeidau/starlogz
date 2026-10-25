@@ -66,6 +66,28 @@ func (s *Store) Migrate(ctx context.Context, logger *slog.Logger) error {
 	return RunMigrations(ctx, s.pool, logger)
 }
 
+// CheckSchema verifies the database has every embedded migration applied without running any.
+func (s *Store) CheckSchema(ctx context.Context, logger *slog.Logger) error {
+	want, err := latestMigrationVersion(ctx, logger)
+	if err != nil {
+		return err
+	}
+
+	var have int
+	err = s.pool.QueryRow(ctx, `SELECT COALESCE(max(version), 0) FROM schema_migrations`).Scan(&have)
+	if err != nil {
+		// schema_migrations doesn't exist yet — no migration has run
+		if !strings.Contains(err.Error(), "does not exist") {
+			return fmt.Errorf("query schema version: %w", err)
+		}
+		have = 0
+	}
+	if have < want {
+		return fmt.Errorf("database schema version %d is behind required version %d; run starlogz-server migrate", have, want)
+	}
+	return nil
+}
+
 // UpsertUser creates or updates a user from GitHub identity. On first login a personal org
 // is created and the user is added as owner. Returns the user row.
 func (s *Store) UpsertUser(ctx context.Context, profile store.GitHubProfile) (*store.User, error) {

@@ -60,9 +60,25 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger)
 		_, _ = conn.Exec(unlockCtx, "SELECT pg_advisory_unlock($1)", migrationLockKey)
 	}()
 
+	migrations, err := loadMigrations(ctx, logger)
+	if err != nil {
+		return err
+	}
+
+	for _, m := range migrations {
+		if err := runMigration(ctx, conn, logger, m); err != nil {
+			return fmt.Errorf("migration %s: %w", m.name, err)
+		}
+	}
+
+	logger.InfoContext(ctx, "migrations complete", slog.Int("count", len(migrations)))
+	return nil
+}
+
+func loadMigrations(ctx context.Context, logger *slog.Logger) ([]migration, error) {
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return nil, fmt.Errorf("read migrations dir: %w", err)
 	}
 
 	var migrations []migration
@@ -85,27 +101,31 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger)
 
 		content, err := migrationsFS.ReadFile("migrations/" + entry.Name())
 		if err != nil {
-			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}
 
 		indexName, migrationContent, err := parseMigrationContent(string(content))
 		if err != nil {
-			return fmt.Errorf("parse migration %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("parse migration %s: %w", entry.Name(), err)
 		}
 
 		migrations = append(migrations, migration{version: version, name: entry.Name(), content: migrationContent, concurrentIndex: indexName})
 	}
 
 	sort.Slice(migrations, func(i, j int) bool { return migrations[i].version < migrations[j].version })
+	return migrations, nil
+}
 
-	for _, m := range migrations {
-		if err := runMigration(ctx, conn, logger, m); err != nil {
-			return fmt.Errorf("migration %s: %w", m.name, err)
-		}
+// latestMigrationVersion returns the highest embedded migration version, or 0 if none.
+func latestMigrationVersion(ctx context.Context, logger *slog.Logger) (int, error) {
+	migrations, err := loadMigrations(ctx, logger)
+	if err != nil {
+		return 0, err
 	}
-
-	logger.InfoContext(ctx, "migrations complete", slog.Int("count", len(migrations)))
-	return nil
+	if len(migrations) == 0 {
+		return 0, nil
+	}
+	return migrations[len(migrations)-1].version, nil
 }
 
 func parseMigrationContent(content string) (indexName, migrationContent string, err error) {

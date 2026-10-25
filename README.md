@@ -247,7 +247,7 @@ terraform -chdir=infra/terraform output ui_oauth_callback_url
 ./bin/deploy prod     # deploys to a different env
 ```
 
-The script builds with goreleaser, reads the version from `dist/metadata.json`, packages the zip, and prompts for confirmation before each of the three destructive steps: S3 upload, terraform plan, and terraform apply. `function_s3_key` and `function_version` are passed as `-var` flags so `terraform.tfvars` does not need to be edited between deploys.
+The script builds with goreleaser, reads the version from `dist/metadata.json`, packages the zip, and prompts for confirmation before each of the four destructive steps: S3 upload, terraform plan, database migration, and terraform apply. `function_s3_key` and `function_version` are passed as `-var` flags so `terraform.tfvars` does not need to be edited between deploys.
 
 Terraform now deploys with `cimd_enabled = true` by default. To disable it for a rollback or incident response, apply with `-var 'cimd_enabled=false'` or set that value in `terraform.tfvars`.
 
@@ -294,7 +294,7 @@ See [`spec/auth.md`](spec/auth.md) for the full flow.
 
 ## Database
 
-PostgreSQL is the only backing store. The schema is applied automatically at startup via an embedded migration runner.
+PostgreSQL is the only backing store. The schema is applied by an embedded migration runner: local `http` applies it at startup, while AWS deploys apply it from `bin/deploy` before `terraform apply`. Lambda (`MIGRATE_ON_START=false`) only verifies the schema version and fails init if it is behind.
 
 ### Schema overview
 
