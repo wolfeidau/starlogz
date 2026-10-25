@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -86,6 +87,7 @@ func (f *ServerFlags) newServer(ctx context.Context, globals *Globals, shutdownT
 }
 
 func (f *ServerFlags) buildServer(ctx context.Context, globals *Globals, st *postgres.Store, privkey jwk.Key, shutdownTimeout time.Duration) (*server.Server, error) {
+	start := time.Now()
 	var err error
 	if f.Migrate {
 		err = st.Migrate(ctx, globals.Logger)
@@ -95,6 +97,7 @@ func (f *ServerFlags) buildServer(ctx context.Context, globals *Globals, st *pos
 	} else if err = st.CheckSchema(ctx, globals.Logger); err != nil {
 		return nil, fmt.Errorf("failed to check database schema: %w", err)
 	}
+	schemaDuration := time.Since(start)
 
 	var awsCfg aws.Config
 	if f.EventBusName != "" || f.OperationsLogGroupName != "" {
@@ -145,6 +148,10 @@ func (f *ServerFlags) buildServer(ctx context.Context, globals *Globals, st *pos
 	if err != nil {
 		return nil, fmt.Errorf("failed to create server: %w", err)
 	}
+	globals.Logger.InfoContext(ctx, "server initialized",
+		slog.Int64("schema_ms", schemaDuration.Milliseconds()),
+		slog.Int64("setup_ms", time.Since(start).Milliseconds()),
+	)
 	return srv, nil
 }
 

@@ -38,11 +38,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	ssmStart := time.Now()
 	if err := loadSSMSecrets(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "starlogz-server: %v\n", err)
 		stop()
 		os.Exit(1) //nolint:gocritic // stop() is called explicitly above
 	}
+	ssmDuration := time.Since(ssmStart)
 
 	cmd := kong.Parse(&cli,
 		kong.Name("starlogz-server"),
@@ -54,7 +56,7 @@ func main() {
 		kong.BindTo(ctx, (*context.Context)(nil)),
 	)
 
-	cmd.FatalIfErrorf(run(ctx, cmd, cli.Development))
+	cmd.FatalIfErrorf(run(ctx, cmd, cli.Development, ssmDuration))
 }
 
 // Must run before kong.Parse because kong env tags and Sentry init read the environment.
@@ -101,13 +103,15 @@ func newLogger(development, sentryEnabled bool) *slog.Logger {
 	return slog.New(handler)
 }
 
-func run(ctx context.Context, cmd *kong.Context, development bool) error {
+func run(ctx context.Context, cmd *kong.Context, development bool, ssmDuration time.Duration) error {
 	buildInfo, _ := debug.ReadBuildInfo()
 
+	sentryStart := time.Now()
 	sentryShutdown, sentryEnabled, err := telemetry.InitSentry(ctx, "starlogz-server", version)
 	if err != nil {
 		return err
 	}
+	sentryDuration := time.Since(sentryStart)
 
 	logger := newLogger(development, sentryEnabled)
 	slog.SetDefault(logger)
@@ -132,6 +136,7 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 		}
 	}()
 
+	telemetryStart := time.Now()
 	telShutdown, err := telemetry.InitTelemetry(ctx, "starlogz-server", version)
 	if err != nil {
 		return fmt.Errorf("failed to initialize telemetry: %w", err)
@@ -143,6 +148,11 @@ func run(ctx context.Context, cmd *kong.Context, development bool) error {
 			child.Error("telemetry shutdown error", slog.Any("error", err))
 		}
 	}()
+	child.Info("startup timings",
+		slog.Int64("ssm_ms", ssmDuration.Milliseconds()),
+		slog.Int64("sentry_ms", sentryDuration.Milliseconds()),
+		slog.Int64("telemetry_ms", time.Since(telemetryStart).Milliseconds()),
+	)
 
 	var sentryHandler func(http.Handler) http.Handler
 	if sentryEnabled {
