@@ -12,6 +12,10 @@ infra/terraform/.terraform.lock.hcl
 infra/terraform/output.tfplan
 infra/terraform/terraform.tfstate
 infra/terraform/terraform.tfstate.backup
+infra/ci/.terraform/
+infra/ci/.terraform.lock.hcl
+infra/ci/*.tfplan
+infra/ci/terraform.tfvars
 logs/
 /coverage.out
 /json.log

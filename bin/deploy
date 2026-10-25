@@ -17,8 +17,34 @@ confirm() {
   local msg=$1
   echo ""
   echo "${msg}"
+  [[ "${CI:-}" == "true" ]] && return 0
   read -rp "Continue? [y/N] " ans
   [[ "${ans}" == [yY] ]] || { echo "aborted."; exit 1; }
+}
+
+# Lists managed resources whose planned change is not a Lambda code update.
+PLAN_GUARD_JQ='
+  .resource_changes[]?
+  | select(.mode == "managed")
+  | select(
+      (.change.actions != ["no-op"])
+      and (.address != "aws_lambda_function.starlogz" or .change.actions != ["update"])
+    )
+  | "\(.address) (\(.change.actions | join(",")))"
+'
+
+check_plan() {
+  local offenders
+  offenders=$(terraform -chdir="${TF_DIR}" show -json output.tfplan | jq -r "${PLAN_GUARD_JQ}")
+  [[ -z "${offenders}" ]] && return 0
+  echo ""
+  echo "plan changes resources other than a Lambda update:"
+  while IFS= read -r line; do echo "  ${line}"; done <<<"${offenders}"
+  if [[ "${CI:-}" == "true" ]]; then
+    echo "error: refusing to apply infrastructure changes from CI; run terraform locally"
+    exit 1
+  fi
+  confirm "Plan includes the changes above."
 }
 
 # Build
@@ -48,14 +74,24 @@ confirm "Run terraform plan (env=${ENV}, version=${VERSION})"
 echo "==> initialising"
 bin/tf-init -input=false
 echo "==> planning"
-terraform -chdir="${TF_DIR}" plan \
+terraform -chdir="${TF_DIR}" plan -input=false \
   -var "function_s3_key=${S3_KEY}" \
   -var "function_version=${VERSION}" \
   -out output.tfplan
+check_plan
 
 confirm "Run database migrations (env=${ENV})"
 echo "==> migrating"
-SSM_SECRETS_PATH="${SSM_SECRETS_PATH:-/config/${ENV}/main/starlogz}" go run ./cmd/starlogz-server migrate
+if [[ -n "${DATABASE_URL:-}" ]]; then
+  # PgBouncer breaks the session advisory lock and CONCURRENTLY index builds.
+  if [[ "${DATABASE_URL}" == *:6432* ]]; then
+    echo "error: DATABASE_URL must use the direct port 5432, not PgBouncer (6432)"
+    exit 1
+  fi
+  env -u SSM_SECRETS_PATH go run ./cmd/starlogz-server migrate
+else
+  SSM_SECRETS_PATH="${SSM_SECRETS_PATH:-/config/${ENV}/main/starlogz}" go run ./cmd/starlogz-server migrate
+fi
 
 confirm "Apply the plan?"
 echo "==> applying"

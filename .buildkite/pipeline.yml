@@ -46,3 +46,12 @@ steps:
           - bun run typecheck
         plugins:
           - mise#v1.1.5: ~
+
+  - label: ":rocket: deploy dev"
+    trigger: starlogz-deploy
+    depends_on: quality_checks
+    if: build.branch == "main" && build.pull_request.id == null
+    build:
+      commit: "${BUILDKITE_COMMIT}"
+      branch: "${BUILDKITE_BRANCH}"
+      message: "${BUILDKITE_MESSAGE}"
