@@ -55,7 +55,8 @@ if ! bun run proto:check; then
   exit 1
 fi
 bun run build
-goreleaser build --clean --snapshot
+# Lambda runs linux/amd64; building every target exhausts memory on hosted agents.
+GOOS=linux GOARCH=amd64 goreleaser build --clean --snapshot --single-target
 VERSION=$(jq -r .version dist/metadata.json)
 echo "    version: ${VERSION}"
 
