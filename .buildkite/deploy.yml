@@ -1,0 +1,41 @@
+steps:
+  - label: ":shield: verify commit is on main"
+    key: verify
+    if: build.source == "trigger_job" && build.branch == "main"
+    agents:
+      queue: hosted
+    concurrency_group: starlogz-deploy-dev
+    concurrency: 1
+    commands:
+      - git fetch origin main
+      - git merge-base --is-ancestor "$$BUILDKITE_COMMIT" FETCH_HEAD
+
+  - block: ":rocket: deploy to dev?"
+    key: approve
+    depends_on: verify
+    if: build.source == "trigger_job" && build.branch == "main"
+    prompt: "Deploys this commit to dev, including any pending database migrations."
+
+  - label: ":rocket: deploy dev"
+    key: deploy
+    depends_on: approve
+    if: build.source == "trigger_job" && build.branch == "main"
+    agents:
+      queue: hosted
+    concurrency_group: starlogz-deploy-dev
+    concurrency: 1
+    secrets:
+      DATABASE_URL: STARLOGZ_MIGRATE_DATABASE_URL
+      STARLOGZ_DEV_TFVARS: STARLOGZ_DEV_TFVARS
+    commands:
+      - umask 077
+      - printf '%s\n' "$$STARLOGZ_DEV_TFVARS" > infra/terraform/terraform.tfvars
+      - unset STARLOGZ_DEV_TFVARS
+      - bin/deploy dev
+    plugins:
+      - mise#v1.1.5: ~
+      - aws-assume-role-with-web-identity#v1.8.1:
+          role-arn: "${STARLOGZ_DEPLOY_ROLE_ARN?}"
+    env:
+      AWS_REGION: us-west-2
+      AWS_DEFAULT_REGION: us-west-2

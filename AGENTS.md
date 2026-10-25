@@ -130,6 +130,8 @@ bin/psql
 
 Docker must be running for store integration tests.
 
+CI deploys dev from the `starlogz-deploy` Buildkite pipeline, triggered by `main` builds; see `infra/README.md`. `bin/deploy` is non-interactive under `CI=true` and refuses plans that touch anything but the Lambda function.
+
 Deploy Lambda changes with `mise exec -- bin/deploy`; Terraform consumes the artifact uploaded by that script and does not build or upload application code itself. Lambda runs `starlogz-server lambda` (native runtime API, no web adapter layer); use `http` for local and self-hosted listeners.
 
 Generated protobuf clients under `api/gen/proto/` are checked in as exact

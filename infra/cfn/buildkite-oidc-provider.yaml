@@ -1,0 +1,27 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Account-wide IAM OIDC provider for Buildkite agent job tokens.
+
+Parameters:
+  Stage:
+    Type: String
+    Description: The stage this provider serves, e.g., dev, prod.
+    Default: "dev"
+
+Outputs:
+  ProviderArn:
+    Value: !Ref BuildkiteOidc
+
+Resources:
+  # Shared by every Buildkite customer; roles must pin agent.buildkite.com:organization_id in their trust policy.
+  BuildkiteOidc:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://agent.buildkite.com
+      ClientIdList:
+        - sts.amazonaws.com
+      Tags:
+        - Key: application
+          Value: buildkite-oidc
+        - Key: environment
+          Value: !Ref Stage

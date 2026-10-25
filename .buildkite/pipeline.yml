@@ -46,3 +46,14 @@ steps:
           - bun run typecheck
         plugins:
           - mise#v1.1.5: ~
+
+  - label: ":rocket: deploy dev"
+    trigger: starlogz-deploy
+    # Async so main CI finishes while the deploy waits for approval.
+    async: true
+    depends_on: quality_checks
+    if: build.branch == "main" && build.pull_request.id == null
+    build:
+      commit: "${BUILDKITE_COMMIT}"
+      branch: "${BUILDKITE_BRANCH}"
+      message: "${BUILDKITE_MESSAGE}"
