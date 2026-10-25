@@ -2,11 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	starlogzv1 "github.com/wolfeidau/starlogz/api/gen/proto/go/starlogz/v1"
@@ -26,10 +27,11 @@ func TestToProtoInsightIncludesRevision(t *testing.T) {
 
 type operationsServiceStore struct {
 	store.Store
-	user     *store.User
-	org      *store.Org
-	overview *store.OperationsOverview
-	called   bool
+	user        *store.User
+	org         *store.Org
+	overview    *store.OperationsOverview
+	overviewErr error
+	called      bool
 
 	revokedWebSessionID uuid.UUID
 	revokedOAuthGrantID uuid.UUID
@@ -57,7 +59,7 @@ func (s *operationsServiceStore) GetPersonalOrgByUserID(context.Context, uuid.UU
 
 func (s *operationsServiceStore) GetOperationsOverview(context.Context, int) (*store.OperationsOverview, error) {
 	s.called = true
-	return s.overview, nil
+	return s.overview, s.overviewErr
 }
 
 func (s *operationsServiceStore) RevokeWebSessionByID(_ context.Context, id, actorUserID uuid.UUID) error {
@@ -104,41 +106,41 @@ func TestUIServiceOperatorAccess(t *testing.T) {
 	}}
 
 	deniedService := newUIService(st, newOperatorAuthorizer(nil), telemetry, nil, 24*time.Hour)
-	session, err := deniedService.GetSession(ctx, connect.NewRequest(&starlogzv1.GetSessionRequest{}))
+	session, err := deniedService.GetSession(ctx, &starlogzv1.GetSessionRequest{})
 	require.NoError(t, err)
-	require.False(t, session.Msg.GetIsOperator())
-	require.Equal(t, webSessionID.String(), session.Msg.GetWebSessionId())
+	require.False(t, session.GetIsOperator())
+	require.Equal(t, webSessionID.String(), session.GetWebSessionId())
 
-	_, err = deniedService.GetOperationsOverview(ctx, connect.NewRequest(&starlogzv1.GetOperationsOverviewRequest{}))
+	_, err = deniedService.GetOperationsOverview(ctx, &starlogzv1.GetOperationsOverviewRequest{})
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 	require.False(t, st.called)
-	_, err = deniedService.GetOperationsTelemetry(ctx, connect.NewRequest(&starlogzv1.GetOperationsTelemetryRequest{}))
+	_, err = deniedService.GetOperationsTelemetry(ctx, &starlogzv1.GetOperationsTelemetryRequest{})
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 	require.False(t, telemetry.called)
-	_, err = deniedService.RevokeOperationsWebSession(ctx, connect.NewRequest(&starlogzv1.RevokeOperationsWebSessionRequest{
+	_, err = deniedService.RevokeOperationsWebSession(ctx, &starlogzv1.RevokeOperationsWebSessionRequest{
 		Id: uuid.NewString(),
-	}))
+	})
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 	require.Equal(t, uuid.Nil, st.revokedWebSessionID)
 
 	allowedService := newUIService(st, newOperatorAuthorizer([]int64{0, 1234}), telemetry, nil, 24*time.Hour)
-	session, err = allowedService.GetSession(ctx, connect.NewRequest(&starlogzv1.GetSessionRequest{}))
+	session, err = allowedService.GetSession(ctx, &starlogzv1.GetSessionRequest{})
 	require.NoError(t, err)
-	require.True(t, session.Msg.GetIsOperator())
+	require.True(t, session.GetIsOperator())
 
-	overview, err := allowedService.GetOperationsOverview(ctx, connect.NewRequest(&starlogzv1.GetOperationsOverviewRequest{Limit: 500}))
+	overview, err := allowedService.GetOperationsOverview(ctx, &starlogzv1.GetOperationsOverviewRequest{Limit: 500})
 	require.NoError(t, err)
 	require.True(t, st.called)
-	require.Equal(t, int32(2), overview.Msg.GetActiveWebSessions())
-	require.Equal(t, int32(3), overview.Msg.GetActiveOauthGrants())
+	require.Equal(t, int32(2), overview.GetActiveWebSessions())
+	require.Equal(t, int32(3), overview.GetActiveOauthGrants())
 
-	telemetryResponse, err := allowedService.GetOperationsTelemetry(ctx, connect.NewRequest(&starlogzv1.GetOperationsTelemetryRequest{}))
+	telemetryResponse, err := allowedService.GetOperationsTelemetry(ctx, &starlogzv1.GetOperationsTelemetryRequest{})
 	require.NoError(t, err)
 	require.True(t, telemetry.called)
-	require.True(t, telemetryResponse.Msg.GetAvailable())
-	require.Equal(t, int32(12), telemetryResponse.Msg.GetTotalToolCalls())
-	require.Equal(t, int32(2), telemetryResponse.Msg.GetFailedToolCalls())
-	require.Equal(t, int64(47), telemetryResponse.Msg.GetP95ToolDurationMs())
+	require.True(t, telemetryResponse.GetAvailable())
+	require.Equal(t, int32(12), telemetryResponse.GetTotalToolCalls())
+	require.Equal(t, int32(2), telemetryResponse.GetFailedToolCalls())
+	require.Equal(t, int64(47), telemetryResponse.GetP95ToolDurationMs())
 }
 
 func TestUIServiceOperatorRevocations(t *testing.T) {
@@ -154,29 +156,29 @@ func TestUIServiceOperatorRevocations(t *testing.T) {
 	require.NoError(t, err)
 	service := newUIService(st, newOperatorAuthorizer([]int64{1234}), nil, emitter, 2*time.Hour)
 
-	_, err = service.RevokeOperationsWebSession(ctx, connect.NewRequest(&starlogzv1.RevokeOperationsWebSessionRequest{
+	_, err = service.RevokeOperationsWebSession(ctx, &starlogzv1.RevokeOperationsWebSessionRequest{
 		Id: currentSessionID.String(),
-	}))
+	})
 	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 
-	_, err = service.RevokeOperationsWebSession(ctx, connect.NewRequest(&starlogzv1.RevokeOperationsWebSessionRequest{
+	_, err = service.RevokeOperationsWebSession(ctx, &starlogzv1.RevokeOperationsWebSessionRequest{
 		Id: "not-a-uuid",
-	}))
+	})
 	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 
 	webSessionID := uuid.New()
-	_, err = service.RevokeOperationsWebSession(ctx, connect.NewRequest(&starlogzv1.RevokeOperationsWebSessionRequest{
+	_, err = service.RevokeOperationsWebSession(ctx, &starlogzv1.RevokeOperationsWebSessionRequest{
 		Id: webSessionID.String(),
-	}))
+	})
 	require.NoError(t, err)
 	require.Equal(t, webSessionID, st.revokedWebSessionID)
 	require.Equal(t, userID, st.actorUserID)
 
 	grantID := uuid.New()
 	before := time.Now().Add(2 * time.Hour)
-	_, err = service.RevokeOperationsOAuthGrant(ctx, connect.NewRequest(&starlogzv1.RevokeOperationsOAuthGrantRequest{
+	_, err = service.RevokeOperationsOAuthGrant(ctx, &starlogzv1.RevokeOperationsOAuthGrantRequest{
 		Id: grantID.String(),
-	}))
+	})
 	require.NoError(t, err)
 	require.Equal(t, grantID, st.revokedOAuthGrantID)
 	require.Equal(t, userID, st.actorUserID)
@@ -193,4 +195,24 @@ func TestUIServiceOperatorRevocations(t *testing.T) {
 	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[2].Outcome)
 	require.Equal(t, wideevent.OperatorOAuthGrantRevokeCompleted, publisher.events[3].EventName)
 	require.Equal(t, wideevent.OutcomeSuccess, publisher.events[3].Outcome)
+}
+
+func TestUIServiceStoreFailureIsInternalWithoutLeak(t *testing.T) {
+	userID := uuid.New()
+	storeErr := errors.New("pq: relation secret_table does not exist")
+	st := &operationsServiceStore{
+		user:        &store.User{ID: userID, GitHubID: 1234, Login: "operator"},
+		org:         &store.Org{ID: uuid.New()},
+		overviewErr: storeErr,
+	}
+	ctx := contextWithWebSession(t.Context(), &store.WebSession{ID: uuid.New(), UserID: userID})
+	service := newUIService(st, newOperatorAuthorizer([]int64{1234}), nil, nil, time.Hour)
+
+	_, err := service.GetOperationsOverview(ctx, &starlogzv1.GetOperationsOverviewRequest{})
+	require.Equal(t, connect.CodeInternal, connect.CodeOf(err))
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.NotContains(t, connectErr.Message(), storeErr.Error())
+	require.NotContains(t, connectErr.Error(), storeErr.Error())
+	require.ErrorIs(t, err, storeErr)
 }

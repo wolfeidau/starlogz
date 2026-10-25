@@ -210,6 +210,10 @@ Lowercase, single word, descriptive of the domain — not the layer. Examples: `
 
 Only comment the **why**, never the **what**. No docstrings for obvious functions. A one-line comment is the maximum.
 
+### Connect handlers
+
+Client-facing codes (`InvalidArgument`, `NotFound`, `PermissionDenied`, `FailedPrecondition`) carry a descriptive message. Internal errors use `connect.NewError(connect.CodeInternal, "internal error").WithCause(err)` so the cause never reaches the wire; `uiErrorLogInterceptor` logs them.
+
 ### HTTP handlers
 
 Every handler checks its method explicitly and returns 405 for wrong-method requests before doing any work. Stub endpoints return 501 with a JSON body, not 404.
