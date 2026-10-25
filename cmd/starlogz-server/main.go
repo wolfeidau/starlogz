@@ -13,9 +13,12 @@ import (
 	_ "time/tzdata" // zone lookup on Lambda without system zoneinfo
 
 	"github.com/alecthomas/kong"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/lmittmann/tint"
 	"github.com/wolfeidau/starlogz/internal/commands"
 	"github.com/wolfeidau/starlogz/internal/logattr"
+	"github.com/wolfeidau/starlogz/internal/secrets"
 	"github.com/wolfeidau/starlogz/internal/telemetry"
 )
 
@@ -33,6 +36,13 @@ var (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if err := loadSSMSecrets(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "starlogz-server: %v\n", err)
+		stop()
+		os.Exit(1) //nolint:gocritic // stop() is called explicitly above
+	}
+
 	cmd := kong.Parse(&cli,
 		kong.Name("starlogz-server"),
 		kong.Description("A server that gives agents memory."),
@@ -44,6 +54,19 @@ func main() {
 	)
 
 	cmd.FatalIfErrorf(run(ctx, cmd, cli.Development))
+}
+
+// Must run before kong.Parse because kong env tags and Sentry init read the environment.
+func loadSSMSecrets(ctx context.Context) error {
+	path := os.Getenv("SSM_SECRETS_PATH")
+	if path == "" {
+		return nil
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	return secrets.LoadEnv(ctx, ssm.NewFromConfig(cfg), path)
 }
 
 func newLogger(development, sentryEnabled bool) *slog.Logger {

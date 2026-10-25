@@ -37,4 +37,5 @@ locals {
   hostname_prefix  = var.env == "prod" ? "starlogz" : "starlogz-${var.env}"
   service_hostname = "${local.hostname_prefix}.${var.domain}"
   server_url       = "https://${local.service_hostname}"
+  ssm_secrets_path = "/config/${var.env}/${var.branch}/starlogz"
 }

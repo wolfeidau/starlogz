@@ -23,12 +23,14 @@ import (
 type HTTPCmd struct {
 	ListenAddr                   string        `help:"The address to listen on." default:"localhost:8088" env:"HTTP_LISTEN_ADDR"`
 	BaseServerURL                string        `help:"The base URL of this server." default:"http://localhost:8088" env:"SERVER_URL"`
-	JWKPath                      string        `help:"Path to the JSON web key used to sign auth tokens." required:""`
+	JWKPath                      string        `help:"Path to the JSON web key used to sign auth tokens." xor:"jwk"`
+	JWKContent                   string        `help:"JSON content of the JSON web key used to sign auth tokens." env:"JWK_CONTENT" xor:"jwk"`
 	GitHubClientID               string        `help:"GitHub OAuth2 application client ID." env:"GITHUB_CLIENT_ID" required:""`
 	GitHubClientSecret           string        `help:"GitHub OAuth2 application client secret." env:"GITHUB_CLIENT_SECRET" required:""`
 	CIMDEnabled                  bool          `help:"Enable OAuth Client ID Metadata Document support." env:"CIMD_ENABLED"`
 	DatabaseURL                  string        `help:"PostgreSQL connection string." env:"DATABASE_URL" required:""`
 	TokenEncryptionKey           string        `help:"Base64-encoded 32-byte key for encrypting stored GitHub tokens." env:"TOKEN_ENCRYPTION_KEY" required:""`
+	TokenEncryptionKeyPrevious   string        `help:"Previous base64-encoded 32-byte token encryption key, accepted for decryption during key rotation." env:"TOKEN_ENCRYPTION_KEY_PREVIOUS"`
 	ShutdownTimeout              time.Duration `help:"Maximum time to wait for in-flight requests before exiting." default:"30s" env:"SHUTDOWN_TIMEOUT"`
 	RefreshTokenGracePeriod      time.Duration `help:"How long a rotated refresh token remains accepted for retry; use 0s to disable." default:"30s" env:"REFRESH_TOKEN_GRACE_PERIOD"`
 	RetiredRefreshTokenRetention time.Duration `help:"How long hashed retired refresh tokens are retained for refresh diagnostics." default:"24h" env:"RETIRED_REFRESH_TOKEN_RETENTION"`
@@ -41,9 +43,16 @@ type HTTPCmd struct {
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
-	jsonPrivateKey, err := os.ReadFile(c.JWKPath)
-	if err != nil {
-		return fmt.Errorf("failed to read jwk file: %w", err)
+	jsonPrivateKey := []byte(c.JWKContent)
+	switch {
+	case c.JWKPath != "":
+		var err error
+		jsonPrivateKey, err = os.ReadFile(c.JWKPath)
+		if err != nil {
+			return fmt.Errorf("failed to read jwk file: %w", err)
+		}
+	case c.JWKContent == "":
+		return fmt.Errorf("one of --jwk-path or JWK_CONTENT is required")
 	}
 
 	privkey, err := jwk.ParseKey(jsonPrivateKey)
@@ -51,14 +60,20 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		return fmt.Errorf("failed to parse jwk: %w", err)
 	}
 
-	keyBytes, err := base64.StdEncoding.DecodeString(c.TokenEncryptionKey)
-	if err != nil || len(keyBytes) != 32 {
-		return fmt.Errorf("TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte value (use: openssl rand -base64 32)")
+	encKey, err := decodeEncryptionKey("TOKEN_ENCRYPTION_KEY", c.TokenEncryptionKey)
+	if err != nil {
+		return err
 	}
-	var encKey [32]byte
-	copy(encKey[:], keyBytes)
+	var prevKey *[32]byte
+	if c.TokenEncryptionKeyPrevious != "" {
+		k, err := decodeEncryptionKey("TOKEN_ENCRYPTION_KEY_PREVIOUS", c.TokenEncryptionKeyPrevious)
+		if err != nil {
+			return err
+		}
+		prevKey = &k
+	}
 
-	st, err := postgres.New(ctx, c.DatabaseURL, store.NewEncryptor(encKey))
+	st, err := postgres.New(ctx, c.DatabaseURL, store.NewEncryptor(encKey, prevKey))
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -125,4 +140,14 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	return srv.Run(ctx, l)
+}
+
+func decodeEncryptionKey(name, value string) ([32]byte, error) {
+	var key [32]byte
+	b, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(b) != 32 {
+		return key, fmt.Errorf("%s must be a base64-encoded 32-byte value (use: openssl rand -base64 32)", name)
+	}
+	copy(key[:], b)
+	return key, nil
 }

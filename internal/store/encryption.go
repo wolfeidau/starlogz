@@ -10,12 +10,18 @@ import (
 
 // Encryptor encrypts and decrypts token strings using NaCl secretbox.
 type Encryptor struct {
-	key *[32]byte
+	key      *[32]byte
+	previous *[32]byte
 }
 
-// NewEncryptor returns an Encryptor keyed with key.
-func NewEncryptor(key [32]byte) *Encryptor {
-	return &Encryptor{key: &key}
+// NewEncryptor returns an Encryptor keyed with key; previous, if set, is tried on Open during key rotation.
+func NewEncryptor(key [32]byte, previous *[32]byte) *Encryptor {
+	e := &Encryptor{key: &key}
+	if previous != nil {
+		prev := *previous
+		e.previous = &prev
+	}
+	return e
 }
 
 // Seal encrypts plaintext and prepends a random nonce.
@@ -41,6 +47,9 @@ func (e *Encryptor) Open(encrypted []byte) (string, error) {
 	var nonce [24]byte
 	copy(nonce[:], encrypted[:24])
 	plaintext, ok := secretbox.Open(nil, encrypted[24:], &nonce, e.key)
+	if !ok && e.previous != nil {
+		plaintext, ok = secretbox.Open(nil, encrypted[24:], &nonce, e.previous)
+	}
 	if !ok {
 		return "", fmt.Errorf("decryption failed")
 	}

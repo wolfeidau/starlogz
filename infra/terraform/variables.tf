@@ -92,41 +92,14 @@ variable "alarm_email_endpoints" {
   default     = []
 }
 
-# Sensitive variables — set via terraform.tfvars (gitignored) or environment variables.
-
-variable "github_client_secret" {
-  description = "GitHub App OAuth2 client secret."
-  type        = string
-  sensitive   = true
-}
-
-variable "database_url" {
-  description = "PostgreSQL connection string. Append ?pool_max_conns=2 to cap per-instance connections."
-  type        = string
-  sensitive   = true
-}
-
-variable "token_encryption_key" {
-  description = "Base64-encoded 32-byte key for encrypting stored GitHub tokens (openssl rand -base64 32)."
-  type        = string
-  sensitive   = true
-}
-
-variable "jwk_content" {
-  description = "JSON content of the JWK signing key (output of: starlogz-server keygen)."
-  type        = string
-  sensitive   = true
-}
-
-variable "sentry_dsn" {
-  description = "Sentry DSN for error reporting. Leave empty to disable."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "sentry_environment" {
   description = "Sentry environment tag (e.g. prod, staging)."
   type        = string
   default     = ""
+}
+
+variable "secrets_revision" {
+  description = "Bump after rotating an SSM secret to force new Lambda instances that reload secrets."
+  type        = string
+  default     = "1"
 }

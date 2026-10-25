@@ -152,6 +152,9 @@ All configuration is via environment variables.
 | `SENTRY_DSN` | (none) | No | Sentry DSN. Omit to disable Sentry error reporting. |
 | `SENTRY_ENVIRONMENT` | (none) | No | Sentry environment tag, e.g. `production`, `staging`. |
 | `CIMD_ENABLED` | `false` locally; `true` in Terraform deploys | No | Enables OAuth Client ID Metadata Document support. Set to `false` to disable CIMD quickly without code rollback. |
+| `SSM_SECRETS_PATH` | (none) | No | SSM Parameter Store path whose parameters are loaded into environment variables at startup (parameter basename upper-cased). Existing environment variables win. Omit to disable. |
+| `JWK_CONTENT` | (none) | One of `--jwk-path` or `JWK_CONTENT` | JSON web key content used to sign auth tokens; alternative to `--jwk-path`. |
+| `TOKEN_ENCRYPTION_KEY_PREVIOUS` | (none) | No | Previous base64-encoded 32-byte token encryption key, used only for decryption during key rotation. |
 
 ## Observability events
 
@@ -167,16 +170,45 @@ The server runs as an AWS Lambda function fronted by API Gateway HTTP API, using
 - AWS CLI — authenticated to the target account
 - Terraform >= 1.10
 - A [PlanetScale Postgres database cluster](https://planetscale.com/postgres)
-- `infra/terraform/terraform.tfvars` populated with all required variables (see `variables.tf`; sensitive values go here and are gitignored)
+- `infra/terraform/terraform.tfvars` populated with the non-secret settings (see `variables.tf`; the file is gitignored). Secrets live in SSM, see [Secrets](#secrets)
 - An existing S3 bucket for Terraform state, with its name stored in an SSM parameter
 
 ### Terraform state
 
 State is stored in S3 with S3-native locking (`use_lockfile`). The bucket is not managed by this configuration. Initialise with `bin/tf-init` instead of `terraform init`. It reads the bucket name from the SSM parameter `/config/dev/master/terraform_bucket` (override with `TF_STATE_BUCKET_PARAM`) and passes it as `-backend-config`. Extra arguments are forwarded to `terraform init`. `bin/deploy` runs it before every plan.
 
+### Secrets
+
+Secrets are SSM SecureString parameters (standard tier, AWS managed `aws/ssm` key) under `/config/{env}/{branch}/starlogz/`. They never appear in `terraform.tfvars`, Terraform state, or Lambda configuration. The Lambda receives only `SSM_SECRETS_PATH` and loads every parameter under it at cold start, exporting each as an environment variable named by the upper-cased parameter name.
+
+| Parameter | Environment variable | Notes |
+|-----------|----------------------|-------|
+| `database_url` | `DATABASE_URL` | Append `?pool_max_conns=2` to cap per-instance connections |
+| `github_client_secret` | `GITHUB_CLIENT_SECRET` | |
+| `token_encryption_key` | `TOKEN_ENCRYPTION_KEY` | `openssl rand -base64 32` |
+| `token_encryption_key_previous` | `TOKEN_ENCRYPTION_KEY_PREVIOUS` | Only during rotation; decrypt-only |
+| `jwk_content` | `JWK_CONTENT` | Output of `starlogz-server keygen` |
+| `sentry_dsn` | `SENTRY_DSN` | Optional |
+
+Create them before the first deploy:
+
+```bash
+read -rs VALUE && aws ssm put-parameter --name /config/dev/main/starlogz/database_url \
+  --type SecureString --tier Standard --value "$VALUE" && unset VALUE
+```
+
+#### Rotating a secret
+
+1. For `token_encryption_key` only, first copy the current value to `token_encryption_key_previous`.
+2. Run `put-parameter --overwrite` with the new value.
+3. Bump `secrets_revision` in `terraform.tfvars` and run `bin/deploy` so new Lambda instances load it.
+4. For the encryption key, delete `token_encryption_key_previous` once old grants have expired. GitHub tokens encrypted with the old key become undecryptable after that, and users must reconnect GitHub.
+
+Rotating `jwk_content` invalidates outstanding access tokens (15-minute lifetime); clients recover by refreshing.
+
 ### First deploy
 
-The deployment S3 bucket is created by Terraform, so bootstrap in two steps:
+Create the [secrets](#secrets) first. The deployment S3 bucket is created by Terraform, so bootstrap in two steps:
 
 ```bash
 # 0. Initialise the state backend

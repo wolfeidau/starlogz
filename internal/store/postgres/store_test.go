@@ -488,7 +488,7 @@ func TestMigrateRedactsLegacyGrantAuditSnapshots(t *testing.T) {
 }
 
 func TestMigrateCompletesInitialOperatorControlsMigration(t *testing.T) {
-	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	user, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 6, Login: "early-operator-controls"})
 	require.NoError(t, err)
@@ -2343,7 +2343,7 @@ func TestGetProjectDashboardActivityWindowAndZone(t *testing.T) {
 }
 
 func TestGetOperationsOverview(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	user, err := st.UpsertUser(ctx, store.GitHubProfile{
 		GitHubID: 76, Email: "operator@example.com", Login: "operator", DisplayName: "Operator",
@@ -2393,7 +2393,7 @@ func TestGetOperationsOverview(t *testing.T) {
 }
 
 func TestOperatorRevocations(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	actor, err := st.UpsertUser(ctx, store.GitHubProfile{
 		GitHubID: 7601, Login: "service-operator", DisplayName: "Service Operator",
@@ -2537,7 +2537,7 @@ func TestUpdateInsight(t *testing.T) {
 // --- Grants ---
 
 func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 100, Email: "grantuser@example.com", Login: "grantuser"})
@@ -2568,7 +2568,7 @@ func TestUpsertGrant_StoresAndRetrievesEncryptedTokens(t *testing.T) {
 }
 
 func TestUpsertGrant_RequiresRefreshTokens(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	user, err := st.UpsertUser(ctx, store.GitHubProfile{
 		GitHubID: 101, Email: "grant-validation@example.com", Login: "grant-validation",
@@ -2587,7 +2587,7 @@ func TestUpsertGrant_RequiresRefreshTokens(t *testing.T) {
 }
 
 func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
-	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 200, Email: "pruneuser@example.com", Login: "pruneuser"})
@@ -2653,14 +2653,14 @@ func TestUpsertGrant_PrunesExpiredGrants(t *testing.T) {
 }
 
 func TestGetGrant_NotFound(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 
 	_, err := st.GetGrant(t.Context(), "no-such-jti")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestRotateGrant_RotatesAndPreservesScope(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 400, Email: "rotate@example.com", Login: "rotateuser"})
@@ -3104,7 +3104,7 @@ func TestStorePendingAuth_RejectsOversizedClientLogo(t *testing.T) {
 // --- StoreAuthCode / ConsumeAuthCode ---
 
 func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -3142,7 +3142,7 @@ func TestStoreAuthCode_ConsumeWithTokens(t *testing.T) {
 
 func TestStoreAuthCode_ConsumeWithoutTokens(t *testing.T) {
 	// Verifies that empty tokens are stored as zero bytes (not NULL) and read back as empty strings.
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	c := store.AuthCode{
@@ -3164,13 +3164,13 @@ func TestStoreAuthCode_ConsumeWithoutTokens(t *testing.T) {
 }
 
 func TestConsumeAuthCode_NotFound(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	_, err := st.ConsumeAuthCode(t.Context(), "no-such-code")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestConsumeAuthCode_SingleUse(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	require.NoError(t, st.StoreAuthCode(ctx, "single-use-code", store.AuthCode{
@@ -3192,7 +3192,7 @@ func TestConsumeAuthCode_SingleUse(t *testing.T) {
 // --- Authorization confirmations ---
 
 func TestAuthorizationConfirmationApprovalIsAtomicAndEncrypted(t *testing.T) {
-	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
@@ -3232,7 +3232,7 @@ func TestAuthorizationConfirmationApprovalIsAtomicAndEncrypted(t *testing.T) {
 }
 
 func TestAuthorizationConfirmationDenialAndExpiryCreateNoCode(t *testing.T) {
-	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
@@ -3259,7 +3259,7 @@ func TestAuthorizationConfirmationDenialAndExpiryCreateNoCode(t *testing.T) {
 }
 
 func TestAuthorizationConfirmationConcurrentApprovalHasOneWinner(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	tokenHash := store.HashSessionToken("concurrent-token")
 	require.NoError(t, st.StoreAuthorizationConfirmation(ctx, tokenHash, store.AuthorizationConfirmation{
@@ -3287,7 +3287,7 @@ func TestAuthorizationConfirmationConcurrentApprovalHasOneWinner(t *testing.T) {
 }
 
 func TestAuthorizationConfirmationApprovalFailurePreservesConfirmation(t *testing.T) {
-	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
@@ -3359,7 +3359,7 @@ func TestIsTokenRevoked_ExpiredEntryReturnsFalse(t *testing.T) {
 // --- GetGrantByRefreshToken / RotateGrant / DeleteGrant ---
 
 func TestGetGrantByRefreshToken_Success(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1100, Email: "rftoken@example.com", Login: "rfuser"})
@@ -3390,13 +3390,13 @@ func TestGetGrantByRefreshToken_Success(t *testing.T) {
 }
 
 func TestGetGrantByRefreshToken_NotFound(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	_, err := st.GetGrantByRefreshToken(t.Context(), "no-such-token")
 	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestRotateGrant_Success(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1200, Email: "rotate@example.com", Login: "rotateuser"})
@@ -3446,7 +3446,7 @@ func TestRotateGrant_Success(t *testing.T) {
 }
 
 func TestRotateGrant_RecordsRetiredRefreshToken(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1250, Email: "retired@example.com", Login: "retireduser"})
@@ -3503,7 +3503,7 @@ func TestRotateGrant_RecordsRetiredRefreshToken(t *testing.T) {
 }
 
 func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1260, Email: "rollback@example.com", Login: "rollbackuser"})
@@ -3549,7 +3549,7 @@ func TestRotateGrant_RollsBackRetiredTokenFailure(t *testing.T) {
 }
 
 func TestGetRetiredRefreshToken_IgnoresExpiredRetention(t *testing.T) {
-	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey))
+	st, dsn := newTestStoreWithEncAndDSN(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1270, Email: "pruneretired@example.com", Login: "pruneretired"})
@@ -3595,7 +3595,7 @@ func TestGetRetiredRefreshToken_IgnoresExpiredRetention(t *testing.T) {
 }
 
 func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1300, Email: "race@example.com", Login: "raceuser"})
@@ -3637,7 +3637,7 @@ func TestRotateGrant_NotFoundOnConcurrentRace(t *testing.T) {
 }
 
 func TestDeleteGrant_Success(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	ctx := t.Context()
 
 	u, err := st.UpsertUser(ctx, store.GitHubProfile{GitHubID: 1400, Email: "del@example.com", Login: "deluser"})
@@ -3673,7 +3673,7 @@ func TestDeleteGrant_Success(t *testing.T) {
 }
 
 func TestDeleteGrant_NotFound(t *testing.T) {
-	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey))
+	st := newTestStoreWithEnc(t, store.NewEncryptor(testEncKey, nil))
 	err := st.DeleteGrant(t.Context(), "no-such-jti", nil)
 	require.ErrorIs(t, err, store.ErrNotFound)
 }

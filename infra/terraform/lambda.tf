@@ -23,11 +23,8 @@ resource "aws_lambda_function" "starlogz" {
       CIMD_ENABLED                 = tostring(var.cimd_enabled)
       GITHUB_CLIENT_ID             = var.github_client_id
       OPERATOR_GITHUB_IDS          = join(",", var.operator_github_ids)
-      GITHUB_CLIENT_SECRET         = var.github_client_secret
-      DATABASE_URL                 = var.database_url
-      TOKEN_ENCRYPTION_KEY         = var.token_encryption_key
-      JWK_CONTENT                  = var.jwk_content
-      SENTRY_DSN                   = var.sentry_dsn
+      SSM_SECRETS_PATH             = local.ssm_secrets_path
+      SECRETS_REVISION             = var.secrets_revision
       SENTRY_ENVIRONMENT           = var.sentry_environment
     }
   }
