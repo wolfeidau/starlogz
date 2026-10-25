@@ -50,7 +50,7 @@ func TestEncryptor_Open_WrongKey(t *testing.T) {
 func TestEncryptor_Open_ShortCiphertext(t *testing.T) {
 	enc := NewEncryptor(testKey(), nil)
 	_, err := enc.Open([]byte("too short"))
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrDecryptionFailed)
 }
 
 func TestEncryptor_Open_EmptyCiphertext(t *testing.T) {
@@ -96,5 +96,5 @@ func TestEncryptor_Open_NeitherKeyMatches(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = NewEncryptor(b, &a).Open(ct)
-	require.ErrorContains(t, err, "decryption failed")
+	require.ErrorIs(t, err, ErrDecryptionFailed)
 }

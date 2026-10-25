@@ -353,6 +353,7 @@ Refresh-token reason values:
 | `github_invalid` | GitHub rejected the stored refresh token as invalid, so the grant was removed. |
 | `github_missing_refresh` | GitHub did not provide a refresh token when one was required to continue the chain. |
 | `client_mismatch` | The refresh token was presented by a different OAuth client. |
+| `grant_undecryptable` | The stored grant could not be decrypted, for example after the token encryption key changed without `TOKEN_ENCRYPTION_KEY_PREVIOUS`; the client must reauthorize. |
 | `never_seen` | No active or retained record exists for the submitted refresh token. |
 | `server_error` | Internal or upstream transient failure prevented refresh completion. |
 

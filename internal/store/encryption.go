@@ -2,11 +2,15 @@ package store
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 
 	"golang.org/x/crypto/nacl/secretbox"
 )
+
+// ErrDecryptionFailed lets callers distinguish undecryptable data from transient faults.
+var ErrDecryptionFailed = errors.New("decryption failed")
 
 // Encryptor encrypts and decrypts token strings using NaCl secretbox.
 type Encryptor struct {
@@ -42,7 +46,7 @@ func (e *Encryptor) Open(encrypted []byte) (string, error) {
 		return "", fmt.Errorf("encryption key not configured")
 	}
 	if len(encrypted) < 24 {
-		return "", fmt.Errorf("ciphertext too short")
+		return "", fmt.Errorf("ciphertext too short: %w", ErrDecryptionFailed)
 	}
 	var nonce [24]byte
 	copy(nonce[:], encrypted[:24])
@@ -51,7 +55,7 @@ func (e *Encryptor) Open(encrypted []byte) (string, error) {
 		plaintext, ok = secretbox.Open(nil, encrypted[24:], &nonce, e.previous)
 	}
 	if !ok {
-		return "", fmt.Errorf("decryption failed")
+		return "", ErrDecryptionFailed
 	}
 	return string(plaintext), nil
 }
