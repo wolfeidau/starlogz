@@ -38,6 +38,13 @@ data "aws_iam_policy_document" "deploy_assume_role" {
       variable = "${local.oidc_host}:build_branch"
       values   = [var.deploy_branch]
     }
+
+    # IAM rejects agent.buildkite.com trust without a scoped sub; this also limits it to the deploy step.
+    condition {
+      test     = "StringLike"
+      variable = "${local.oidc_host}:sub"
+      values   = ["organization:${var.buildkite_organization_slug}:pipeline:${var.buildkite_pipeline_slug}:ref:refs/heads/${var.deploy_branch}:commit:*:step:${var.deploy_step_key}"]
+    }
   }
 }
 

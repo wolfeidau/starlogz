@@ -21,6 +21,23 @@ variable "buildkite_organization_id" {
   type        = string
 }
 
+variable "buildkite_organization_slug" {
+  description = "Buildkite organization slug, matched in the OIDC sub claim."
+  type        = string
+}
+
+variable "buildkite_pipeline_slug" {
+  description = "Buildkite pipeline slug allowed to assume the deploy role."
+  type        = string
+  default     = "starlogz-deploy"
+}
+
+variable "deploy_step_key" {
+  description = "Step key in .buildkite/deploy.yml allowed to assume the deploy role."
+  type        = string
+  default     = "deploy"
+}
+
 variable "buildkite_pipeline_id" {
   description = "Buildkite pipeline UUID (starlogz-deploy) allowed to assume the deploy role."
   type        = string
