@@ -52,7 +52,8 @@ steps:
     # Async so main CI finishes while the deploy waits for approval.
     async: true
     depends_on: quality_checks
-    if: build.branch == "main" && build.pull_request.id == null
+    # Bot-merged builds (e.g. Renovate) have no Buildkite creator, which fails the trigger.
+    if: build.branch == "main" && build.pull_request.id == null && build.creator.id != null
     build:
       commit: "${BUILDKITE_COMMIT}"
       branch: "${BUILDKITE_BRANCH}"
