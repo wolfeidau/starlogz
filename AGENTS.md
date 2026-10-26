@@ -112,6 +112,9 @@ mise exec -- go build ./...
 # Run all tests (store tests spin up a real PostgreSQL container via testcontainers-go)
 mise exec -- go test ./...
 
+# Consistency checks (go mod tidy, generated stubs, UI typecheck/lint); lefthook and CI both run this
+mise run check
+
 # Generate a signing key (once)
 mise exec -- go run ./cmd/starlogz-server keygen --output key.jwk
 

@@ -38,13 +38,11 @@ steps:
           - wolfeidau/go-test-annotate#v1.0.0:
               file: tests.json
 
-      - label: ":bun: test and lint"
+      - label: ":bun: test and check"
         commands:
           - bun install --frozen-lockfile
           - bun run test
-          - bun run lint
-          - bun run typecheck
-          - bun run proto:check
+          - mise run check
         plugins:
           - mise#v1.1.5: ~
 
