@@ -44,6 +44,7 @@ steps:
           - bun run test
           - bun run lint
           - bun run typecheck
+          - bun run proto:check
         plugins:
           - mise#v1.1.5: ~
 
