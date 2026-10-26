@@ -11,3 +11,17 @@ bun = "1.4.4"
 terraform = "1.17.0"
 aws-cli = "2.38.5"
 jq = "1.8.2"
+
+[tasks."check:tidy"]
+run = "go mod tidy -diff"
+
+[tasks."check:proto"]
+run = "bun run proto:check"
+
+[tasks."check:ui"]
+run = ["bun run typecheck", "bun run lint"]
+
+# Shared by lefthook and CI so the two gates cannot drift.
+[tasks.check]
+description = "Repository consistency checks"
+depends = ["check:tidy", "check:proto", "check:ui"]
