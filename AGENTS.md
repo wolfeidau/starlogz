@@ -281,3 +281,4 @@ Use the MCP Inspector (`npx @modelcontextprotocol/inspector`) to validate the fu
 
 Branch names: `feat_<short_description>`, `fix_<short_description>`.
 Commits: conventional commits style (`feat:`, `fix:`, `chore:`, `docs:`).
+Merges: `gh pr merge <n> --squash`. Never pass `--delete-branch`; GitHub auto-deletes head branches and retargets stacked PRs, while gh's own deletion closes them. A Claude Code hook in `.claude/settings.json` enforces this.
