@@ -5,7 +5,7 @@ lockfile = true
 [tools]
 go = "1.27.3"
 golangci-lint = "2.15.0"
-goreleaser = "v2.18.3"
+goreleaser = "v2.19.0"
 tflint = "0.65.0"
 bun = "1.4.4"
 terraform = "1.17.0"
