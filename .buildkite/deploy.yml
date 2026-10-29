@@ -35,7 +35,7 @@ steps:
       - unset STARLOGZ_DEV_TFVARS
       - bin/deploy dev
     plugins:
-      - mise#v1.1.5: ~
+      - mise#v1.1.6: ~
       - aws-assume-role-with-web-identity#v1.8.1:
           role-arn: "${STARLOGZ_DEPLOY_ROLE_ARN?}"
     env:
