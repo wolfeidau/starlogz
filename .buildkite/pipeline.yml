@@ -10,7 +10,7 @@ steps:
         artifact_paths:
           - golangci-lint.sarif
         plugins:
-          - mise#v1.1.5: ~
+          - mise#v1.1.6: ~
           - ./.buildkite/plugins/sarif-annotate:
               file: golangci-lint.sarif
 
@@ -21,7 +21,7 @@ steps:
         env:
           TFLINT_LOG: debug
         plugins:
-          - mise#v1.1.5: ~
+          - mise#v1.1.6: ~
           - ./.buildkite/plugins/sarif-annotate:
               file: tflint.sarif
 
@@ -34,7 +34,7 @@ steps:
           - bun run build
           - go test -json -coverprofile=coverage.out ./... > tests.json
         plugins:
-          - mise#v1.1.5: ~
+          - mise#v1.1.6: ~
           - wolfeidau/go-test-annotate#v1.0.0:
               file: tests.json
 
@@ -44,7 +44,7 @@ steps:
           - bun run test
           - mise run check
         plugins:
-          - mise#v1.1.5: ~
+          - mise#v1.1.6: ~
 
   - label: ":rocket: deploy dev"
     trigger: starlogz-deploy
