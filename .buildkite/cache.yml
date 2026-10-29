@@ -1,0 +1,12 @@
+caches:
+  # Toolchains from mise.toml.
+  - name: mise
+    cache_key:
+      - "v1"
+      - agent: "os"
+      - agent: "arch"
+        fallback_limit: true
+      - checksum: "mise.toml"
+      - checksum: "mise.lock"
+    target_paths:
+      - "~/.local/share/mise"
