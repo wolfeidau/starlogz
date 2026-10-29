@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# A cache miss is not an error; the toolchain installs from scratch.
+buildkite-agent cache restore --name mise || echo "mise-cache: restore failed, continuing without cache"

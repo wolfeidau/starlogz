@@ -1,0 +1,8 @@
+name: Mise Cache
+description: Restores the mise toolchain cache before the command and saves it after.
+author: github.com/wolfeidau
+requirements:
+  - buildkite-agent
+configuration:
+  properties: {}
+  additionalProperties: false
