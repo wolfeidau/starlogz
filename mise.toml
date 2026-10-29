@@ -9,7 +9,7 @@ goreleaser = "v2.19.0"
 tflint = "0.65.0"
 bun = "1.4.4"
 terraform = "1.17.0"
-aws-cli = "2.38.5"
+aws-cli = "2.38.6"
 jq = "1.8.2"
 
 [tasks."check:tidy"]
