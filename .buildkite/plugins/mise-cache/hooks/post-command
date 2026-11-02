@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${BUILDKITE_COMMAND_EXIT_STATUS:-0}" != "0" ]]; then
+  echo "mise-cache: command failed, skipping save"
+  exit 0
+fi
+
+buildkite-agent cache save --name mise

@@ -1,3 +1,6 @@
+env:
+  BUILDKITE_AGENT_CACHE_REGISTRY: "default"
+
 steps:
   - group: ":mag: QA"
     key: quality_checks
@@ -10,6 +13,7 @@ steps:
         artifact_paths:
           - golangci-lint.sarif
         plugins:
+          - ./.buildkite/plugins/mise-cache
           - mise#v1.1.6: ~
           - ./.buildkite/plugins/sarif-annotate:
               file: golangci-lint.sarif
@@ -21,6 +25,7 @@ steps:
         env:
           TFLINT_LOG: debug
         plugins:
+          - ./.buildkite/plugins/mise-cache
           - mise#v1.1.6: ~
           - ./.buildkite/plugins/sarif-annotate:
               file: tflint.sarif
@@ -34,6 +39,7 @@ steps:
           - bun run build
           - go test -json -coverprofile=coverage.out ./... > tests.json
         plugins:
+          - ./.buildkite/plugins/mise-cache
           - mise#v1.1.6: ~
           - wolfeidau/go-test-annotate#v1.0.0:
               file: tests.json
@@ -44,6 +50,7 @@ steps:
           - bun run test
           - mise run check
         plugins:
+          - ./.buildkite/plugins/mise-cache
           - mise#v1.1.6: ~
 
   - label: ":rocket: deploy dev"

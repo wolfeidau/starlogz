@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Match the cache.yml target path; pipeline env values are not shell-expanded, so ~ and $HOME can't be set there.
+export MISE_DATA_DIR="${HOME}/.local/share/mise"
