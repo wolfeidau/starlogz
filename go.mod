@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.18
 	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.92.2
 	github.com/aws/aws-sdk-go-v2/service/eventbridge v1.55.11
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.82.1
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.83.0
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/getsentry/sentry-go/otel v0.50.0
 	github.com/google/jsonschema-go v0.4.3
